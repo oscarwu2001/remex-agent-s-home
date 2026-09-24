@@ -21,6 +21,17 @@
         <g id="people"></g>
       </g>
     </svg>
+    <div class="camera" role="toolbar" aria-label="View">
+      <button type="button" class="cam-btn" id="cam-left" aria-label="Turn the hospital left" title="Turn left (Q)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H4V2M4.5 7A8.5 8.5 0 1 1 3.5 14"/></svg>
+      </button>
+      <button type="button" class="cam-btn" id="cam-right" aria-label="Turn the hospital right" title="Turn right (E)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7h5V2M19.5 7A8.5 8.5 0 1 0 20.5 14"/></svg>
+      </button>
+      <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
+      <span class="cam-where" id="cam-where" aria-live="polite"></span>
+    </div>
+    <p class="cam-hint">Click a room to visit · scroll to zoom · drag to move</p>
     <p class="source" id="source"></p>
   </main>
 
@@ -59,9 +70,9 @@
           <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span>Grove</label>
         </div>
       </fieldset>
+      <label class="switch"><input type="checkbox" id="opt-night"> <span>Night</span></label>
       <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
       <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
-
       <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
     </footer>
   </aside>

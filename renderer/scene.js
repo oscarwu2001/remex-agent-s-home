@@ -4,21 +4,23 @@
 
 import {
   P, M, poly, box, tiledTop, cylinder, ball, splitGradients, archPoints, uprightRing, applyTheme, rivet,
+  viewDepth, faceVisible,
 } from './iso.js';
 import { floorTones } from './themes.js';
 
 const BASE_Z = -3; // columns hang down to here and dissolve into mist
 
 // Floor top height z; floor spans [x, x+6) x [y, y+6). Tower colours come
-// from the colourway (M[roomId]).
+// from the colourway (M[roomId]). Walls are not listed: a room gets a wall on
+// each side that is at the back in the current view and has no doorway.
 export const LAYOUT = {
-  radiology: { x: 0, y: 0, z: 6, walls: ['north', 'west'] },
-  'vision-clinic': { x: 8, y: 0, z: 4, walls: ['north'] },
-  laboratory: { x: 0, y: 8, z: 4, walls: ['west'] },
-  'nurses-station': { x: 8, y: 8, z: 2, walls: [] },
-  'operating-room': { x: 16, y: 8, z: 2, walls: ['north'] },
-  'research-office': { x: 8, y: 16, z: 2, walls: ['west'] },
-  'general-ward': { x: 16, y: 16, z: 0, walls: ['west'] },
+  radiology: { x: 0, y: 0, z: 6 },
+  'vision-clinic': { x: 8, y: 0, z: 4 },
+  laboratory: { x: 0, y: 8, z: 4 },
+  'nurses-station': { x: 8, y: 8, z: 2 },
+  'operating-room': { x: 16, y: 8, z: 2 },
+  'research-office': { x: 8, y: 16, z: 2 },
+  'general-ward': { x: 16, y: 16, z: 0 },
 };
 
 const SIZE = 6;
@@ -111,42 +113,65 @@ function column(id, r) {
   );
 }
 
-// Three rivets on each visible face of a tower, under the band.
+// Three rivets on each tower face turned toward the viewer, under the band.
 function rivets(x, y, z) {
   const zz = z - 2.5;
-  const left = (u, h) => [x + 0.25 + u, y + SIZE - 0.25 + 0.001, h];
-  const right = (u, h) => [x + SIZE - 0.25 + 0.001, y + 0.25 + u, h];
+  const lo = 0.25 - 0.001;
+  const hi = SIZE - 0.25 + 0.001;
+  const faces = [
+    { n: [0, 1], along: (u, h) => [x + 0.25 + u, y + hi, h] },
+    { n: [1, 0], along: (u, h) => [x + hi, y + 0.25 + u, h] },
+    { n: [0, -1], along: (u, h) => [x + 0.25 + u, y + lo, h] },
+    { n: [-1, 0], along: (u, h) => [x + lo, y + 0.25 + u, h] },
+  ];
   let s = '';
-  for (const u of [1.6, 2.75, 3.9]) {
-    s += rivet(left, u, zz, 0.34, M.sand.left, M.lilac.right);
-    s += rivet(right, u, zz, 0.34, M.sand.right, M.lilac.right);
+  for (const f of faces) {
+    if (!faceVisible(...f.n)) continue;
+    for (const u of [1.6, 2.75, 3.9]) s += rivet(f.along, u, zz, 0.34, M.sand.left, M.lilac.right);
   }
   return s;
 }
 
+let activeTheme;
+
 function floor(id, r) {
-  const [a, b] = floorTones(M[id].base);
+  const [a, b] = floorTones(M[id].base, activeTheme);
   return tiledTop(r.x, r.y, r.z + 0.001, SIZE, SIZE, a, b);
 }
 
-function walls(r) {
-  let s = '';
-  const H = 2.3;
-  const T = 0.3;
-  if (r.walls.includes('west')) {
-    s += box(r.x, r.y, r.z, T, SIZE, H, M.cream);
-    // arched windows on the inner face (x = r.x + T)
-    const along = (u, zz) => [r.x + T + 0.001, r.y + u, zz];
-    for (const u0 of [0.9, 3.6]) {
-      s += poly(archPoints(along, u0, 1.3, r.z + 0.7, 1.35), 'url(#window)');
+// Sides with a doorway (a bridge or stairs lands there) never get a wall.
+function doorways(id) {
+  const r = LAYOUT[id];
+  const sides = new Set();
+  for (const c of CONNECTORS) {
+    for (const [room, p] of [[c.a, c.from], [c.b, c.to]]) {
+      if (room !== id) continue;
+      if (p[1] === r.y) sides.add('north');
+      if (p[1] === r.y + SIZE) sides.add('south');
+      if (p[0] === r.x) sides.add('west');
+      if (p[0] === r.x + SIZE) sides.add('east');
     }
   }
-  if (r.walls.includes('north')) {
-    s += box(r.x, r.y, r.z, SIZE, T, H, M.cream);
-    const along = (u, zz) => [r.x + u, r.y + T + 0.001, zz];
-    for (const u0 of r.walls.includes('west') ? [2.1, 4.1] : [0.9, 3.6]) {
-      s += poly(archPoints(along, u0, 1.3, r.z + 0.7, 1.35), 'url(#window)');
-    }
+  return sides;
+}
+
+function walls(id, r) {
+  const H = 2.3;
+  const T = 0.3;
+  const open = doorways(id);
+  const sides = {
+    // inward normal, wall box, a point on the inner face at (u, z)
+    north: { n: [0, 1], box: [r.x, r.y, SIZE, T], along: (u, zz) => [r.x + u, r.y + T + 0.001, zz] },
+    south: { n: [0, -1], box: [r.x, r.y + SIZE - T, SIZE, T], along: (u, zz) => [r.x + u, r.y + SIZE - T - 0.001, zz] },
+    west: { n: [1, 0], box: [r.x, r.y, T, SIZE], along: (u, zz) => [r.x + T + 0.001, r.y + u, zz] },
+    east: { n: [-1, 0], box: [r.x + SIZE - T, r.y, T, SIZE], along: (u, zz) => [r.x + SIZE - T - 0.001, r.y + u, zz] },
+  };
+  let s = '';
+  for (const [name, w] of Object.entries(sides)) {
+    if (open.has(name) || !faceVisible(...w.n)) continue;
+    const [bx, by, bw, bd] = w.box;
+    s += box(bx, by, r.z, bw, bd, H, M.cream);
+    for (const u0 of [1.1, 3.6]) s += poly(archPoints(w.along, u0, 1.3, r.z + 0.7, 1.35), 'url(#window)');
   }
   return s;
 }
@@ -172,7 +197,7 @@ function stairs(c) {
       const yb = ay + (by - ay) * t1;
       y0 = Math.min(ya, yb); d = Math.abs(yb - ya); x0 = ax - 1; w = 2;
     }
-    steps.push({ key: x0 + y0, s: box(x0, y0, low - 1.2, w, d, zTop - (low - 1.2), M.stone) });
+    steps.push({ key: viewDepth(x0 + w / 2, y0 + d / 2), s: box(x0, y0, low - 1.2, w, d, zTop - (low - 1.2), M.stone) });
   }
   steps.sort((p, q) => p.key - q.key);
   return steps.map((p) => p.s).join('');
@@ -224,7 +249,9 @@ function furniture(id, r) {
         box(x + 2.3, y + 1.9, z + 0.92, 1.4, 0.6, 0.15, M.mint) +
         box(x + 4.9, y + 0.9, z, 0.3, 0.3, 1.5, M.steel) +
         box(x + 4.6, y + 0.7, z + 1.5, 0.9, 0.5, 0.7, M.ink) +
-        `<polyline class="ecg" points="${ecg(x + 4.62, y + 1.21, z + 1.62)}" fill="none" stroke="#8ef0c8" stroke-width="1.6" stroke-linejoin="round"/>` +
+        (faceVisible(0, 1)
+          ? `<polyline class="ecg" points="${ecg(x + 4.62, y + 1.21, z + 1.62)}" fill="none" stroke="#8ef0c8" stroke-width="1.6" stroke-linejoin="round"/>`
+          : '') +
         `<polygon points="${lx - 26},${ly} ${lx + 26},${ly} ${tb[0]},${tb[1]} ${ta[0]},${ta[1]}" fill="#fffbe6" opacity="0.35"/>` +
         `<ellipse cx="${lx}" cy="${ly}" rx="30" ry="12" fill="#e9eef3"/>` +
         `<ellipse cx="${lx}" cy="${ly + 2}" rx="20" ry="7" fill="#fff8d6"/>` +
@@ -234,7 +261,7 @@ function furniture(id, r) {
     case 'research-office':
       return (
         box(x + 0.35, y + 2.6, z, 0.6, 3, 2, M.sand) +
-        books(x + 0.95, y + 2.75, z) +
+        (faceVisible(1, 0) ? books(x + 0.95, y + 2.75, z) : '') +
         desk(x + 1, y + 1, z) +
         desk(x + 3.6, y + 1, z) +
         plant(x + 5.3, y + 5.3, z)
@@ -301,14 +328,15 @@ function books(x, y, z) {
   return s;
 }
 
+// A chart board on a thin stand, lettered on whichever face is showing.
 function eyeChart(x, y, z) {
-  const yy = y + 0.301;
-  let s = poly([[x + 0.7, yy, z + 0.8], [x + 1.8, yy, z + 0.8], [x + 1.8, yy, z + 2.1], [x + 0.7, yy, z + 2.1]], '#ffffff');
+  let s = box(x + 0.7, y + 0.25, z + 0.8, 1.1, 0.12, 1.3, M.white) + box(x + 1.2, y + 0.27, z, 0.1, 0.08, 0.8, M.steel);
+  const yy = faceVisible(0, 1) ? y + 0.371 : y + 0.249;
   const rows = [0.8, 0.62, 0.46, 0.34, 0.24];
   rows.forEach((w, i) => {
     const zz = z + 1.9 - i * 0.24;
     const x0 = x + 1.25 - w / 2;
-    s += poly([[x0, yy, zz], [x0 + w, yy, zz], [x0 + w, yy, zz - 0.1], [x0, yy, zz - 0.1]], '#585c7c');
+    s += poly([[x0, yy, zz], [x0 + w, yy, zz], [x0 + w, yy, zz - 0.1], [x0, yy, zz - 0.1]], M.ink.left);
   });
   return s;
 }
@@ -355,19 +383,20 @@ function floaters() {
 // Draw order: back to front by room centre depth; connectors just before
 // the nearer of their two rooms so stairs tuck under floors correctly.
 export function buildScene(theme) {
+  activeTheme = theme;
   applyTheme(theme);
   const items = [];
   for (const [id, r] of Object.entries(LAYOUT)) {
-    const depth = r.x + r.y + SIZE;
-    items.push({ depth, s: column(id, r) + floor(id, r) + walls(r) + furniture(id, r) });
+    const depth = viewDepth(r.x + SIZE / 2, r.y + SIZE / 2);
+    items.push({ depth, s: column(id, r) + floor(id, r) + walls(id, r) + furniture(id, r) });
   }
   for (const c of CONNECTORS) {
     const ra = LAYOUT[c.a];
     const rb = LAYOUT[c.b];
-    const depth = Math.max(ra.x + ra.y, rb.x + rb.y) + SIZE - 0.5;
+    const depth = Math.max(viewDepth(ra.x + SIZE / 2, ra.y + SIZE / 2), viewDepth(rb.x + SIZE / 2, rb.y + SIZE / 2)) - 0.5;
     items.push({ depth, s: c.kind === 'stairs' ? stairs(c) : bridge(c) });
   }
-  items.push({ depth: 23, s: garden() }, { depth: 22, s: grove() });
+  items.push({ depth: viewDepth(3.5, 19.5), s: garden() }, { depth: viewDepth(19.2, 3.2), s: grove() });
   items.sort((p, q) => p.depth - q.depth);
   const geometry = floaters() + items.map((i) => i.s).join('');
   return {
@@ -380,7 +409,28 @@ export function buildScene(theme) {
 }
 
 // Label anchors: above the back corner of each floor.
+// Label anchors: under the floor corner nearest the viewer.
 export function labelPoint(roomId) {
   const r = LAYOUT[roomId];
-  return P(r.x + SIZE, r.y + SIZE, r.z - 0.9);
+  const corners = [[r.x, r.y], [r.x + SIZE, r.y], [r.x, r.y + SIZE], [r.x + SIZE, r.y + SIZE]];
+  const [cx, cy] = corners.reduce((a, b) => (viewDepth(...b) > viewDepth(...a) ? b : a));
+  return P(cx, cy, r.z - 0.9);
+}
+
+// The floor outline of a room, for click targets.
+export function floorOutline(roomId) {
+  const r = LAYOUT[roomId];
+  return [[r.x, r.y], [r.x + SIZE, r.y], [r.x + SIZE, r.y + SIZE], [r.x, r.y + SIZE]].map(([x, y]) => P(x, y, r.z));
+}
+
+// Screen box around a room with its walls and people, for zooming in.
+export function roomFrame(roomId) {
+  const r = LAYOUT[roomId];
+  const pts = [];
+  for (const [x, y] of [[r.x, r.y], [r.x + SIZE, r.y], [r.x, r.y + SIZE], [r.x + SIZE, r.y + SIZE]]) {
+    pts.push(P(x, y, r.z - 1.2), P(x, y, r.z + 3.4));
+  }
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
 }

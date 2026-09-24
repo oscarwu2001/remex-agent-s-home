@@ -148,6 +148,12 @@ function eventsFromEntry(entry) {
     agentId: typeof entry.agentId === 'string' ? entry.agentId : undefined,
     cwd: typeof entry.cwd === 'string' ? entry.cwd : undefined,
     ts,
+    // Token usage. Claude Code writes one line per content block and repeats
+    // the reply's usage on each, so consumers must count it once per id.
+    messageId: entry.type === 'assistant' && entry.message && typeof entry.message.id === 'string'
+      ? entry.message.id : undefined,
+    usage: entry.type === 'assistant' && entry.message && entry.message.usage && typeof entry.message.usage === 'object'
+      ? entry.message.usage : undefined,
   };
 
   if (entry.type === 'assistant' || entry.type === 'user') {

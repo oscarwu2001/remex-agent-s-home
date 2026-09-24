@@ -49,6 +49,29 @@ npm start            # run it now, against your real sessions
 npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 ```
 
+## Getting around
+
+- **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
+- **Zoom and move:** scroll to zoom, drag to move.
+- **Turn the tower:** the ⟲ ⟳ buttons, or Q and E, turn it a quarter at a time, the way Monument Valley does.
+- **Night:** each colourway has a night version with stars, a moon and lit windows. By day a small sun keeps watch.
+- Figures act out their work: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
+
+## Performance report
+
+```powershell
+npm run report                 # last 28 days
+npm run report -- --days 7     # last week
+```
+
+This reads your transcripts (read-only) and writes `out/reports/agent-report-<date>.html`, a self-contained page that opens offline. It also writes `runs`, `daily` and `weekly` CSV files for your own analysis. The page shows:
+
+- **Headline numbers:** helper runs, the share that finished, median helper time and tokens used, each compared with the period before.
+- **Scorecard per agent:** runs, a score out of 100, finished %, re-runs, median and p90 time, tokens per run, tool calls per run, tool error rate, PASS/FAIL or Approve/Block verdicts, and a 14-day sparkline.
+- **Charts:** runs per day, weekly score per agent, and how long each agent takes.
+
+The **score** is reliability (40), right first time (20), speed (20) and efficiency (20). Speed and efficiency are measured against the same agent's own history, never against other agents. A reviewer answering FAIL is doing its job and is never marked down for it. The report keeps no prompts, results, file names or commands. Sessions appear as `s1`, `s2`…, and project names appear only if you ask with `--by-project`.
+
 ## How it works
 
 Claude Code writes every conversation to a JSONL transcript under

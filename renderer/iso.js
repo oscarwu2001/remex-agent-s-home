@@ -10,15 +10,62 @@ export const TW = 32; // half a tile's screen width
 export const TH = 16; // half a tile's screen height
 export const ZH = 35; // screen height of one unit of z
 
+// The view: the world turned in quarter steps about its centre, so the
+// tower can be walked around. Everything projects through P, so figures,
+// labels and geometry all follow.
+const CX = 11;
+const CY = 11;
+let VIEW = 0;
+
+export function setView(quarterTurns) {
+  VIEW = ((quarterTurns % 4) + 4) % 4;
+}
+
+export function getView() {
+  return VIEW;
+}
+
+function turn(a, b) {
+  for (let i = 0; i < VIEW; i++) [a, b] = [-b, a];
+  return [a, b];
+}
+
+export function toView(x, y) {
+  const [a, b] = turn(x - CX, y - CY);
+  return [CX + a, CY + b];
+}
+
+// Farther from the viewer = smaller. Painter's order sorts on this.
+export function viewDepth(x, y) {
+  const [a, b] = toView(x, y);
+  return a + b;
+}
+
+// Whether a face whose outward normal is (nx, ny) in world axes faces the
+// viewer in the current view.
+export function faceVisible(nx, ny) {
+  const [a, b] = turn(nx, ny);
+  return a > 0.5 || b > 0.5;
+}
+
+function Pv(vx, vy, z) {
+  return [(vx - vy) * TW, (vx + vy) * TH - z * ZH];
+}
+
 export function P(x, y, z = 0) {
-  return [(x - y) * TW, (x + y) * TH - z * ZH];
+  const [vx, vy] = toView(x, y);
+  return Pv(vx, vy, z);
+}
+
+function fmt(list, project) {
+  return list
+    .map((p) => project(p[0], p[1], p[2]))
+    .map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`)
+    .join(' ');
 }
 
 export function pts(list) {
-  return list
-    .map((p) => P(p[0], p[1], p[2]))
-    .map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`)
-    .join(' ');
+  return fmt(list, P);
 }
 
 // A seam-free face: stroke in the fill colour closes hairline gaps.
@@ -37,13 +84,22 @@ export function applyTheme(theme) {
   for (const [room, base] of Object.entries(theme.rooms)) M[room] = { ...shade(base, theme), base };
 }
 
+// Faces are worked out in view space, so the lit and shaded sides are
+// always the ones facing the viewer, whichever way the tower is turned.
 export function box(x, y, z, w, d, h, m, extra = '') {
+  const corners = [toView(x, y), toView(x + w, y), toView(x, y + d), toView(x + w, y + d)];
+  const vx = Math.min(...corners.map((c) => c[0]));
+  const vy = Math.min(...corners.map((c) => c[1]));
+  const vw = Math.max(...corners.map((c) => c[0])) - vx;
+  const vd = Math.max(...corners.map((c) => c[1])) - vy;
   const t = z + h;
+  const face = (list, fill) =>
+    `<polygon points="${fmt(list, Pv)}" fill="${fill}" stroke="${fill}" stroke-width="0.6" stroke-linejoin="round"/>`;
   return (
     `<g ${extra}>` +
-    poly([[x, y + d, t], [x + w, y + d, t], [x + w, y + d, z], [x, y + d, z]], m.left) +
-    poly([[x + w, y, t], [x + w, y + d, t], [x + w, y + d, z], [x + w, y, z]], m.right) +
-    poly([[x, y, t], [x + w, y, t], [x + w, y + d, t], [x, y + d, t]], m.top) +
+    face([[vx, vy + vd, t], [vx + vw, vy + vd, t], [vx + vw, vy + vd, z], [vx, vy + vd, z]], m.left) +
+    face([[vx + vw, vy, t], [vx + vw, vy + vd, t], [vx + vw, vy + vd, z], [vx + vw, vy, z]], m.right) +
+    face([[vx, vy, t], [vx + vw, vy, t], [vx + vw, vy + vd, t], [vx, vy + vd, t]], m.top) +
     '</g>'
   );
 }
@@ -113,12 +169,14 @@ export function archPoints(along, u0, width, zBase, height, steps = 12) {
 // Ring standing in the plane y = cy (the MRI bore).
 export function uprightRing(cx, cy, cz, R, r, depth, m) {
   const layers = 6;
+  // Extrude from the far face to the near one, whichever that is now.
+  const ys = Array.from({ length: layers + 1 }, (_, k) => cy - depth / 2 + (depth * k) / layers)
+    .sort((a, b) => viewDepth(cx, a) - viewDepth(cx, b));
   let s = '';
-  for (let k = 0; k <= layers; k++) {
-    const yy = cy - depth / 2 + (depth * k) / layers;
+  ys.forEach((yy, k) => {
     const fill = k === layers ? m.top : k > layers / 2 ? m.left : m.right;
     s += `<path fill-rule="evenodd" fill="${fill}" d="${ringPath(cx, yy, cz, R)} ${ringPath(cx, yy, cz, r)}"/>`;
-  }
+  });
   return s;
 }
 

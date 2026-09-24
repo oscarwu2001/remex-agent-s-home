@@ -84,6 +84,32 @@
   --swatch: #9dcbb6;
 }
 
+/* Night variants: the same three colourways after dark. Every text pair
+   measures 6:1 or better. */
+:root[data-time="night"] { color-scheme: dark; --on-accent: #1d1838; }
+:root[data-theme="blossom"][data-time="night"],
+:root[data-time="night"]:not([data-theme]) {
+  --sky-top: #1b1a45; --sky-mid: #3a3276; --sky-bottom: #8a6aa6; --mist: #6f5690; --cloud: #4a3f86;
+  --window-top: #ffe9b0; --window-bottom: #ffb877;
+  --panel: #211d43; --panel-raised: #2a2553; --line: #3b356b; --ink: #f6effa; --ink-muted: #c7bddf;
+  --accent: #f2a6c4; --accent-soft: #3a3068; --warn: #ffb0a8; --warn-soft: #4a2440; --focus: #f2a6c4;
+  --label-bg: rgba(33, 29, 67, 0.9); --on-accent: #1d1838;
+}
+:root[data-theme="tide"][data-time="night"] {
+  --sky-top: #0a1430; --sky-mid: #1a2f5f; --sky-bottom: #3d5f93; --mist: #34507e; --cloud: #2a3f6e;
+  --window-top: #fff0c0; --window-bottom: #ffc27a;
+  --panel: #111d38; --panel-raised: #172748; --line: #26395f; --ink: #eef4ff; --ink-muted: #b4c3de;
+  --accent: #9cc4ff; --accent-soft: #203660; --warn: #ffb0a8; --warn-soft: #3d2236; --focus: #9cc4ff;
+  --label-bg: rgba(17, 29, 56, 0.9); --on-accent: #0e1830;
+}
+:root[data-theme="grove"][data-time="night"] {
+  --sky-top: #0b2023; --sky-mid: #173f3e; --sky-bottom: #3c6a58; --mist: #2f5a4c; --cloud: #24493f;
+  --window-top: #fff4bf; --window-bottom: #ffcf6e;
+  --panel: #0f2424; --panel-raised: #153030; --line: #214545; --ink: #eefaf3; --ink-muted: #b2d0c3;
+  --accent: #9fe0c0; --accent-soft: #1d4040; --warn: #ffb0a8; --warn-soft: #3d2426; --focus: #9fe0c0;
+  --label-bg: rgba(15, 36, 36, 0.9); --on-accent: #0b1f1f;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -280,7 +306,7 @@ details > summary h2 { margin: 0; }
   border-radius: 999px;
   border: 0;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent, #ffffff);
   font: 600 13px var(--font);
   cursor: pointer;
 }
@@ -344,3 +370,104 @@ details > summary h2 { margin: 0; }
 .colourway.grove .dot { background: linear-gradient(135deg, #b3ebcf 50%, #5fa6b8 50%); }
 .colourway:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
 .colourway:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---- camera ---------------------------------------------------------- */
+
+#scene { cursor: grab; touch-action: none; }
+#scene.dragging { cursor: grabbing; }
+#scene.turning #world { opacity: 0.001; }
+#world { transition: opacity 0.25s ease; }
+
+.room-hit { fill: transparent; cursor: zoom-in; }
+.room-label { cursor: zoom-in; outline: none; }
+.room-label.hidden { display: none; }
+.room-label:hover rect, .room-label:focus-visible rect { stroke: var(--focus); stroke-width: 2; }
+
+.camera {
+  position: absolute;
+  top: var(--s-4);
+  left: var(--s-4);
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1);
+  border-radius: 999px;
+  background: var(--label-bg);
+  box-shadow: 0 2px 10px rgba(40, 30, 80, 0.12);
+}
+.cam-btn {
+  min-width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: 600 13px var(--font);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.cam-btn.wide { padding: 0 var(--s-3); }
+.cam-btn:hover:not(:disabled) { background: var(--accent-soft); }
+.cam-btn:disabled { color: var(--ink-muted); cursor: default; opacity: 0.6; }
+.cam-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cam-where { padding: 0 var(--s-3) 0 var(--s-1); font-size: 13px; color: var(--ink-muted); white-space: nowrap; }
+.cam-hint {
+  position: absolute;
+  top: calc(var(--s-4) + 60px);
+  left: var(--s-4);
+  margin: 0;
+  padding: 2px var(--s-3);
+  border-radius: 999px;
+  background: var(--label-bg);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* ---- night sky --------------------------------------------------------- */
+
+.star { fill: #fff6dc; opacity: 0.8; animation: twinkle 4s ease-in-out infinite; }
+.star.s1 { animation-delay: -1.3s; }
+.star.s2 { animation-delay: -2.6s; }
+@keyframes twinkle { 50% { opacity: 0.25; } }
+:root[data-time="night"] .cloud { opacity: 0.55; }
+:root[data-time="night"] .ecg { filter: drop-shadow(0 0 3px #8ef0c8); }
+@media (prefers-reduced-motion: reduce) {
+  .star { animation: none; }
+  #world { transition: none; }
+}
+
+/* ---- props in hand while working ------------------------------------- */
+
+.prop .page { transform-origin: 0 0; animation: page-turn 1.6s ease-in-out infinite; }
+.prop .pencil { animation: scribble 0.5s ease-in-out infinite alternate; }
+.prop .bubble1 { animation: rise 1.2s ease-out infinite; }
+.prop .bubble2 { animation: rise 1.2s ease-out infinite 0.6s; }
+.prop .lens { animation: orbit 1.8s linear infinite; transform-origin: 0 -1px; }
+.prop .meridian { animation: spin-globe 1.6s linear infinite; transform-origin: 0 -3px; }
+.prop .tick { stroke-dasharray: 12; animation: draw-tick 1.4s ease-in-out infinite; }
+.prop .spark { transform-origin: 0 -3px; animation: sparkle 1s ease-in-out infinite; }
+
+@keyframes page-turn { 0%, 30% { transform: scaleX(1); } 60%, 100% { transform: scaleX(-1); } }
+@keyframes scribble { from { transform: translate(-2px, 0.5px); } to { transform: translate(1.5px, -0.5px); } }
+@keyframes rise { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-9px); opacity: 0; } }
+@keyframes orbit { from { transform: rotate(0deg) translateX(2px) rotate(0deg); } to { transform: rotate(360deg) translateX(2px) rotate(-360deg); } }
+@keyframes spin-globe { 0% { transform: scaleX(1); } 50% { transform: scaleX(0.1); } 100% { transform: scaleX(1); } }
+@keyframes draw-tick { from { stroke-dashoffset: 12; } 60%, to { stroke-dashoffset: 0; } }
+@keyframes sparkle { 50% { transform: scale(0.6) rotate(45deg); opacity: 0.6; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .prop * { animation: none !important; }
+}
+
+/* ---- sun and moon -------------------------------------------------------- */
+
+.sun { animation: float 8s ease-in-out infinite; }
+.sun-glow { fill: #fff3c4; opacity: 0.55; }
+.sun-rays { fill: #ffd27a; transform-origin: 0 0; animation: spin 40s linear infinite; }
+.sun-face { fill: #ffdf8a; stroke: #ffc861; stroke-width: 2; }
+.sun-eyes { fill: none; stroke: #b86f3f; stroke-width: 1.8; stroke-linecap: round; }
+.sun-blush { fill: #ff9e9e; opacity: 0.6; }
+.moon-glow { fill: #fff6dc; opacity: 0.12; }
+.moon-face { fill: #fff3cf; }
+@media (prefers-reduced-motion: reduce) { .sun, .sun-rays { animation: none; } }

@@ -13,7 +13,8 @@
     "test": "node --test \"test/*.test.js\"",
     "preview": "node scripts/preview-server.js",
     "dist:win": "electron-builder --win nsis portable --publish never",
-    "dist:dir": "electron-builder --dir"
+    "dist:dir": "electron-builder --dir",
+    "report": "node scripts/agent-report.js"
   },
   "devDependencies": {
     "electron": "^38.8.6",

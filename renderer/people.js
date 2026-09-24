@@ -1,7 +1,7 @@
 // The people of the hospital: faceless, two-tone figures in the Monument
 // Valley manner, dressed for the room they work in.
 
-import { P } from './iso.js';
+import { P, viewDepth } from './iso.js';
 
 const SKIN = ['#fbf3ea', '#eadbca'];
 
@@ -79,11 +79,43 @@ export function personMarkup(roomId) {
     `<circle cx="0" cy="-31" r="6.6" fill="${SKIN[0]}"/>` +
     `<path d="M0,-37.6 A6.6,6.6 0 0 1 0,-24.4 Z" fill="${SKIN[1]}"/>` +
     hat(look.hat, look.accent) +
+    '<g class="prop" transform="translate(-12 -13)"></g>' +
     '</g>' +
     '<g class="bubble" transform="translate(0 -56)"></g>' +
     '<g class="tag" transform="translate(0 16)"><rect/><text text-anchor="middle" y="3.5"></text></g>'
   );
 }
+
+// Something in hand for each kind of work, drawn beside the figure and
+// animated in CSS. Decoration only: the bubble and the board carry the state.
+const PROPS = {
+  read: // an open book whose page turns
+    '<path d="M-6,0 L0,1.5 L0,-5.5 L-6,-7 Z" fill="#fffaf0" stroke="#8a7fb5" stroke-width="0.8"/>' +
+    '<path d="M6,0 L0,1.5 L0,-5.5 L6,-7 Z" fill="#fffaf0" stroke="#8a7fb5" stroke-width="0.8"/>' +
+    '<path class="page" d="M0,1.5 L0,-5.5 L6,-7 L6,0 Z" fill="#f3ecff"/>',
+  write: // a clipboard with a pencil scribbling
+    '<rect x="-5" y="-9" width="10" height="12" rx="1.5" fill="#fffaf0" stroke="#8a7fb5" stroke-width="0.8"/>' +
+    '<path d="M-3,-5 H3 M-3,-2.5 H2 M-3,0 H1" stroke="#b7afd6" stroke-width="0.9"/>' +
+    '<g class="pencil"><path d="M1,-1 L7,-7 L8.5,-5.5 L2.5,0.5 Z" fill="#f6c667"/><path d="M1,-1 L2.5,0.5 L0.5,1 Z" fill="#585c7c"/></g>',
+  run: // a flask sending up bubbles
+    '<path d="M-2,-8 H2 V-4 L5,2 Q5,3 4,3 H-4 Q-5,3 -5,2 L-2,-4 Z" fill="#e8f7ff" stroke="#6f90b8" stroke-width="0.8"/>' +
+    '<path d="M-4.2,0.5 L-3,-1.5 H3 L4.2,0.5 Q4.2,2 3.5,2 H-3.5 Q-4.2,2 -4.2,0.5 Z" fill="#8fd6c8"/>' +
+    '<circle class="bubble1" cx="-1" cy="-9" r="1.2" fill="#8fd6c8"/><circle class="bubble2" cx="1.2" cy="-9" r="0.9" fill="#8fd6c8"/>',
+  search: // a magnifier circling
+    '<g class="lens"><circle cx="0" cy="-3" r="3.6" fill="#e8f7ff" fill-opacity="0.7" stroke="#585c7c" stroke-width="1.3"/>' +
+    '<path d="M2.6,-0.4 L6,3" stroke="#585c7c" stroke-width="1.8" stroke-linecap="round"/></g>',
+  web: // a turning globe
+    '<circle cx="0" cy="-3" r="4.5" fill="#bfe3f5" stroke="#6f90b8" stroke-width="0.9"/>' +
+    '<ellipse class="meridian" cx="0" cy="-3" rx="2" ry="4.5" fill="none" stroke="#6f90b8" stroke-width="0.8"/>' +
+    '<path d="M-4.5,-3 H4.5" stroke="#6f90b8" stroke-width="0.8"/>',
+  chart: // a chart with ticks appearing
+    '<rect x="-5" y="-9" width="10" height="12" rx="1.5" fill="#fffaf0" stroke="#8a7fb5" stroke-width="0.8"/>' +
+    '<path class="tick" d="M-3,-4 L-1.5,-2.5 L1.5,-6" fill="none" stroke="#2f6f6b" stroke-width="1.2" stroke-linecap="round"/>',
+  tool: // a small spark
+    '<path class="spark" d="M0,-8 L1.4,-4.4 L5,-3 L1.4,-1.6 L0,2 L-1.4,-1.6 L-5,-3 L-1.4,-4.4 Z" fill="#f6c667"/>',
+};
+PROPS.skill = PROPS.tool;
+PROPS.delegate = PROPS.chart;
 
 // Status glyphs differ in shape as well as colour: every status, and every
 // way of finishing, has its own silhouette.
@@ -149,6 +181,9 @@ export class Person {
     this.el.setAttribute('role', 'button');
     this.el.innerHTML = personMarkup(roomId);
     this.figure = this.el.querySelector('.figure');
+    this.prop = this.el.querySelector('.prop');
+    this.propKind = undefined;
+    this.hopAt = -1;
     this.bubble = this.el.querySelector('.bubble');
     this.tagText = this.el.querySelector('.tag text');
     this.tagRect = this.el.querySelector('.tag rect');
@@ -180,9 +215,20 @@ export class Person {
 
   setStatus(status) {
     if (status === this.status) return;
+    // A little hop of relief when a helper comes back with its result.
+    if (['done', 'quiet'].includes(status) && this.status && this.status !== status) this.hopAt = performance.now() / 1000;
     this.status = status;
     this.bubble.innerHTML = bubbleMarkup(status);
     this.el.dataset.status = status;
+  }
+
+  // What is in the figure's hands: only while it is actually at work.
+  setActivity(kind) {
+    const show = this.status === 'working' || this.status === 'blocked' ? kind : undefined;
+    if (show === this.propKind) return;
+    this.propKind = show;
+    this.prop.innerHTML = (show && PROPS[show]) || '';
+    this.prop.setAttribute('class', `prop ${show ? `p-${show}` : ''}`);
   }
 
   walk(points) {
@@ -220,17 +266,39 @@ export class Person {
     this.el.setAttribute('transform', `translate(${sx.toFixed(1)} ${sy.toFixed(1)}) scale(1.3)`);
     this.el.style.opacity = this.fade.toFixed(3);
 
-    let bob = 0;
-    if (!reducedMotion) {
-      bob = this.walking
-        ? -Math.abs(Math.sin(t * 9 + this.phase)) * 2.6
-        : -Math.max(0, Math.sin(t * 1.6 + this.phase)) * 0.8;
+    const { bob, lean } = reducedMotion ? { bob: 0, lean: 0 } : this.motion(t);
+    this.figure.setAttribute('transform', `translate(0 ${bob.toFixed(2)}) rotate(${lean.toFixed(2)})`);
+  }
+
+  // Body language by state: walk bounce, busy jiggle, slow thinking sway,
+  // an impatient hop while blocked, and a hop of relief when done.
+  motion(t) {
+    const ph = this.phase;
+    if (this.hopAt >= 0) {
+      const k = t - this.hopAt;
+      if (k < 0.55) return { bob: -Math.sin((k / 0.55) * Math.PI) * 9, lean: 0 };
+      this.hopAt = -1;
     }
-    this.figure.setAttribute('transform', `translate(0 ${bob.toFixed(2)})`);
+    if (this.walking) return { bob: -Math.abs(Math.sin(t * 9 + ph)) * 2.6, lean: Math.sin(t * 9 + ph) * 2 };
+    switch (this.status) {
+      case 'working':
+        return { bob: -Math.abs(Math.sin(t * 12 + ph)) * 1.1, lean: -3 + Math.sin(t * 3 + ph) * 1.5 };
+      case 'thinking':
+      case 'reporting':
+        return { bob: -Math.max(0, Math.sin(t * 1.4 + ph)) * 1, lean: Math.sin(t * 0.9 + ph) * 4 };
+      case 'blocked': {
+        const beat = (t * 0.8 + ph) % 1;
+        return { bob: beat < 0.2 ? -Math.sin((beat / 0.2) * Math.PI) * 3.5 : 0, lean: 0 };
+      }
+      case 'delegating':
+        return { bob: 0, lean: Math.sin(t * 0.7 + ph) * 2.5 };
+      default:
+        return { bob: -Math.max(0, Math.sin(t * 1.6 + ph)) * 0.8, lean: 0 };
+    }
   }
 
   depth() {
-    return this.pos[0] + this.pos[1] + this.pos[2] * 0.01;
+    return viewDepth(this.pos[0], this.pos[1]) + this.pos[2] * 0.01;
   }
 
   remove() {

@@ -1,7 +1,10 @@
-import { buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT } from './scene.js';
+import {
+  buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT, floorOutline, roomFrame,
+} from './scene.js';
+import { setView, getView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
-import { THEMES, DEFAULT_THEME } from './themes.js';
+import { THEMES, DEFAULT_THEME, themeFor } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const config = await bridge.config();
@@ -10,10 +13,11 @@ const ROOM_NAMES = Object.fromEntries(config.rooms.map((r) => [r.id, r]));
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
 const peopleLayer = $('people');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
-const prefs = { private: true, names: true, theme: DEFAULT_THEME, demo: false };
+const prefs = { private: true, names: true, theme: DEFAULT_THEME, night: false, view: 0, demo: false };
 try {
   Object.assign(prefs, JSON.parse(localStorage.getItem('agents-home-prefs') || '{}'));
 } catch {
@@ -32,37 +36,251 @@ function savePrefs() {
 
 function applyPrefs() {
   document.documentElement.dataset.theme = prefs.theme;
+  document.documentElement.dataset.time = prefs.night ? 'night' : 'day';
   document.body.classList.toggle('no-tags', !prefs.names);
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
   for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === prefs.theme;
   $('opt-demo').checked = prefs.demo;
+  $('opt-night').checked = prefs.night;
 }
 
-for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo']]) {
+for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo'], ['opt-night', 'night']]) {
   $(id).addEventListener('change', (e) => {
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
     savePrefs();
     applyPrefs();
+    if (key === 'night') drawScene();
     render(true);
   });
 }
 
 // ---- scene -----------------------------------------------------------------
 
-// Redrawn whenever the colourway changes; the layout never moves.
+// Redrawn when the colourway, day/night or the view turn changes; the rooms
+// themselves never move.
 function drawScene() {
-  const { defs, geometry } = buildScene(THEMES[prefs.theme]);
+  const { defs, geometry } = buildScene(themeFor(prefs.theme, prefs.night));
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
       <stop offset="1" stop-color="var(--mist)" stop-opacity="1"/>
     </linearGradient>`;
   $('geometry').innerHTML = geometry;
+  overview = frameOf($('geometry').getBBox());
+  drawBackdrop();
+  drawLabels();
+  placeLabels();
 }
-document.documentElement.dataset.theme = prefs.theme;
+
+function frameOf(b) {
+  const pad = 36;
+  return { x: b.x - pad, y: b.y - pad * 2, w: b.width + pad * 2, h: b.height + pad * 3 };
+}
+
+// Sky furniture sits in overview space so it stays put while you zoom.
+function drawBackdrop() {
+  const o = overview;
+  $('mist').innerHTML = `<rect x="${o.x - o.w}" y="${o.y + o.h * 0.84}" width="${o.w * 3}" height="${o.h}" fill="url(#mist-grad)"/>`;
+  const clouds = [[0.12, 0.16, 1], [0.78, 0.1, 1.3], [0.86, 0.55, 0.9], [0.06, 0.62, 0.8]]
+    .map(([fx, fy, k]) => `<g transform="translate(${o.x + o.w * fx} ${o.y + o.h * fy}) scale(${k})"><g class="float">
+      <ellipse class="cloud" cx="0" cy="0" rx="70" ry="16"/><ellipse class="cloud" cx="-18" cy="-12" rx="30" ry="16"/>
+      <ellipse class="cloud" cx="16" cy="-16" rx="34" ry="20"/></g></g>`)
+    .join('');
+  // Stars only come out at night; a fixed pseudo-random field, not Math.random,
+  // so they do not jump on every redraw.
+  let stars = '';
+  if (prefs.night) {
+    for (let i = 0; i < 70; i++) {
+      const fx = ((i * 73) % 97) / 97;
+      const fy = ((i * 41) % 89) / 89 * 0.6;
+      const r = 0.8 + ((i * 29) % 7) / 5;
+      stars += `<circle class="star s${i % 3}" cx="${(o.x + o.w * fx).toFixed(1)}" cy="${(o.y + o.h * fy).toFixed(1)}" r="${r.toFixed(1)}"/>`;
+    }
+  }
+  // A cute tiny sun by day, a crescent moon by night, high in one corner.
+  const [cx, cy] = [o.x + o.w * 0.9, o.y + o.h * 0.13];
+  const sky = prefs.night
+    ? `<g class="moon" transform="translate(${cx} ${cy})">
+        <circle r="30" class="moon-glow"/>
+        <path d="M6,-20 A20,20 0 1 0 20,6 A15,15 0 1 1 6,-20 Z" class="moon-face"/>
+      </g>`
+    : `<g transform="translate(${cx} ${cy})"><g class="sun">
+        <circle r="34" class="sun-glow"/>
+        <g class="sun-rays">${Array.from({ length: 8 }, (_, i) => `<rect x="-2.5" y="-31" width="5" height="9" rx="2.5" transform="rotate(${i * 45})"/>`).join('')}</g>
+        <circle r="17" class="sun-face"/>
+        <path d="M-8,-2 q2.5,-3 5,0 M3,-2 q2.5,-3 5,0" class="sun-eyes"/>
+        <path d="M-4,5 q4,4 8,0" class="sun-eyes"/>
+        <circle cx="-10" cy="4" r="2.6" class="sun-blush"/><circle cx="10" cy="4" r="2.6" class="sun-blush"/>
+      </g></g>`;
+  $('clouds').innerHTML = sky + stars + clouds;
+}
+
+// Room signs and floor click targets: both open that room.
+function drawLabels() {
+  $('labels').innerHTML = config.rooms
+    .filter((r) => LAYOUT[r.id])
+    .map((r) => {
+      const floorPts = floorOutline(r.id).map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ');
+      return `<polygon class="room-hit" data-room="${r.id}" points="${floorPts}"/>`;
+    })
+    .join('') + config.rooms
+    .filter((r) => LAYOUT[r.id])
+    .map((r) => {
+      const [x, y] = labelPoint(r.id);
+      const w = Math.max(r.name.length * 12.5, r.purpose.length * 8) + 28;
+      return `<g class="room-label" data-room="${r.id}" role="button" tabindex="0"
+          aria-label="Visit the ${escapeXml(r.name)}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
+        <rect x="${-w / 2}" y="-20" width="${w}" height="46" rx="12"/>
+        <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
+        <text class="purpose" text-anchor="middle" y="19">${escapeXml(r.purpose)}</text></g>`;
+    })
+    .join('');
+}
+
+// ---- camera: zoom, pan, visit a room, turn the tower ------------------------
+
+let overview;
+let focusedRoom;
+const cam = { x: 0, y: 0, w: 1, h: 1 };
+let tween;
+
+function setViewBox(b) {
+  Object.assign(cam, b);
+  svg.setAttribute('viewBox', `${b.x.toFixed(1)} ${b.y.toFixed(1)} ${b.w.toFixed(1)} ${b.h.toFixed(1)}`);
+  placeLabels();
+}
+
+// Room signs keep the same size on screen at any zoom. Inside a room only
+// its own sign shows.
+function placeLabels() {
+  const k = cam.w > 1 ? Math.min(1, cam.w / overview.w) : 1;
+  for (const g of document.querySelectorAll('.room-label')) {
+    g.setAttribute('transform', `translate(${g.dataset.x} ${g.dataset.y}) scale(${k.toFixed(3)})`);
+    g.classList.toggle('hidden', Boolean(focusedRoom) && g.dataset.room !== focusedRoom);
+  }
+}
+
+function flyTo(target, ms = 450) {
+  if (reducedMotion.matches) ms = 0;
+  const from = { ...cam };
+  const start = performance.now();
+  cancelAnimationFrame(tween);
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+  const stepTo = (now) => {
+    const t = ms ? Math.min(1, (now - start) / ms) : 1;
+    const k = ease(t);
+    setViewBox({
+      x: from.x + (target.x - from.x) * k, y: from.y + (target.y - from.y) * k,
+      w: from.w + (target.w - from.w) * k, h: from.h + (target.h - from.h) * k,
+    });
+    if (t < 1) tween = requestAnimationFrame(stepTo);
+  };
+  tween = requestAnimationFrame(stepTo);
+}
+
+function visitRoom(id) {
+  focusedRoom = id;
+  placeLabels();
+  const f = roomFrame(id);
+  const pad = 0.4;
+  flyTo({ x: f.x - f.w * pad, y: f.y - f.h * pad, w: f.w * (1 + 2 * pad), h: f.h * (1 + 2 * pad) });
+  updateCameraUi();
+}
+
+function showOverview() {
+  focusedRoom = undefined;
+  placeLabels();
+  flyTo(overview);
+  updateCameraUi();
+}
+
+function turnView(step) {
+  setView(getView() + step);
+  prefs.view = getView();
+  savePrefs();
+  svg.classList.add('turning');
+  drawScene();
+  requestAnimationFrame(() => svg.classList.remove('turning'));
+  if (focusedRoom) visitRoom(focusedRoom);
+  else setViewBox(overview);
+}
+
+function updateCameraUi() {
+  const zoomed = focusedRoom || cam.w < overview.w * 0.95;
+  $('cam-overview').disabled = !zoomed;
+  $('cam-where').textContent = focusedRoom ? `In the ${ROOM_NAMES[focusedRoom]?.name ?? ''}` : zoomed ? 'Zoomed in' : '';
+  $('cam-where').hidden = !zoomed;
+}
+
+// Wheel zooms about the pointer; drag pans. A drag never counts as a click.
+function toSvgPoint(clientX, clientY) {
+  const r = svg.getBoundingClientRect();
+  const scale = Math.max(cam.w / r.width, cam.h / r.height);
+  const ox = cam.x + (cam.w - r.width * scale) / 2;
+  const oy = cam.y + (cam.h - r.height * scale) / 2;
+  return [ox + (clientX - r.left) * scale, oy + (clientY - r.top) * scale, scale];
+}
+
+svg.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  cancelAnimationFrame(tween);
+  const [px, py] = toSvgPoint(e.clientX, e.clientY);
+  const k = Math.exp(e.deltaY * 0.0015);
+  const w = Math.min(overview.w * 1.4, Math.max(overview.w * 0.12, cam.w * k));
+  const f = w / cam.w;
+  setViewBox({ x: px - (px - cam.x) * f, y: py - (py - cam.y) * f, w, h: cam.h * f });
+  focusedRoom = undefined;
+  updateCameraUi();
+}, { passive: false });
+
+let drag;
+svg.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  drag = { x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x;
+  const dy = e.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+  if (!drag.moved) svg.setPointerCapture?.(e.pointerId);
+  drag.moved = true;
+  svg.classList.add('dragging');
+  const [, , scale] = toSvgPoint(0, 0);
+  cancelAnimationFrame(tween);
+  setViewBox({ ...drag.cam, x: drag.cam.x - dx * scale, y: drag.cam.y - dy * scale });
+  focusedRoom = undefined;
+  updateCameraUi();
+});
+window.addEventListener('pointerup', () => {
+  svg.classList.remove('dragging');
+  // Let the click that follows this pointerup see whether it was a drag.
+  setTimeout(() => { drag = undefined; }, 0);
+});
+
+$('cam-left').addEventListener('click', () => turnView(-1));
+$('cam-right').addEventListener('click', () => turnView(1));
+$('cam-overview').addEventListener('click', showOverview);
+$('labels').addEventListener('keydown', (e) => {
+  const label = e.target.closest('.room-label');
+  if (label && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    visitRoom(label.dataset.room);
+  }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, button, .row, .person, .room-label')) return;
+  if (e.key === 'q' || e.key === 'Q') turnView(-1);
+  else if (e.key === 'e' || e.key === 'E') turnView(1);
+  else if (e.key === 'Escape') showOverview();
+});
+
+setView(prefs.view ?? 0);
 drawScene();
+setViewBox(overview);
+updateCameraUi();
 
 for (const radio of document.querySelectorAll('input[name="theme"]')) {
   radio.addEventListener('change', () => {
@@ -72,38 +290,6 @@ for (const radio of document.querySelectorAll('input[name="theme"]')) {
     drawScene();
   });
 }
-
-// Frame whatever was drawn, with room for labels and bubbles.
-const bounds = (() => {
-  const b = $('geometry').getBBox();
-  const pad = 36;
-  return { x: b.x - pad, y: b.y - pad * 2, w: b.width + pad * 2, h: b.height + pad * 3 };
-})();
-svg.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.w} ${bounds.h}`);
-svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-$('mist').innerHTML = `<rect x="${bounds.x}" y="${bounds.y + bounds.h * 0.84}" width="${bounds.w}" height="${bounds.h * 0.16 + 2}" fill="url(#mist-grad)"/>`;
-$('clouds').innerHTML = [
-  [bounds.x + bounds.w * 0.12, bounds.y + bounds.h * 0.16, 1],
-  [bounds.x + bounds.w * 0.78, bounds.y + bounds.h * 0.1, 1.3],
-  [bounds.x + bounds.w * 0.86, bounds.y + bounds.h * 0.55, 0.9],
-  [bounds.x + bounds.w * 0.06, bounds.y + bounds.h * 0.62, 0.8],
-]
-  .map(([x, y, k]) => `<g transform="translate(${x} ${y}) scale(${k})"><g class="float">
-      <ellipse class="cloud" cx="0" cy="0" rx="70" ry="16"/><ellipse class="cloud" cx="-18" cy="-12" rx="30" ry="16"/>
-      <ellipse class="cloud" cx="16" cy="-16" rx="34" ry="20"/></g></g>`)
-  .join('');
-
-$('labels').innerHTML = config.rooms
-  .filter((r) => LAYOUT[r.id])
-  .map((r) => {
-    const [x, y] = labelPoint(r.id);
-    const w = Math.max(r.name.length * 12.5, r.purpose.length * 8) + 28;
-    return `<g class="room-label" transform="translate(${x} ${y + 28})">
-      <rect x="${-w / 2}" y="-20" width="${w}" height="46" rx="12"/>
-      <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
-      <text class="purpose" text-anchor="middle" y="19">${escapeXml(r.purpose)}</text></g>`;
-  })
-  .join('');
 
 // ---- people ----------------------------------------------------------------
 
@@ -133,6 +319,12 @@ function select(key) {
 }
 
 svg.addEventListener('click', (e) => {
+  if (drag?.moved) return;
+  const room = e.target.closest('[data-room]');
+  if (room && !e.target.closest('.person')) {
+    visitRoom(room.dataset.room);
+    return;
+  }
   if (!e.target.closest('.person') && selected) select(selected);
 });
 
@@ -160,6 +352,7 @@ function syncPeople(snapshot) {
       people.set(key, p);
     }
     p.setStatus(glyphKey(w.data));
+    p.setActivity(w.data.activity?.kind);
     p.setLabel(w.name, statusText(w.data));
     p.el.classList.toggle('selected', key === selected);
     if (w.kind === 'agent' && w.data.status === 'done' && !p.leaving) {
@@ -176,7 +369,6 @@ function syncPeople(snapshot) {
   }
 }
 
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let last = performance.now();
 function frame(nowMs) {
   const dt = Math.min(0.1, (nowMs - last) / 1000);
