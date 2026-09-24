@@ -468,6 +468,8 @@ function freeSeat(roomId, key) {
 }
 
 function select(key) {
+  const p = people.get(key);
+  if (key.startsWith('r:') && p?.busyWith) key = p.busyWith;
   selected = selected === key ? undefined : key;
   for (const [k, p] of people) p.el.classList.toggle('selected', k === selected);
   render(true);
@@ -498,13 +500,17 @@ function syncPeople(snapshot) {
   // A helper whose room is gone (a department removed while it was on
   // shift) is shown in the General Ward, and counted.
   homeless = 0;
+  const staff = staffList(snapshot);
   for (const w of wanted.values()) {
     if (!LAYOUT[w.room]) {
       w.room = 'general-ward';
       homeless += 1;
     }
   }
+  syncStaff(staff, wanted);
+
   for (const [key, w] of wanted) {
+    if (w.resident) continue; // a staff member at their post is doing this one
     let p = people.get(key);
     if (!p) {
       const seat = takeSeat(w.room, key);
@@ -542,10 +548,74 @@ function syncPeople(snapshot) {
   }
 
   for (const [key, p] of people) {
+    if (key.startsWith('r:')) continue; // staff are handled in syncStaff
     if (!wanted.has(key) && !p.leaving) {
       freeSeat(p.roomId, key);
       p.leave(key.startsWith('a:') ? [...routeTo(p.roomId).reverse()] : []);
     }
+  }
+}
+
+// ---- resident staff -----------------------------------------------------------
+
+// Your staff are the agents you have defined (.claude/agents) and the ones
+// you placed in departments. Each stands at a post in their own room all the
+// time. When called, the attending brings the task over and they do it right
+// there; when done they stay. Agents with no post (Explore, Plan...) walk in
+// as visitors and leave again, as before.
+function staffList(snap) {
+  const list = new Map(); // name -> room
+  for (const a of snap.roster || []) list.set(a.name, a.room);
+  for (const d of config.layout?.departments || []) for (const a of d.agents) if (!list.has(a)) list.set(a, d.id);
+  for (const [name, room] of list) if (!LAYOUT[room]) list.set(name, 'general-ward');
+  return list;
+}
+
+function syncStaff(staff, wanted) {
+  // Retire posts that no longer exist.
+  for (const [key, p] of people) {
+    if (!key.startsWith('r:') || p.leaving) continue;
+    if (!staff.has(key.slice(2))) {
+      freeSeat(p.roomId, key);
+      p.leave([]);
+    }
+  }
+  for (const [name, room] of staff) {
+    const key = `r:${name}`;
+    let p = people.get(key);
+    if (!p || p.leaving) {
+      const home = slotPoint(room, takeSeat(room, key));
+      p = new Person({ id: key, roomId: room, layer: peopleLayer, at: home, onSelect: select });
+      p.seat = home;
+      p.home = home.slice();
+      people.set(key, p);
+    } else if (p.roomId !== room) {
+      // Moved to another room (a new department, or rooms.json): walk over.
+      freeSeat(p.roomId, key);
+      const home = slotPoint(room, takeSeat(room, key));
+      p.walk([...routeBetween(p.roomId, room), home]);
+      p.roomId = room;
+      p.seat = home;
+      p.home = home.slice();
+    }
+    // Take on a helper of this type: keep the one already held, else the
+    // first new one. Any others of the same type walk in as visitors.
+    if (p.busyWith && !wanted.has(p.busyWith)) p.busyWith = undefined;
+    if (!p.busyWith) {
+      for (const [k, w] of wanted) {
+        if (w.kind !== 'agent' || w.name !== name || w.resident || people.has(k)) continue;
+        p.busyWith = k;
+        escort(people.get(`s:${w.session}`), room);
+        break;
+      }
+    }
+    const job = p.busyWith && wanted.get(p.busyWith);
+    if (job) job.resident = p;
+    const x = job ? job.data : { status: 'standby' };
+    p.setStatus(glyphKey(x));
+    p.setActivity(x.activity?.kind);
+    p.setLabel(name, statusText(x));
+    p.el.classList.toggle('selected', selected === key || (job && selected === p.busyWith));
   }
 }
 
@@ -644,6 +714,7 @@ requestAnimationFrame(frame);
 // Distinct words lead each status, so they can be told apart at a glance.
 function statusText(x) {
   switch (x.status) {
+    case 'standby': return 'Standby';
     case 'working': return x.activity ? x.activity.label : 'Working';
     case 'delegating': return x.activity ? x.activity.label.replace('Consulting', 'With') : 'With a helper';
     case 'blocked': return 'Needs approval, or a long tool is running';
@@ -734,6 +805,11 @@ function renderSessions(s) {
 }
 
 function findSelected(s) {
+  if (selected?.startsWith('r:')) {
+    const name = selected.slice(2);
+    const room = staffList(s).get(name);
+    if (room) return { x: { status: 'standby', history: [] }, name, room, resident: true };
+  }
   for (const sess of s.sessions) {
     if (`s:${sess.id}` === selected) return { x: sess, name: sess.project, room: 'nurses-station' };
     for (const a of sess.agents) if (`a:${a.id}` === selected) return { x: a, name: a.type, room: a.room, parent: sess.project };
@@ -752,7 +828,7 @@ function renderChart(s) {
     parent ? ['Called by', parent] : null,
     !prefs.private && x.description ? ['Task', x.description] : null,
     x.background ? ['Mode', 'Background'] : null,
-    ['On shift since', clock(x.startedAt)],
+    x.startedAt ? ['On shift since', clock(x.startedAt)] : null,
     x.errors ? ['Tool errors', String(x.errors)] : null,
   ].filter(Boolean);
   const history = [...x.history].reverse()
@@ -760,7 +836,7 @@ function renderChart(s) {
         <span>${escapeXml(h.label)}${!prefs.private && h.detail ? `<span class="d"> · ${escapeXml(h.detail)}</span>` : ''}</span></li>`)
     .join('');
   return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>
-    <ol aria-label="Recent activity">${history || '<li><span class="t">—</span><span>No tool calls yet</span></li>'}</ol>`;
+    <ol aria-label="Recent activity">${history || `<li><span class="t">—</span><span>${found.resident ? 'Standing by in their room' : 'No tool calls yet'}</span></li>`}</ol>`;
 }
 
 function renderCensus(s) {

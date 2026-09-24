@@ -107,7 +107,13 @@ export function demoSnapshot(nowMs, epochMs) {
     sessions,
     stats: { malformedLines: 0, unlinkedSidechains: 0 },
     watcher: { roots: [], filesTailed: 0 },
-    roster: [],
+    // The demo's own staff, standing at their posts.
+    roster: [
+      { name: 'reviewer', room: 'operating-room', summary: 'Independent code-quality reviewer.' },
+      { name: 'runner', room: 'laboratory', summary: 'Runs tests, gates and analyses.' },
+      { name: 'silent-failure-hunter', room: 'radiology', summary: 'Hunts silent failures.' },
+      { name: 'ui-reviewer', room: 'vision-clinic', summary: 'Independent interface reviewer.' },
+    ],
     problems: [],
   };
 }

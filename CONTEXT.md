@@ -3,7 +3,8 @@
 | Term | Meaning |
 | --- | --- |
 | **Session** | One Claude Code conversation: one main `.jsonl` transcript. Drawn as an attending in a white coat at the Nurses' Station. |
-| **Helper** / **sub-agent** | An agent started by a `Task` (older) or `Agent` (newer) tool call. Drawn as a figure who walks from the station to its room and back. |
+| **Helper** / **sub-agent** | An agent started by a `Task` (older) or `Agent` (newer) tool call. If it is one of your staff, the resident in its room does the work; otherwise a visitor walks from the station to the room and back. |
+| **Staff** | Agents defined in `.claude/agents` (the roster) and agents placed in departments. Each always stands in its room, on standby until called. |
 | **Agent type** | The `subagent_type` of the call (`reviewer`, `Explore`, …). Decides the room. |
 | **Room** | One of the seven core places in `src/core/rooms.js`, or a department the user added. |
 | **Grid / cell** | Rooms sit on a grid of cells `[col, row]`. The core 3 × 3 is cells 0..2; departments go in the ring around it (-1..3), up to 5 × 5. |
@@ -27,6 +28,7 @@ Every status has its own glyph silhouette in the scene and its own words on the 
 | `delegating` | hourglass | With *type* | The session is waiting on a helper. |
 | `your-turn` | speech bubble | Your turn | The session finished its answer. |
 | `idle` | crescent | Idle | Nothing seen yet but proof of life (attachments, meta lines). |
+| `standby` | small dot badge | Standby | A staff member at their post, not working on anything. |
 | `done` / finished | teal disc, tick | Finished | The helper's result came back, or its task notification said *completed*. |
 | `done` / went quiet | dashed ring, tick | Presumed finished (went quiet) | A background helper wrote nothing for 2 minutes. A guess, shown as one. |
 | `done` / error | red diamond, cross | Failed | The result was an error, or the notification said *failed*. |

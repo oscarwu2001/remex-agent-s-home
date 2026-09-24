@@ -12,9 +12,7 @@ Pixel Agents, but the rooms are hospital departments:
 - **Vision Clinic**: `ui-reviewer` checks contrast and legibility at the eye chart.
 - **General Ward**: any other agent.
 
-When a session calls a sub-agent, a figure walks out of the station, along the
-bridges and up the stairs to its room. It works there, showing a status bubble,
-and walks back when it returns its result.
+Your staff are the agents you have defined in `.claude/agents`, plus any you placed in a department. Each always stands in its own room, on **Standby** until called. When a session calls one of them, the attending walks the task over from the station and the staff member works on it in place, showing a status bubble. When it's done, it gives a little hop and goes back to standby. Agents without a post of their own (Claude's built-in Explore, Plan and general-purpose) walk in from the station as visitors and leave again when they're done.
 
 It comes in three calm colourways inspired by *Monument Valley 3*: pastel
 towers whose shaded sides turn violet, indigo or sea blue. Switch between

@@ -155,6 +155,8 @@ export function bubbleMarkup(status) {
       return '<path d="M0,-10.5 L10.5,0 L0,10.5 L-10.5,0 Z" fill="#b8443f"/><path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>';
     case 'stopped': // grey square, stop bar
       return `<rect x="-9" y="-9" width="18" height="18" rx="3" fill="${INK}"/><rect x="-3.5" y="-3.5" width="7" height="7" rx="1" fill="#ffffff"/>`;
+    case 'standby': // small badge with a dot: at their post, ready
+      return `<circle r="6.5" class="b-bg"/><circle r="2.4" fill="${INK}"/>`;
     case 'idle': // crescent moon
       return `${BG}<path d="M2.5,-5.5 A6,6 0 1 0 5.5,3 A4.6,4.6 0 1 1 2.5,-5.5 Z" fill="${INK}"/>`;
     default:
