@@ -162,8 +162,8 @@ body {
 .cloud { fill: var(--cloud); opacity: 0.85; }
 
 .room-label rect { fill: var(--label-bg); }
-.room-label .name { font: 600 17px var(--font); fill: var(--ink); letter-spacing: 0.06em; text-transform: uppercase; }
-.room-label .purpose { font: 400 14px var(--font); fill: var(--ink-muted); }
+.room-label .name { font: 600 21px var(--font); fill: var(--ink); letter-spacing: 0.06em; text-transform: uppercase; }
+.room-label .purpose { font: 400 17px var(--font); fill: var(--ink-muted); }
 
 
 .float { animation: float 7s ease-in-out infinite; }
@@ -479,16 +479,18 @@ details > summary h2 { margin: 0; }
 .build-cell path { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
 .build-cell:hover polygon, .build-cell:focus-visible polygon { fill-opacity: 0.9; }
 .build-cell.chosen polygon { fill: var(--accent); fill-opacity: 0.35; stroke-dasharray: none; }
-.build-cell:focus-visible polygon { stroke-width: 4; }
+.build-cell:focus-visible polygon { stroke: var(--ink); stroke-width: 4; stroke-dasharray: none; }
 
 .dept-list { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
 .dept-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 var(--s-2); padding: var(--s-2) 0; border-top: 1px dashed var(--line); font-size: 13px; }
 .dept-list li:first-child { border-top: 0; }
 .dept-list .agent { font-weight: 600; }
 .dept-list .summary { grid-column: 1; color: var(--ink-muted); font-size: 12px; }
-.dept-list .link-btn { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+.dept-list .actions { grid-column: 1 / -1; margin-top: var(--s-1); font-size: 12px; color: var(--ink-muted); }
+.dept-list .confirm { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--ink); font-weight: 600; }
+.link-btn.danger { color: var(--warn); }
 .link-btn {
-  min-height: 36px; padding: 0 var(--s-2); border: 0; background: none; color: var(--accent);
+  min-height: 44px; padding: 0 var(--s-2); border: 0; background: none; color: var(--accent);
   font: 600 13px var(--font); cursor: pointer; border-radius: var(--r-sm);
 }
 .link-btn:disabled { color: var(--ink-muted); cursor: not-allowed; }
@@ -498,10 +500,13 @@ details > summary h2 { margin: 0; }
 .field { display: grid; gap: var(--s-1); font-size: 13px; color: var(--ink-muted); border: 0; padding: 0; margin: 0; }
 .field legend { padding: 0; margin-bottom: var(--s-1); }
 .field select, .field input {
-  min-height: 40px; padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-md);
+  min-height: 40px; padding: 0 var(--s-2); border: 1px solid var(--ink-muted); border-radius: var(--r-md);
   background: var(--panel-raised); color: var(--ink); font: 14px var(--font);
 }
 .checks { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; margin-bottom: var(--s-2); }
 .check { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; color: var(--ink); font-size: 13px; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .form-actions { display: flex; align-items: center; gap: var(--s-2); }
+.field-error { color: var(--warn); font-weight: 600; font-size: 12px; }
+.add-row { display: flex; gap: var(--s-2); }
+.add-row input { flex: 1; min-width: 0; }

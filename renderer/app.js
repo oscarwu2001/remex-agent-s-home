@@ -137,7 +137,8 @@ function drawLabels() {
       const [cx, cy] = pts.reduce(([a, b], [x, y]) => [a + x / 4, b + y / 4], [0, 0]);
       const chosen = draft && draft.cell[0] === cell[0] && draft.cell[1] === cell[1];
       return `<g class="build-cell${chosen ? ' chosen' : ''}" data-cell="${cell.join(',')}" role="button" tabindex="0"
-          aria-label="Build a department here">
+          aria-label="Build a department ${escapeXml(spotName(cell))}">
+        <title>${escapeXml(spotName(cell))}</title>
         <polygon points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>
         <path d="M${cx - 12},${cy} H${cx + 12} M${cx},${cy - 12} V${cy + 12}"/></g>`;
     }).join('')
@@ -152,12 +153,12 @@ function drawLabels() {
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const [x, y] = labelPoint(r.id);
-      const w = Math.max(r.name.length * 12.5, r.purpose.length * 8) + 28;
+      const w = Math.max(r.name.length * 16, r.purpose.length * 9.8) + 32;
       return `<g class="room-label" data-room="${r.id}" role="button" tabindex="0"
           aria-label="Visit the ${escapeXml(r.name)}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
-        <rect x="${-w / 2}" y="-20" width="${w}" height="46" rx="12"/>
+        <rect x="${-w / 2}" y="-24" width="${w}" height="56" rx="14"/>
         <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
-        <text class="purpose" text-anchor="middle" y="19">${escapeXml(r.purpose)}</text></g>`;
+        <text class="purpose" text-anchor="middle" y="22">${escapeXml(r.purpose)}</text></g>`;
     })
     .join('');
 }
@@ -300,7 +301,9 @@ $('labels').addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, button, .row, .person, .room-label')) return;
+  // Shortcuts only when nothing that takes typing or keys has focus.
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest('input, select, textarea, button, summary, [contenteditable], .row, .person, .room-label, .build-cell')) return;
   if (e.key === 'q' || e.key === 'Q') turnView(-1);
   else if (e.key === 'e' || e.key === 'E') turnView(1);
   else if (e.key === 'Escape') showOverview();
@@ -323,6 +326,7 @@ for (const radio of document.querySelectorAll('input[name="theme"]')) {
 // ---- people ----------------------------------------------------------------
 
 const people = new Map(); // key -> Person
+let homeless = 0;
 const seats = new Map(); // roomId -> [key | undefined]
 let selected;
 
@@ -369,6 +373,15 @@ function syncPeople(snapshot) {
     for (const a of s.agents) wanted.set(`a:${a.id}`, { kind: 'agent', room: a.room, data: a, name: a.type });
   }
 
+  // A helper whose room is gone (a department removed while it was on
+  // shift) is shown in the General Ward, and counted.
+  homeless = 0;
+  for (const w of wanted.values()) {
+    if (!LAYOUT[w.room]) {
+      w.room = 'general-ward';
+      homeless += 1;
+    }
+  }
   for (const [key, w] of wanted) {
     let p = people.get(key);
     if (!p) {
@@ -384,6 +397,12 @@ function syncPeople(snapshot) {
       p.seat = home;
       if (w.kind === 'agent') p.walk([...routeTo(w.room), home]);
       people.set(key, p);
+    }
+    if (p.roomId !== w.room && !p.leaving) {
+      freeSeat(p.roomId, key);
+      p.roomId = w.room;
+      p.seat = slotPoint(w.room, takeSeat(w.room, key));
+      p.walk([p.seat]);
     }
     p.setStatus(glyphKey(w.data));
     p.setActivity(w.data.activity?.kind);
@@ -605,6 +624,9 @@ function renderProblems(s) {
     const n = st.unmatchedRelays;
     list.push({ label: `${n} relayed helper ${plural(n, 'update', 'updates')} named a call that is not in view, so ${plural(n, 'it is', 'they are')} not shown` });
   }
+  if (homeless) {
+    list.push({ label: `${homeless} helper${homeless === 1 ? ' is' : 's are'} working in a department that has been removed, so ${homeless === 1 ? 'it is' : 'they are'} shown in the General Ward` });
+  }
   if (st.untimedEntries) {
     list.push({ label: `${st.untimedEntries} transcript ${plural(st.untimedEntries, 'entry has', 'entries have')} no timestamp and did not count as activity` });
   }
@@ -669,6 +691,19 @@ setInterval(() => {
 
 // ---- hospital layout: add and remove departments ----------------------------
 
+// "east of the Operating Room": which room a free spot joins, in words.
+function spotName([c, r]) {
+  const sides = [[-1, 0, 'east'], [1, 0, 'west'], [0, -1, 'south'], [0, 1, 'north']];
+  for (const [dc, dr, dir] of sides) {
+    const room = config.rooms.find((x) => x.cell[0] === c + dc && x.cell[1] === r + dr);
+    if (room) return `${dir} of the ${room.name}`;
+  }
+  return 'here';
+}
+
+let confirmRemove; // department id awaiting a yes
+let nameError = '';
+
 function knownAgentNames() {
   const names = new Set((snapshot.roster || []).map((a) => a.name));
   for (const sess of snapshot.sessions) for (const a of sess.agents) names.add(a.type);
@@ -680,6 +715,7 @@ function knownAgentNames() {
 function chooseCell(cell) {
   draft = { cell, kind: config.departmentKinds[0].kind, name: '', agents: new Set() };
   layoutError = '';
+  nameError = '';
   drawLabels();
   placeLabels();
   renderLayoutEditor();
@@ -697,7 +733,7 @@ function setBuildMode(on) {
 }
 
 async function saveLayout(departments) {
-  const plain = departments.map(({ kind, name, purpose, cell, agents }) => ({ kind, name, purpose, cell, agents: [...agents] }));
+  const plain = departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents: [...agents] }));
   const result = await bridge.saveLayout({ departments: plain });
   if (!result.ok) {
     layoutError = result.error;
@@ -706,20 +742,32 @@ async function saveLayout(departments) {
   }
   useConfig(result.config);
   drawScene();
+  focusedRoom = undefined;
   setViewBox(overview);
+  updateCameraUi();
   return true;
 }
 
 function renderLayoutEditor() {
   const depts = config.layout.departments;
   $('layout-count').textContent = depts.length ? `(${depts.length})` : '';
-  const needed = new Set(depts.map((d) => d.via));
+  const reachedThrough = (id) => depts.find((x) => x.via === id);
   const list = depts.length
-    ? `<ul class="dept-list">${depts.map((d) => `<li>
+    ? `<ul class="dept-list">${depts.map((d) => {
+      const child = reachedThrough(d.id);
+      const action = child
+        ? `<span class="blocked">Remove ${escapeXml(child.name)} first: it is reached through here.</span>`
+        : confirmRemove === d.id
+          ? `<span class="confirm">Remove ${escapeXml(d.name)}?
+              <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(d.id)}">Remove</button>
+              <button type="button" class="link-btn" data-remove-no>Keep</button></span>`
+          : `<button type="button" class="link-btn" data-remove="${escapeXml(d.id)}">Remove</button>`;
+      return `<li>
         <span class="agent">${escapeXml(d.name)}</span>
         <span class="summary">${escapeXml(d.purpose)}${d.agents.length ? ` · ${escapeXml(d.agents.join(', '))}` : ' · no agents yet'}</span>
-        <button type="button" class="link-btn" data-remove="${escapeXml(d.id)}" ${needed.has(d.id) ? 'disabled title="Another department is reached through this one"' : ''}>Remove</button>
-      </li>`).join('')}</ul>`
+        <span class="actions">${action}</span>
+      </li>`;
+    }).join('')}</ul>`
     : '<p class="empty">Only the core hospital so far. Add a department for each specialty your agents serve.</p>';
 
   let form = '';
@@ -732,10 +780,16 @@ function renderLayoutEditor() {
       <label class="field">Department
         <select id="dept-kind">${kinds}</select></label>
       <label class="field" ${draft.kind === 'custom' ? '' : 'hidden'}>Name
-        <input id="dept-name" maxlength="40" placeholder="e.g. Hand Surgery" value="${escapeXml(draft.name)}"></label>
+        <input id="dept-name" maxlength="40" placeholder="e.g. Hand Surgery" value="${escapeXml(draft.name)}"
+          ${nameError ? 'aria-invalid="true" aria-describedby="dept-name-error"' : ''}>
+        ${nameError ? `<span class="field-error" id="dept-name-error">${escapeXml(nameError)}</span>` : ''}</label>
       <fieldset class="field"><legend>Agents who work here</legend>
         <div class="checks">${agents || '<span class="muted">No agents seen yet.</span>'}</div>
-        <input id="dept-agent-new" placeholder="Add an agent by name, e.g. spine-planner">
+        <label class="field" for="dept-agent-new">Another agent, by its name in .claude/agents</label>
+        <div class="add-row">
+          <input id="dept-agent-new" placeholder="e.g. spine-planner">
+          <button type="button" class="link-btn" id="dept-agent-add">Add</button>
+        </div>
       </fieldset>
       <div class="form-actions">
         <button type="submit" class="button">Build department</button>
@@ -750,11 +804,30 @@ function renderLayoutEditor() {
     ${buildMode && !draft ? '<button type="button" class="link-btn" id="build-stop">Done</button>' : ''}`;
 }
 
+function addTypedAgent() {
+  const input = $('dept-agent-new');
+  const name = input?.value.trim();
+  if (!draft || !name) return;
+  draft.agents.add(name);
+  renderLayoutEditor();
+  $('dept-agent-new')?.focus();
+}
+
 $('layout-body').addEventListener('click', async (e) => {
-  if (e.target.id === 'build-start') setBuildMode(true);
-  else if (e.target.id === 'build-stop' || e.target.id === 'dept-cancel') setBuildMode(false);
-  else if (e.target.dataset.remove) {
-    const keep = config.layout.departments.filter((d) => d.id !== e.target.dataset.remove);
+  const t = e.target;
+  if (t.id === 'build-start') setBuildMode(true);
+  else if (t.id === 'build-stop' || t.id === 'dept-cancel') setBuildMode(false);
+  else if (t.id === 'dept-agent-add') addTypedAgent();
+  else if (t.dataset.remove) {
+    confirmRemove = t.dataset.remove;
+    renderLayoutEditor();
+    document.querySelector('[data-remove-no]')?.focus();
+  } else if (t.hasAttribute('data-remove-no')) {
+    confirmRemove = undefined;
+    renderLayoutEditor();
+  } else if (t.dataset.removeYes) {
+    confirmRemove = undefined;
+    const keep = config.layout.departments.filter((d) => d.id !== t.dataset.removeYes);
     if (await saveLayout(keep.map((d) => ({ ...d, agents: new Set(d.agents) })))) renderLayoutEditor();
   }
 });
@@ -776,12 +849,7 @@ $('layout-body').addEventListener('change', (e) => {
 $('layout-body').addEventListener('keydown', (e) => {
   if (e.target.id === 'dept-agent-new' && e.key === 'Enter') {
     e.preventDefault();
-    const name = e.target.value.trim();
-    if (name) {
-      draft.agents.add(name);
-      renderLayoutEditor();
-      $('dept-agent-new')?.focus();
-    }
+    addTypedAgent();
   }
 });
 
@@ -792,11 +860,12 @@ $('layout-body').addEventListener('submit', async (e) => {
   const extra = $('dept-agent-new')?.value.trim();
   if (extra) draft.agents.add(extra);
   if (draft.kind === 'custom' && !draft.name.trim()) {
-    layoutError = 'Give your department a name.';
+    nameError = 'Give your department a name.';
     renderLayoutEditor();
     $('dept-name')?.focus();
     return;
   }
+  nameError = '';
   const existing = config.layout.departments.map((d) => ({ ...d, agents: new Set(d.agents) }));
   const added = { kind: draft.kind, name: draft.kind === 'custom' ? draft.name.trim() : undefined, cell: draft.cell, agents: draft.agents };
   if (await saveLayout([...existing, added])) setBuildMode(false);

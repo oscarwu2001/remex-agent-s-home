@@ -95,7 +95,7 @@ function bodyOf(id) {
 
 
 export function slotPoint(roomId, index) {
-  const r = LAYOUT[roomId];
+  const r = LAYOUT[roomId] ?? LAYOUT['general-ward'];
   const slots = SLOTS[roomId] ?? SLOTS.department;
   const [u, v] = slots[index % slots.length];
   // Past the named slots, spread extra people out a little.
@@ -135,7 +135,7 @@ export function routeTo(roomId) {
 
 // A point one step inside the room from a doorway, so people do not clip walls.
 function inset(p, roomId) {
-  const r = LAYOUT[roomId];
+  const r = LAYOUT[roomId] ?? LAYOUT['general-ward'];
   const cx = r.x + SIZE / 2;
   const cy = r.y + SIZE / 2;
   const dx = Math.sign(cx - p[0]) * 0.8;

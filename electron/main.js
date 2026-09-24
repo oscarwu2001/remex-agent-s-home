@@ -169,9 +169,16 @@ app.whenReady().then(() => {
     } catch (err) {
       return { ok: false, error: err.message };
     }
+    // rooms.json may name a department this change removes. Refuse rather
+    // than send helpers to a room that no longer exists.
+    try {
+      validateOverrides(fileOverrides, new Set(roomsWith(next).map((r) => r.id)));
+    } catch (err) {
+      return { ok: false, error: `rooms.json still uses a room this change removes: ${err.message}. Edit rooms.json first.` };
+    }
     try {
       fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
-      fs.writeFileSync(layoutFile, `${JSON.stringify({ departments: next.departments.map(({ kind, name, purpose, cell, agents }) => ({ kind, name, purpose, cell, agents })) }, null, 2)}\n`);
+      fs.writeFileSync(layoutFile, `${JSON.stringify({ departments: next.departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents })) }, null, 2)}\n`);
     } catch (err) {
       return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
     }

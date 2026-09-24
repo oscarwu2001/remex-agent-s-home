@@ -104,6 +104,8 @@ function validateLayout(layout) {
   const taken = new Map(ROOMS.map((r) => [key(r.cell), r.id]));
   for (const c of SCENERY_CELLS) taken.set(key(c), 'scenery');
   const ids = new Set(ROOM_IDS);
+  // Ids already written in the file, so a new department never takes one.
+  const reserved = new Set(layout.departments.map((d) => d && d.id).filter((x) => typeof x === 'string'));
   const departments = layout.departments.map((d, i) => {
     const where = `department ${i + 1}`;
     if (!d || typeof d !== 'object') throw new TypeError(`${where} is not an object`);
@@ -125,8 +127,13 @@ function validateLayout(layout) {
     const via = NEIGHBOURS.map(([dc, dr]) => taken.get(key([c + dc, r + dr])))
       .find((id) => id && id !== 'scenery');
     if (!via) throw new RangeError(`${where} is not next to any room, so nothing can reach it`);
-    let id = `dept-${slug(name)}`;
-    for (let n = 2; ids.has(id); n++) id = `dept-${slug(name)}-${n}`;
+    // Ids are kept once given, so removing one department never renames
+    // another (helpers on shift and rooms.json refer to rooms by id).
+    let id = typeof d.id === 'string' && /^dept-[a-z0-9-]{1,60}$/.test(d.id) && !ids.has(d.id) ? d.id : undefined;
+    if (!id) {
+      id = `dept-${slug(name)}`;
+      for (let n = 2; ids.has(id) || reserved.has(id); n++) id = `dept-${slug(name)}-${n}`;
+    }
     ids.add(id);
     taken.set(key(cell), id);
     const agents = Array.isArray(d.agents)

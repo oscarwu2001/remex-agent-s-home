@@ -159,3 +159,69 @@ test('rollUp gives daily and weekly rows per agent', () => {
   assert.equal(roll.weekly[0].score.value, 100);
   assert.equal(roll.sessionDays[0].helperRuns, 3);
 });
+
+test('a part that could not be measured is left out, not given full marks', () => {
+  const sc = score({ runs: 5, successRate: 0.5, rerunRate: 0, medianMs: 60_000, medianTokens: undefined }, { medianMs: 60_000, medianTokens: 1000 });
+  assert.deepEqual(sc.missing, ['efficiency']);
+  // reliability 20/40 + right first 20/20 + speed 20/20 = 60 of 80 possible
+  assert.equal(sc.value, 75);
+  assert.equal(score({ runs: 5, successRate: undefined }, null).reason, 'no run has ended yet');
+});
+
+test('a notification with an unreadable status leaves the run unknown and is counted', () => {
+  const root = world({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'b', 'Agent', { subagent_type: 'runner', prompt: 'x', run_in_background: true }),
+      { ...prompt(9, '<task-notification>\n<tool-use-id>b</tool-use-id>\n<status>paused</status>'), origin: { kind: 'task-notification' } },
+    ],
+  });
+  const { runs, stats } = collect([root], RANGE);
+  assert.equal(runs[0].outcome, 'unknown');
+  assert.equal(stats.unknownNotifications, 1);
+});
+
+test('two runs with the same prompt are not guessed between', () => {
+  const p = 'Review the change please, carefully and completely';
+  const root = world({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'a', 'Task', { subagent_type: 'reviewer', prompt: p }),
+      toolUse(1, 'b', 'Task', { subagent_type: 'reviewer', prompt: p }),
+    ],
+    'p/sess-1/subagents/agent-z.jsonl': [prompt(2, p, sidechain('z')), toolUse(3, 'r', 'Read', {}, sidechain('z'))],
+    'p/sess-1/subagents/agent-q.jsonl': [prompt(2, `${p} (and more)`, sidechain('q'))],
+  });
+  const { runs, stats } = collect([root], RANGE);
+  assert.ok(runs.every((r) => !r.linked));
+  assert.equal(stats.ambiguousHelpers, 1); // z matches both
+  assert.equal(stats.unlinkedHelpers, 1); // q matches neither: prefixes do not count
+});
+
+test('tool calls come from one source: the helper transcript, else the relays', () => {
+  const p = 'Explore the code base and summarise the loaders';
+  const relay = (sec, parent, inner) => ({
+    type: 'progress', sessionId: 'sess-1', timestamp: new Date(s(sec)).toISOString(), parentToolUseID: parent, data: { message: inner },
+  });
+  const root = world({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'e', 'Task', { subagent_type: 'Explore', prompt: p }),
+      relay(2, 'e', toolUse(2, 'r1', 'Read', {})),
+      toolUse(5, 'f', 'Task', { subagent_type: 'Plan', prompt: 'plan it' }),
+      relay(6, 'f', toolUse(6, 'r2', 'Read', {})),
+      relay(7, 'f', toolUse(7, 'r3', 'Grep', {})),
+    ],
+    'p/sess-1/subagents/agent-e.jsonl': [prompt(2, p, sidechain('e')), toolUse(2, 'r1', 'Read', {}, sidechain('e'))],
+  });
+  const byType = Object.fromEntries(collect([root], RANGE).runs.map((r) => [r.type, r.toolCalls]));
+  assert.deepEqual(byType, { Explore: 1, Plan: 2 });
+});
+
+test('a resumed transcript repeating a Task call counts it once', () => {
+  const call = toolUse(1, 'dup', 'Task', { subagent_type: 'runner', prompt: 'p' });
+  const root = world({ 'p/sess-1.jsonl': [prompt(0, 'go'), call, call, toolResult(9, 'dup', 'ok')] });
+  const { runs, sessions } = collect([root], RANGE);
+  assert.equal(runs.length, 1);
+  assert.equal(sessions[0].runs.length, 1);
+});

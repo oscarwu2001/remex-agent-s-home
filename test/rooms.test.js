@@ -98,3 +98,16 @@ test('overrides may name a department room once it exists', () => {
   assert.deepEqual(validateOverrides({ 'implant-planner': 'dept-dental-implantology' }, ids), { 'implant-planner': 'dept-dental-implantology' });
   assert.throws(() => validateOverrides({ 'implant-planner': 'dept-dental-implantology' }), /unknown room/);
 });
+
+test('removing one of two same-name departments keeps the id of the other', () => {
+  const first = validateLayout({ departments: [
+    { kind: 'custom', name: 'Hand Surgery', cell: [3, 1] },
+    { kind: 'custom', name: 'Hand Surgery', cell: [1, -1] },
+  ] });
+  const saved = first.departments.map(({ id, kind, name, cell }) => ({ id, kind, name, cell }));
+  const after = validateLayout({ departments: [saved[1]] });
+  assert.equal(after.departments[0].id, 'dept-hand-surgery-2');
+  // and a new department never takes an id that is still in the file
+  const added = validateLayout({ departments: [saved[1], { kind: 'custom', name: 'Hand Surgery', cell: [3, 1] }] });
+  assert.deepEqual(added.departments.map((d) => d.id), ['dept-hand-surgery-2', 'dept-hand-surgery']);
+});

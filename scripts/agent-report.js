@@ -16,7 +16,8 @@ const fs = require('fs');
 const path = require('path');
 const { collect, rollUp, summarise, dayKey, totalTokens } = require('../src/core/metrics');
 const { defaultRoots } = require('../src/core/watcher');
-const { ROOMS, roomFor } = require('../src/core/rooms');
+const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../src/core/rooms');
+const os = require('os');
 
 // ---- arguments ---------------------------------------------------------------
 
@@ -58,7 +59,43 @@ function compact(n) {
   return String(Math.round(n));
 }
 
-const roomName = Object.fromEntries(ROOMS.map((r) => [r.id, r.name]));
+// The app's own settings folder (Electron's userData for "Agents Home"), so
+// the report puts agents in the same rooms the app does.
+function appDataDir() {
+  const name = 'Agents Home';
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), name);
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', name);
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), name);
+}
+
+function readJson(file, problems) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if (err.code !== 'ENOENT') problems.push(`${path.basename(file)} could not be read, so the default rooms are used`);
+    return undefined;
+  }
+}
+
+function roomSetup(problems) {
+  const dir = appDataDir();
+  let layout = { departments: [] };
+  try {
+    layout = validateLayout(readJson(path.join(dir, 'layout.json'), problems));
+  } catch (err) {
+    problems.push(`layout.json ignored: ${err.message}`);
+  }
+  const rooms = roomsWith(layout);
+  let fromFile = {};
+  try {
+    fromFile = validateOverrides(readJson(path.join(dir, 'rooms.json'), problems), new Set(rooms.map((r) => r.id)));
+  } catch (err) {
+    problems.push(`rooms.json ignored: ${err.message}`);
+  }
+  return { names: Object.fromEntries(rooms.map((r) => [r.id, r.name])), overrides: { ...overridesFrom(layout), ...fromFile } };
+}
+let roomName = {};
+let roomOverrides = {};
 
 // Categorical slots, in fixed order, light and dark steps (validated set).
 const SERIES = [
@@ -126,7 +163,7 @@ function durationRanges(types, overall) {
   if (!rows.length) return '<p class="muted">No finished runs yet.</p>';
   const W = 760;
   const rowH = 30;
-  const pad = { l: 170, r: 70, t: 8, b: 26 };
+  const pad = { l: 170, r: 170, t: 8, b: 26 };
   const H = pad.t + pad.b + rows.length * rowH;
   const longest = Math.max(...rows.map((t) => overall[t].p90Ms ?? overall[t].medianMs));
   // Ticks on round durations: 10s, 30s, 1m, 2m, 5m, 10m, 30m, 1h…
@@ -145,7 +182,7 @@ function durationRanges(types, overall) {
     s += `<text class="label" x="${pad.l - 10}" y="${cy + 4}" text-anchor="end">${esc(t)}</text>`;
     if (o.p90Ms !== undefined) s += `<line class="range" x1="${x(o.medianMs)}" x2="${x(o.p90Ms)}" y1="${cy}" y2="${cy}"/>`;
     s += `<circle class="dot" cx="${x(o.medianMs)}" cy="${cy}" r="5"><title>${esc(t)}: median ${dur(o.medianMs)}, p90 ${dur(o.p90Ms)}</title></circle>`;
-    s += `<text class="value" x="${x(o.p90Ms ?? o.medianMs) + 10}" y="${cy + 4}">${dur(o.medianMs)}</text>`;
+    s += `<text class="value" x="${x(o.p90Ms ?? o.medianMs) + 10}" y="${cy + 4}">${dur(o.medianMs)} median · ${dur(o.p90Ms)} p90</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Median and 90th percentile run time per agent">${s}</svg>`;
 }
@@ -161,12 +198,16 @@ function weeklyScores(weekly, typeSlot) {
   }
   if (!series.size) return `<p class="muted">Scores appear once an agent has ${3} runs in a week.</p>`;
   const W = 760;
-  const H = 220;
-  const pad = { l: 36, r: 150, t: 12, b: 28 };
+  const H = 260;
+  const pad = { l: 36, r: 190, t: 12, b: 28 };
+  // The axis spans the scores actually seen (in steps of 10), so close lines
+  // separate; the ticks say where it starts.
+  const values = [...series.values()].flat().map((r) => r.score.value);
+  const lo = Math.max(0, Math.floor((Math.min(...values) - 5) / 10) * 10);
   const x = (w) => pad.l + (weeks.length === 1 ? (W - pad.l - pad.r) / 2 : ((W - pad.l - pad.r) * weeks.indexOf(w)) / (weeks.length - 1));
-  const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / 100);
+  const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - (v - lo) / (100 - lo));
   let s = '';
-  for (const v of [0, 25, 50, 75, 100]) {
+  for (let v = lo; v <= 100; v += lo >= 60 ? 10 : 20) {
     s += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/>`;
     s += `<text class="tick" x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
   }
@@ -180,7 +221,7 @@ function weeklyScores(weekly, typeSlot) {
       s += `<circle class="pt s${slot}" cx="${px}" cy="${py}" r="4"><title>${esc(type)} · ${r.period}: ${r.score.value} (${r.runs} runs)</title></circle>`;
     }
     const last = pts[pts.length - 1];
-    ends.push({ type, y: last[1], x: last[0], slot });
+    ends.push({ type, y: last[1], x: last[0], slot, value: last[2].score.value });
   }
   // End labels in text ink, spread so they never overlap.
   ends.sort((a, b) => a.y - b.y);
@@ -189,7 +230,8 @@ function weeklyScores(weekly, typeSlot) {
     const ly = Math.max(e.y, prev + 14);
     prev = ly;
     s += `<line class="leader" x1="${e.x + 6}" y1="${e.y}" x2="${W - pad.r + 8}" y2="${ly}"/>`;
-    s += `<text class="label" x="${W - pad.r + 12}" y="${ly + 4}">${esc(e.type)}</text>`;
+    s += `<rect class="mark s${e.slot}" x="${W - pad.r + 12}" y="${ly - 5}" width="10" height="10" rx="3"/>`;
+    s += `<text class="label" x="${W - pad.r + 28}" y="${ly + 4}">${esc(e.type)} ${e.value}</text>`;
   }
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly score per agent">${s}</svg>`;
 }
@@ -213,7 +255,7 @@ function deltaText(now, before, fmt, upIsGood = true) {
   const diff = now - before;
   if (Math.abs(diff) < 1e-9) return 'same as the period before';
   const good = diff > 0 === upIsGood;
-  return `<span class="${good ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${fmt(Math.abs(diff))}</span> vs the period before`;
+  return `<span class="${good ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${fmt(Math.abs(diff))}, ${good ? 'better' : 'worse'}</span> than the period before`;
 }
 
 function page({ opt, roll, runs, prevRuns, days, stats, problems }) {
@@ -238,7 +280,11 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems }) {
   const scoreCell = (sc) => {
     if (sc.value === undefined) return `<td class="num muted" title="Not scored: ${esc(sc.reason)}">—</td>`;
     const p = sc.parts;
-    const title = `Reliability ${p.reliability.toFixed(0)}/40 · Right first time ${p.rightFirst.toFixed(0)}/20 · Speed ${p.speed.toFixed(0)}/20 · Efficiency ${p.efficiency.toFixed(0)}/20`;
+    const label = { reliability: 'Reliability', rightFirst: 'Right first time', speed: 'Speed', efficiency: 'Efficiency' };
+    const max = { reliability: 40, rightFirst: 20, speed: 20, efficiency: 20 };
+    const title = Object.keys(label)
+      .map((k) => (k in p ? `${label[k]} ${p[k].toFixed(0)}/${max[k]}` : `${label[k]} not measured`))
+      .join(' · ');
     return `<td class="num" title="${title}"><strong>${sc.value}</strong></td>`;
   };
 
@@ -249,7 +295,7 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems }) {
     const spark = days.slice(-14).map((d) => dailyByType.get(t)?.get(d) ?? 0);
     return `<tr>
       <th scope="row"><span class="swatch s${typeSlot(t)}"></span>${esc(t)}</th>
-      <td>${esc(roomName[roomFor(t)] ?? '')}</td>
+      <td>${esc(roomName[roomFor(t, roomOverrides)] ?? '')}</td>
       <td class="num">${o.runs}</td>
       ${scoreCell(lastWeek ? lastWeek.score : o.score)}
       <td class="num">${pct(o.successRate)}</td>
@@ -270,11 +316,15 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems }) {
       <td class="num">${dur(w.medianMs)}</td><td class="num">${compact(w.medianTokens)}</td></tr>`).join('');
 
   const notes = [
+    'Counts below cover every file read, which includes the period before this one (used for the comparisons).',
+    stats.ambiguousHelpers ? `${stats.ambiguousHelpers} helper transcript${stats.ambiguousHelpers === 1 ? '' : 's'} matched more than one run with the same prompt and ${stats.ambiguousHelpers === 1 ? 'was' : 'were'} not counted, rather than guessed.` : '',
+    stats.unknownNotifications ? `${stats.unknownNotifications} background run${stats.unknownNotifications === 1 ? '' : 's'} ended with a status the report does not recognise and ${stats.unknownNotifications === 1 ? 'is' : 'are'} treated as unknown.` : '',
     stats.malformedLines ? `${stats.malformedLines} transcript line${stats.malformedLines === 1 ? '' : 's'} could not be read and were skipped.` : '',
     stats.unlinkedHelpers ? `${stats.unlinkedHelpers} helper transcript${stats.unlinkedHelpers === 1 ? '' : 's'} could not be matched to the call that started ${stats.unlinkedHelpers === 1 ? 'it' : 'them'}; their tokens and tool calls are not counted.` : '',
     all.unknown ? `${all.unknown} run${all.unknown === 1 ? ' has' : 's have'} no recorded end (still running, or the transcript stops) and ${all.unknown === 1 ? 'is' : 'are'} left out of success rates and times.` : '',
     ...problems,
   ].filter(Boolean);
+  if (notes.length === 1) notes.length = 0; // only the preamble: nothing to note
 
   const generated = new Date();
   return `<!doctype html>
@@ -312,14 +362,15 @@ svg { width: 100%; height: auto; display: block; }
 .mark { fill: var(--c); }
 .line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .pt { fill: var(--c); stroke: var(--surface); stroke-width: 2; }
-.leader { stroke: var(--axis); stroke-width: 1; }
+.leader { stroke: var(--muted); stroke-width: 1; }
 .range { stroke: var(--s0); stroke-width: 2; stroke-linecap: round; opacity: 0.45; }
 .dot { fill: var(--s0); stroke: var(--surface); stroke-width: 2; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 12px; color: var(--ink-2); font-size: 13px; }
 .key { display: inline-flex; align-items: center; gap: 6px; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--c); margin-right: 6px; vertical-align: -1px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { padding: 8px 10px; border-bottom: 1px solid var(--grid); text-align: left; white-space: nowrap; }
+th, td { padding: 8px 8px; border-bottom: 1px solid var(--grid); text-align: left; }
+td.num, th.num, tbody th { white-space: nowrap; }
 thead th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody th { font-weight: 600; }
@@ -341,7 +392,8 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     ${kpi('Helper runs', num(all.runs), deltaText(all.runs, prevRuns.length ? before.runs : undefined, (d) => num(d)))}
     ${kpi('Finished successfully', pct(all.successRate), deltaText(all.successRate, before.successRate, (d) => `${Math.round(d * 100)} pts`))}
     ${kpi('Median helper time', dur(all.medianMs), deltaText(all.medianMs, before.medianMs, dur, false))}
-    ${kpi('Tokens used by helpers', compact(all.totalTokens), deltaText(all.totalTokens, prevRuns.length ? before.totalTokens : undefined, compact, false))}
+    ${kpi('Tokens used by helpers', compact(all.totalTokens), prevRuns.length && before.totalTokens !== undefined
+    ? `${all.totalTokens >= before.totalTokens ? '▲' : '▼'} ${compact(Math.abs(all.totalTokens - before.totalTokens))} vs the period before` : 'no earlier period to compare')}
   </section>
 
   <section class="card">
@@ -420,8 +472,11 @@ function main() {
   const since = start.getTime();
   const prevSince = since - opt.days * 86_400_000;
 
+  const setupProblems = [];
+  ({ names: roomName, overrides: roomOverrides } = roomSetup(setupProblems));
   const roots = defaultRoots();
   const data = collect(roots, { since: prevSince, until: now });
+  data.problems.push(...setupProblems);
   const runs = data.runs.filter((r) => r.start >= since);
   const prevRuns = data.runs.filter((r) => r.start < since);
   const sessions = data.sessions.filter((s) => (s.start ?? 0) >= since);
@@ -440,7 +495,7 @@ function main() {
     session: handle.get(r.sessionId),
     project: opt.byProject ? projectOf.get(r.sessionId) : undefined,
     agent: r.type,
-    room: roomFor(r.type),
+    room: roomFor(r.type, roomOverrides),
     started: new Date(r.start).toISOString(),
     seconds: r.durationMs === undefined ? undefined : Math.round(r.durationMs / 1000),
     outcome: r.outcome,
