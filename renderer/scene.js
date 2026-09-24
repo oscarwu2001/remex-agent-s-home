@@ -10,20 +10,23 @@ import { floorTones } from './themes.js';
 
 const BASE_Z = -3; // columns hang down to here and dissolve into mist
 
+// Rooms come from src/core/rooms.js (through the bridge's config): each has
+// a grid cell, and a cell is 8 tiles, a 6-tile room plus a 2-tile gap. This
+// module only decides heights, furniture and how rooms join.
 // Floor top height z; floor spans [x, x+6) x [y, y+6). Tower colours come
 // from the colourway (M[roomId]). Walls are not listed: a room gets a wall on
 // each side that is at the back in the current view and has no doorway.
-export const LAYOUT = {
-  radiology: { x: 0, y: 0, z: 6 },
-  'vision-clinic': { x: 8, y: 0, z: 4 },
-  laboratory: { x: 0, y: 8, z: 4 },
-  'nurses-station': { x: 8, y: 8, z: 2 },
-  'operating-room': { x: 16, y: 8, z: 2 },
-  'research-office': { x: 8, y: 16, z: 2 },
-  'general-ward': { x: 16, y: 16, z: 0 },
-};
+export const LAYOUT = {}; // roomId -> { x, y, z, kind? }
 
 const SIZE = 6;
+const CELL = 8;
+const CORE_Z = {
+  radiology: 6, 'vision-clinic': 4, laboratory: 4, 'nurses-station': 2,
+  'operating-room': 2, 'research-office': 2, 'general-ward': 0,
+};
+// Tower colours for departments, taken in turn from the colourway.
+const DEPT_MATERIALS = ['rose', 'sky', 'mint', 'lilac', 'sand', 'coral', 'teal'];
+const deptMaterial = new Map(); // dept id -> material key
 
 // Where people stand, in room-local tile coordinates.
 const SLOTS = {
@@ -34,13 +37,15 @@ const SLOTS = {
   radiology: [[1.2, 3.6], [4.8, 3.6], [1.5, 5.1], [4.5, 5.1], [3, 5.5], [1.2, 1.6]],
   'vision-clinic': [[1.8, 3], [4.1, 4.2], [2.2, 4.9], [3.6, 5.4], [5.1, 4.8], [1.4, 1.6]],
   'general-ward': [[3.2, 1.1], [3.2, 2.9], [3.2, 4.7], [4.8, 2], [4.8, 3.8], [4.8, 5.4]],
+  department: [[1.3, 3.2], [4.7, 3.2], [3, 5.2], [1.5, 5.1], [4.6, 5.2], [2.2, 1.4]],
 };
 
 // Where new helpers appear and finished ones leave: the middle of the station.
 export const SPAWN = [11, 12.4, 2];
 
-// Walkable joins between rooms. Points run from room a to room b.
-const CONNECTORS = [
+// Walkable joins between rooms. Points run from room a to room b. The core
+// joins are fixed; each department adds one to the room it was placed next to.
+const CORE_CONNECTORS = [
   { a: 'nurses-station', b: 'operating-room', kind: 'bridge', axis: 'x', from: [14, 11, 2], to: [16, 11, 2] },
   { a: 'nurses-station', b: 'research-office', kind: 'bridge', axis: 'y', from: [11, 14, 2], to: [11, 16, 2] },
   { a: 'nurses-station', b: 'vision-clinic', kind: 'stairs', axis: 'y', from: [11, 8, 2], to: [11, 6, 4] },
@@ -48,10 +53,50 @@ const CONNECTORS = [
   { a: 'laboratory', b: 'radiology', kind: 'stairs', axis: 'y', from: [3, 8, 4], to: [3, 6, 6] },
   { a: 'operating-room', b: 'general-ward', kind: 'stairs', axis: 'y', from: [19, 14, 2], to: [19, 16, 0] },
 ];
+let CONNECTORS = [...CORE_CONNECTORS];
+
+// Lays out the rooms the config lists: core rooms at their fixed heights,
+// departments one step up or down from the room they join, so each gets a
+// short flight of stairs.
+export function configureRooms(rooms) {
+  for (const k of Object.keys(LAYOUT)) delete LAYOUT[k];
+  CONNECTORS = [...CORE_CONNECTORS];
+  deptMaterial.clear();
+  let n = 0;
+  for (const room of rooms) {
+    const [c, r] = room.cell;
+    const x = c * CELL;
+    const y = r * CELL;
+    if (!room.custom) {
+      LAYOUT[room.id] = { x, y, z: CORE_Z[room.id] ?? 2 };
+      continue;
+    }
+    const via = LAYOUT[room.via];
+    if (!via) continue; // validated upstream; a missing link is skipped, not guessed
+    const z = via.z > 0 ? via.z - 1 : via.z + 1;
+    LAYOUT[room.id] = { x, y, z, kind: room.kind };
+    deptMaterial.set(room.id, DEPT_MATERIALS[n++ % DEPT_MATERIALS.length]);
+    const [vc, vr] = [via.x / CELL, via.y / CELL];
+    let from;
+    let to;
+    let axis;
+    if (c === vc + 1) { axis = 'x'; from = [via.x + SIZE, via.y + 3, via.z]; to = [x, y + 3, z]; }
+    else if (c === vc - 1) { axis = 'x'; from = [via.x, via.y + 3, via.z]; to = [x + SIZE, y + 3, z]; }
+    else if (r === vr + 1) { axis = 'y'; from = [via.x + 3, via.y + SIZE, via.z]; to = [x + 3, y, z]; }
+    else { axis = 'y'; from = [via.x + 3, via.y, via.z]; to = [x + 3, y + SIZE, z]; }
+    CONNECTORS.push({ a: room.via, b: room.id, kind: from[2] === to[2] ? 'bridge' : 'stairs', axis, from, to });
+  }
+}
+
+// The tower material of a room: its own colour, or a department's turn.
+function bodyOf(id) {
+  return M[id] ?? M[deptMaterial.get(id)] ?? M.stone;
+}
+
 
 export function slotPoint(roomId, index) {
   const r = LAYOUT[roomId];
-  const slots = SLOTS[roomId];
+  const slots = SLOTS[roomId] ?? SLOTS.department;
   const [u, v] = slots[index % slots.length];
   // Past the named slots, spread extra people out a little.
   const lap = Math.floor(index / slots.length);
@@ -60,7 +105,7 @@ export function slotPoint(roomId, index) {
 }
 
 export function slotCount(roomId) {
-  return SLOTS[roomId].length;
+  return (SLOTS[roomId] ?? SLOTS.department).length;
 }
 
 // Waypoints from the station spawn point to a room (or back, reversed).
@@ -103,7 +148,7 @@ function inset(p, roomId) {
 
 function column(id, r) {
   const { x, y, z } = r;
-  const body = M[id];
+  const body = bodyOf(id);
   return (
     box(x + 0.25, y + 0.25, BASE_Z, SIZE - 0.5, SIZE - 0.5, z - 0.5 - BASE_Z, body) +
     // a thin band where MV towers change material
@@ -135,7 +180,8 @@ function rivets(x, y, z) {
 let activeTheme;
 
 function floor(id, r) {
-  const [a, b] = floorTones(M[id].base, activeTheme);
+  const body = bodyOf(id);
+  const [a, b] = floorTones(body.base ?? body.left, activeTheme);
   return tiledTop(r.x, r.y, r.z + 0.001, SIZE, SIZE, a, b);
 }
 
@@ -302,8 +348,63 @@ function furniture(id, r) {
       return s;
     }
     default:
-      return '';
+      return r.kind ? navSuite(r) : '';
   }
+}
+
+// Every navigated department shares the kit of surgical navigation: a table,
+// an optical tracking camera on its stand, and a planning monitor. One piece
+// on top says which specialty it is.
+function navSuite(r) {
+  const { x, y, z } = r;
+  let s =
+    box(x + 2.55, y + 2.2, z, 0.9, 1.6, 0.65, M.steel) +
+    box(x + 2.1, y + 1.7, z + 0.65, 1.8, 2.6, 0.2, M.white) +
+    // tracking camera: a pole and a bar with two lenses, looking at the table
+    box(x + 5.05, y + 0.85, z, 0.16, 0.16, 2.3, M.steel) +
+    box(x + 4.5, y + 0.8, z + 2.3, 1.2, 0.26, 0.3, M.ink) +
+    cylinder(x + 4.65, y + 1.07, z + 2.37, 0.08, 0.02, M.sky) +
+    cylinder(x + 5.55, y + 1.07, z + 2.37, 0.08, 0.02, M.sky) +
+    // planning monitor on a cart
+    box(x + 0.6, y + 0.8, z, 0.7, 0.5, 0.8, M.white) +
+    box(x + 0.55, y + 0.95, z + 0.8, 0.8, 0.12, 0.6, M.ink);
+  const top = z + 0.85;
+  switch (r.kind) {
+    case 'spine': // a column of vertebrae on a stand
+      for (let i = 0; i < 5; i++) s += box(x + 2.8, y + 2.1 + i * 0.4, top, 0.4, 0.3, 0.18, M.cream);
+      break;
+    case 'neuro': // a head clamp ring at the head of the table
+    case 'ent':
+      s += uprightRing(x + 3, y + 1.9, top + 0.45, 0.45, 0.3, 0.2, M.steel);
+      break;
+    case 'dental': // a reclining dental chair and its lamp
+      s += box(x + 2.3, y + 3.2, top, 1.4, 0.7, 0.25, M.mint) + box(x + 2.3, y + 1.9, top, 1.4, 0.35, 0.8, M.mint) +
+        box(x + 1.4, y + 2.4, z + 1.9, 0.5, 0.5, 0.12, M.sand);
+      break;
+    case 'cmf': // a skull model
+      s += ball(x + 3, y + 2.5, top + 0.4, 0.4, M.cream) + box(x + 2.75, y + 2.6, top, 0.5, 0.35, 0.2, M.cream);
+      break;
+    case 'ortho':
+    case 'sports':
+    case 'trauma':
+    case 'ir': // a C-arm over the table
+      s += uprightRing(x + 3, y + 3, top + 0.6, 1.2, 0.95, 0.35, M.lilac);
+      break;
+    case 'pulmonology': // a bronchoscope tower
+      s += box(x + 4.6, y + 4.4, z, 0.7, 0.7, 1.6, M.white) + box(x + 4.62, y + 5.05, z + 1.1, 0.6, 0.06, 0.4, M.ink);
+      break;
+    case 'cardio': // an ECG monitor
+      s += box(x + 4.5, y + 4.3, z, 0.9, 0.5, 1.3, M.ink) +
+        (faceVisible(0, 1) ? `<polyline class="ecg" points="${ecg(x + 4.55, y + 4.81, z + 0.8)}" fill="none" stroke="#8ef0c8" stroke-width="1.6"/>` : '');
+      break;
+    case 'oncology': // a tray of instruments
+      s += box(x + 4.3, y + 4.4, z, 1, 0.6, 0.9, M.steel) + box(x + 4.35, y + 4.45, z + 0.9, 0.9, 0.5, 0.05, M.white);
+      break;
+    default: // your own department: a plant to make it homely
+      s += plant(x + 5.2, y + 5.2, z);
+      break;
+  }
+  return s;
 }
 
 function desk(x, y, z) {
@@ -372,12 +473,22 @@ function grove() {
   return s;
 }
 
+// Floating cubes in empty ring cells; a department built there moves them on.
 function floaters() {
-  return (
-    `<g class="float f1">${box(-4, 4, 3, 0.8, 0.8, 0.8, M.coral)}</g>` +
-    `<g class="float f2">${box(24, 13, 5, 0.6, 0.6, 0.6, M.sky)}</g>` +
-    `<g class="float f3">${box(6, 25, 0.5, 0.7, 0.7, 0.7, M.lilac)}</g>`
-  );
+  const taken = new Set(Object.values(LAYOUT).map((r) => `${r.x / CELL},${r.y / CELL}`));
+  return [
+    [-4, 4, 3, 0.8, M.coral, 'f1'], [24, 13, 5, 0.6, M.sky, 'f2'], [6, 25, 0.5, 0.7, M.lilac, 'f3'],
+  ]
+    .filter(([x, y]) => !taken.has(`${Math.floor(x / CELL)},${Math.floor(y / CELL)}`))
+    .map(([x, y, z, k, m, f]) => `<g class="float ${f}">${box(x, y, z, k, k, k, m)}</g>`)
+    .join('');
+}
+
+// Screen outline of an empty grid cell, for the "build here" markers.
+export function cellOutline([c, r]) {
+  const x = c * CELL;
+  const y = r * CELL;
+  return [[x, y], [x + SIZE, y], [x + SIZE, y + SIZE], [x, y + SIZE]].map(([a, b]) => P(a, b, 0));
 }
 
 // Draw order: back to front by room centre depth; connectors just before

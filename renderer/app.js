@@ -1,5 +1,5 @@
 import {
-  buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT, floorOutline, roomFrame,
+  buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT, floorOutline, roomFrame, configureRooms, cellOutline,
 } from './scene.js';
 import { setView, getView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
@@ -7,8 +7,19 @@ import { demoSnapshot } from './demo.js';
 import { THEMES, DEFAULT_THEME, themeFor } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
-const config = await bridge.config();
-const ROOM_NAMES = Object.fromEntries(config.rooms.map((r) => [r.id, r]));
+let config = await bridge.config();
+let ROOM_NAMES = {};
+function useConfig(next) {
+  config = next;
+  ROOM_NAMES = Object.fromEntries(config.rooms.map((r) => [r.id, r]));
+  configureRooms(config.rooms);
+}
+useConfig(config);
+
+// Layout editing state (see "hospital layout" below).
+let buildMode = false;
+let draft; // { cell, kind, name, agents: Set }
+let layoutError = '';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
@@ -117,9 +128,21 @@ function drawBackdrop() {
   $('clouds').innerHTML = sky + stars + clouds;
 }
 
-// Room signs and floor click targets: both open that room.
+// Room signs and floor click targets: both open that room. In build mode,
+// the free spots next to the hospital show as "+" tiles.
 function drawLabels() {
-  $('labels').innerHTML = config.rooms
+  const build = buildMode
+    ? config.openCells.map((cell) => {
+      const pts = cellOutline(cell);
+      const [cx, cy] = pts.reduce(([a, b], [x, y]) => [a + x / 4, b + y / 4], [0, 0]);
+      const chosen = draft && draft.cell[0] === cell[0] && draft.cell[1] === cell[1];
+      return `<g class="build-cell${chosen ? ' chosen' : ''}" data-cell="${cell.join(',')}" role="button" tabindex="0"
+          aria-label="Build a department here">
+        <polygon points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>
+        <path d="M${cx - 12},${cy} H${cx + 12} M${cx},${cy - 12} V${cy + 12}"/></g>`;
+    }).join('')
+    : '';
+  $('labels').innerHTML = build + config.rooms
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const floorPts = floorOutline(r.id).map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ');
@@ -264,6 +287,12 @@ $('cam-left').addEventListener('click', () => turnView(-1));
 $('cam-right').addEventListener('click', () => turnView(1));
 $('cam-overview').addEventListener('click', showOverview);
 $('labels').addEventListener('keydown', (e) => {
+  const cell = e.target.closest('[data-cell]');
+  if (cell && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    chooseCell(cell.dataset.cell.split(',').map(Number));
+    return;
+  }
   const label = e.target.closest('.room-label');
   if (label && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
@@ -320,6 +349,11 @@ function select(key) {
 
 svg.addEventListener('click', (e) => {
   if (drag?.moved) return;
+  const cell = e.target.closest('[data-cell]');
+  if (cell) {
+    chooseCell(cell.dataset.cell.split(',').map(Number));
+    return;
+  }
   const room = e.target.closest('[data-room]');
   if (room && !e.target.closest('.person')) {
     visitRoom(room.dataset.room);
@@ -632,6 +666,143 @@ setInterval(() => {
   const now = Date.now();
   for (const el of document.querySelectorAll('[data-since]')) el.textContent = elapsed(Number(el.dataset.since), now);
 }, 1000);
+
+// ---- hospital layout: add and remove departments ----------------------------
+
+function knownAgentNames() {
+  const names = new Set((snapshot.roster || []).map((a) => a.name));
+  for (const sess of snapshot.sessions) for (const a of sess.agents) names.add(a.type);
+  for (const d of config.layout.departments) for (const a of d.agents) names.add(a);
+  if (draft) for (const a of draft.agents) names.add(a);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function chooseCell(cell) {
+  draft = { cell, kind: config.departmentKinds[0].kind, name: '', agents: new Set() };
+  layoutError = '';
+  drawLabels();
+  placeLabels();
+  renderLayoutEditor();
+  $('dept-kind')?.focus();
+}
+
+function setBuildMode(on) {
+  buildMode = on;
+  if (!on) draft = undefined;
+  layoutError = '';
+  drawLabels();
+  placeLabels();
+  renderLayoutEditor();
+  if (on && !focusedRoom) showOverview();
+}
+
+async function saveLayout(departments) {
+  const plain = departments.map(({ kind, name, purpose, cell, agents }) => ({ kind, name, purpose, cell, agents: [...agents] }));
+  const result = await bridge.saveLayout({ departments: plain });
+  if (!result.ok) {
+    layoutError = result.error;
+    renderLayoutEditor();
+    return false;
+  }
+  useConfig(result.config);
+  drawScene();
+  setViewBox(overview);
+  return true;
+}
+
+function renderLayoutEditor() {
+  const depts = config.layout.departments;
+  $('layout-count').textContent = depts.length ? `(${depts.length})` : '';
+  const needed = new Set(depts.map((d) => d.via));
+  const list = depts.length
+    ? `<ul class="dept-list">${depts.map((d) => `<li>
+        <span class="agent">${escapeXml(d.name)}</span>
+        <span class="summary">${escapeXml(d.purpose)}${d.agents.length ? ` · ${escapeXml(d.agents.join(', '))}` : ' · no agents yet'}</span>
+        <button type="button" class="link-btn" data-remove="${escapeXml(d.id)}" ${needed.has(d.id) ? 'disabled title="Another department is reached through this one"' : ''}>Remove</button>
+      </li>`).join('')}</ul>`
+    : '<p class="empty">Only the core hospital so far. Add a department for each specialty your agents serve.</p>';
+
+  let form = '';
+  if (buildMode && !draft) {
+    form = `<p class="hint">Choose a “+” spot next to the hospital. ${config.openCells.length} ${config.openCells.length === 1 ? 'spot is' : 'spots are'} free.</p>`;
+  } else if (draft) {
+    const kinds = config.departmentKinds.map((k) => `<option value="${k.kind}" ${k.kind === draft.kind ? 'selected' : ''}>${escapeXml(k.name)}</option>`).join('');
+    const agents = knownAgentNames().map((a) => `<label class="check"><input type="checkbox" value="${escapeXml(a)}" ${draft.agents.has(a) ? 'checked' : ''}> ${escapeXml(a)}</label>`).join('');
+    form = `<form class="dept-form" id="dept-form">
+      <label class="field">Department
+        <select id="dept-kind">${kinds}</select></label>
+      <label class="field" ${draft.kind === 'custom' ? '' : 'hidden'}>Name
+        <input id="dept-name" maxlength="40" placeholder="e.g. Hand Surgery" value="${escapeXml(draft.name)}"></label>
+      <fieldset class="field"><legend>Agents who work here</legend>
+        <div class="checks">${agents || '<span class="muted">No agents seen yet.</span>'}</div>
+        <input id="dept-agent-new" placeholder="Add an agent by name, e.g. spine-planner">
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="button">Build department</button>
+        <button type="button" class="link-btn" id="dept-cancel">Cancel</button>
+      </div>
+    </form>`;
+  }
+  $('layout-body').innerHTML = `${list}
+    ${layoutError ? `<p class="form-error" role="alert">${escapeXml(layoutError)}</p>` : ''}
+    ${form}
+    ${buildMode ? '' : `<button type="button" class="button" id="build-start" ${config.openCells.length ? '' : 'disabled'}>Add a department</button>`}
+    ${buildMode && !draft ? '<button type="button" class="link-btn" id="build-stop">Done</button>' : ''}`;
+}
+
+$('layout-body').addEventListener('click', async (e) => {
+  if (e.target.id === 'build-start') setBuildMode(true);
+  else if (e.target.id === 'build-stop' || e.target.id === 'dept-cancel') setBuildMode(false);
+  else if (e.target.dataset.remove) {
+    const keep = config.layout.departments.filter((d) => d.id !== e.target.dataset.remove);
+    if (await saveLayout(keep.map((d) => ({ ...d, agents: new Set(d.agents) })))) renderLayoutEditor();
+  }
+});
+
+$('layout-body').addEventListener('change', (e) => {
+  if (!draft) return;
+  if (e.target.id === 'dept-kind') {
+    draft.kind = e.target.value;
+    renderLayoutEditor();
+    if (draft.kind === 'custom') $('dept-name')?.focus();
+  } else if (e.target.id === 'dept-name') {
+    draft.name = e.target.value;
+  } else if (e.target.type === 'checkbox') {
+    if (e.target.checked) draft.agents.add(e.target.value);
+    else draft.agents.delete(e.target.value);
+  }
+});
+
+$('layout-body').addEventListener('keydown', (e) => {
+  if (e.target.id === 'dept-agent-new' && e.key === 'Enter') {
+    e.preventDefault();
+    const name = e.target.value.trim();
+    if (name) {
+      draft.agents.add(name);
+      renderLayoutEditor();
+      $('dept-agent-new')?.focus();
+    }
+  }
+});
+
+$('layout-body').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!draft) return;
+  draft.name = $('dept-name')?.value ?? draft.name;
+  const extra = $('dept-agent-new')?.value.trim();
+  if (extra) draft.agents.add(extra);
+  if (draft.kind === 'custom' && !draft.name.trim()) {
+    layoutError = 'Give your department a name.';
+    renderLayoutEditor();
+    $('dept-name')?.focus();
+    return;
+  }
+  const existing = config.layout.departments.map((d) => ({ ...d, agents: new Set(d.agents) }));
+  const added = { kind: draft.kind, name: draft.kind === 'custom' ? draft.name.trim() : undefined, cell: draft.cell, agents: draft.agents };
+  if (await saveLayout([...existing, added])) setBuildMode(false);
+});
+
+renderLayoutEditor();
 
 applyPrefs();
 render(true);

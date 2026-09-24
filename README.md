@@ -57,6 +57,16 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **Night:** each colourway has a night version with stars, a moon and lit windows. By day a small sun keeps watch.
 - Figures act out their work: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
+## Grow the hospital
+
+The core hospital is a 3 × 3 block. Open **Hospital layout** in the side panel and choose **Add a department**. The free spots around the hospital light up with a "+" (up to 5 × 5 in all). Pick a spot, then choose the department:
+
+Spine Surgery · Neurosurgery · ENT · Dental Implantology · Maxillofacial (CMF) · Orthopaedics · Trauma · Sports Medicine · Pulmonology · Interventional Radiology · Cardiac Electrophysiology · Surgical Oncology, or **Your own department** with a name you choose.
+
+Tick the agents who work there, or type a new agent's name. The department is built as its own tower, joined by stairs to the room next to it. It comes with a navigation suite (table, tracking camera, planning monitor) and a piece that marks its specialty. Its agents walk there when they are called. Corner spots open up once a neighbouring department exists.
+
+The layout is saved in `%APPDATA%\Agents Home\layout.json`. Assignments written by hand in `rooms.json` still win over ones made in the app.
+
 ## Performance report
 
 ```powershell

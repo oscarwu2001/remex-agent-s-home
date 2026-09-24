@@ -5,7 +5,9 @@
 | **Session** | One Claude Code conversation: one main `.jsonl` transcript. Drawn as an attending in a white coat at the Nurses' Station. |
 | **Helper** / **sub-agent** | An agent started by a `Task` (older) or `Agent` (newer) tool call. Drawn as a figure who walks from the station to its room and back. |
 | **Agent type** | The `subagent_type` of the call (`reviewer`, `Explore`, …). Decides the room. |
-| **Room** | One of the seven places in `src/core/rooms.js`. |
+| **Room** | One of the seven core places in `src/core/rooms.js`, or a department the user added. |
+| **Grid / cell** | Rooms sit on a grid of cells `[col, row]`. The core 3 × 3 is cells 0..2; departments go in the ring around it (-1..3), up to 5 × 5. |
+| **Department** | A room the user adds from a list of surgical-navigation specialties (or a custom name), saved in `layout.json`. It joins the room beside it (`via`) by a bridge or stairs. |
 | **Stream** | The entries of one actor in one file: a file's own turns, or its sidechain entries grouped by `agentId`. |
 | **Linking** | Matching a sidechain stream to the `Task` call that started it, by exact prompt text, never by guessing. A stream that never links is counted as *unlinked*. |
 | **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper and is not a new prompt. |

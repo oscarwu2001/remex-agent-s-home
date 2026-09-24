@@ -14,6 +14,8 @@ export const LOOKS = {
   radiology: { robe: ['#b9a0cf', '#977fb0'], hat: 'headlamp', accent: '#f6dc6e' },
   'vision-clinic': { robe: ['#f3cf8e', '#d8ad69'], hat: 'specs', accent: '#585c7c' },
   'general-ward': { robe: ['#a7c3df', '#84a1c2'], hat: 'beanie', accent: '#e3877a' },
+  // Every department you add: navigation-suite scrubs.
+  department: { robe: ['#8fb4e8', '#6f90c8'], hat: 'scrub', accent: '#cfe0f7' },
 };
 
 function hat(kind, accent) {
@@ -67,7 +69,7 @@ function hat(kind, accent) {
 }
 
 export function personMarkup(roomId) {
-  const look = LOOKS[roomId] || LOOKS['general-ward'];
+  const look = LOOKS[roomId] || (roomId.startsWith('dept-') ? LOOKS.department : LOOKS['general-ward']);
   const [robeLight, robeDark] = look.robe;
   return (
     '<rect class="hit" x="-15" y="-48" width="30" height="58"/>' +

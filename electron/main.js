@@ -7,7 +7,9 @@ const path = require('path');
 const { Tracker } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
 const { readRoster } = require('../src/core/roster');
-const { ROOMS, validateOverrides } = require('../src/core/rooms');
+const {
+  DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
+} = require('../src/core/rooms');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -34,7 +36,31 @@ function problem(label, detail = '') {
   if (problems.size > PROBLEM_LIMIT) problems.delete(problems.keys().next().value);
 }
 
-function loadOverrides() {
+// The user's departments, from layout.json next to rooms.json. A broken file
+// is reported and the core hospital is used; it is never overwritten until
+// the user saves a new layout.
+function loadLayout() {
+  const file = path.join(app.getPath('userData'), 'layout.json');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    // No layout.json is the normal case: just the core hospital.
+    if (err.code !== 'ENOENT') {
+      startupProblems.push({ label: `layout.json could not be read (${err.code}); showing the core hospital`, detail: file, count: 1 });
+    }
+    return { file, layout: { departments: [] } };
+  }
+  try {
+    return { file, layout: validateLayout(JSON.parse(text)) };
+  } catch (err) {
+    const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
+    startupProblems.push({ label: `layout.json ignored: ${reason}; showing the core hospital`, detail: file, count: 1 });
+    return { file, layout: { departments: [] } };
+  }
+}
+
+function loadOverrides(roomIds) {
   const file = path.join(app.getPath('userData'), 'rooms.json');
   let text;
   try {
@@ -47,7 +73,7 @@ function loadOverrides() {
     return { file, overrides: {} };
   }
   try {
-    return { file, overrides: validateOverrides(JSON.parse(text)) };
+    return { file, overrides: validateOverrides(JSON.parse(text), roomIds) };
   } catch (err) {
     const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
     startupProblems.push({ label: `rooms.json ignored: ${reason}; using the default rooms`, detail: file, count: 1 });
@@ -98,7 +124,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  const { file: overridesFile, overrides } = loadOverrides();
+  const { file: layoutFile, layout: loaded } = loadLayout();
+  let layout = loaded;
+  const ids = () => new Set(roomsWith(layout).map((r) => r.id));
+  const { file: overridesFile, overrides: fileOverrides } = loadOverrides(ids());
+  // rooms.json, written by hand, wins over assignments made in the app.
+  let overrides = { ...overridesFrom(layout), ...fileOverrides };
   tracker = new Tracker({ overrides });
   const roots = defaultRoots();
   watcher = new TranscriptWatcher({
@@ -110,19 +141,46 @@ app.whenReady().then(() => {
   watcher.start();
 
   let roster = { agents: [], problems: [] };
-  const refreshRoster = () => {
+  function refreshRoster() {
     roster = readRoster(rosterDirs(), overrides);
-  };
+  }
   refreshRoster();
   setInterval(refreshRoster, ROSTER_MS);
   setInterval(() => tracker.prune(), 60_000);
 
-  ipcMain.handle('home:config', () => ({
-    rooms: ROOMS,
+  const config = () => ({
+    rooms: roomsWith(layout),
+    layout,
+    departmentKinds: DEPARTMENT_KINDS,
+    openCells: openCells(layout),
     overridesFile,
+    layoutFile,
     platform: process.platform,
     version: app.getVersion(),
-  }));
+  });
+  ipcMain.handle('home:config', config);
+
+  // Saving a layout: validate, write, then use it. Helpers already on shift
+  // keep their room; new ones follow the new assignments.
+  ipcMain.handle('home:save-layout', (_event, proposed) => {
+    let next;
+    try {
+      next = validateLayout(proposed);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    try {
+      fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+      fs.writeFileSync(layoutFile, `${JSON.stringify({ departments: next.departments.map(({ kind, name, purpose, cell, agents }) => ({ kind, name, purpose, cell, agents })) }, null, 2)}\n`);
+    } catch (err) {
+      return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
+    }
+    layout = next;
+    overrides = { ...overridesFrom(layout), ...fileOverrides };
+    tracker.overrides = overrides;
+    refreshRoster();
+    return { ok: true, config: config() };
+  });
 
   createWindow();
 
