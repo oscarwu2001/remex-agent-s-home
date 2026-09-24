@@ -7,6 +7,7 @@ import {
   viewDepth, faceVisible, cellDepth,
 } from './iso.js';
 import { floorTones } from './themes.js';
+import { detailedFurniture, navSuiteDetailed } from './detailed.js';
 
 const BASE_Z = -4; // columns hang down to here and dissolve into mist
 
@@ -332,7 +333,14 @@ function plant(x, y, z) {
   return cylinder(x, y, z, 0.28, 0.4, M.coral) + ball(x, y, z + 0.75, 0.38, M.leaf);
 }
 
+// The room style: 'simple' (storybook) or 'detailed' (realistic equipment).
+let detail = 'simple';
+
 function furniture(id, r) {
+  if (detail === 'detailed') {
+    const real = detailedFurniture(id, r, { plant, books, desk, eyeChart, ecg });
+    if (real !== undefined) return real;
+  }
   const { x, y, z } = r;
   switch (id) {
     case 'nurses-station':
@@ -415,7 +423,7 @@ function furniture(id, r) {
 // on top says which specialty it is.
 function navSuite(r) {
   const { x, y, z } = r;
-  let s =
+  const base =
     box(x + 2.55, y + 2.2, z, 0.9, 1.6, 0.65, M.steel) +
     box(x + 2.1, y + 1.7, z + 0.65, 1.8, 2.6, 0.2, M.white) +
     // tracking camera: a pole and a bar with two lenses, looking at the table
@@ -426,6 +434,7 @@ function navSuite(r) {
     // planning monitor on a cart
     box(x + 0.6, y + 0.8, z, 0.7, 0.5, 0.8, M.white) +
     box(x + 0.55, y + 0.95, z + 0.8, 0.8, 0.12, 0.6, M.ink);
+  let s = ''; // the specialty piece
   const top = z + 0.85;
   switch (r.kind) {
     case 'spine': // a column of vertebrae on a stand
@@ -462,7 +471,7 @@ function navSuite(r) {
       s += plant(x + 5.2, y + 5.2, z);
       break;
   }
-  return s;
+  return detail === 'detailed' ? navSuiteDetailed(r, s) : base + s;
 }
 
 function desk(x, y, z) {
@@ -553,8 +562,9 @@ export function cellOutline([c, r]) {
 
 // Draw order: back to front by room centre depth; connectors just before
 // the nearer of their two rooms so stairs tuck under floors correctly.
-export function buildScene(theme) {
+export function buildScene(theme, options = {}) {
   activeTheme = theme;
+  detail = options.detail === 'detailed' ? 'detailed' : 'simple';
   applyTheme(theme);
   const items = [];
   for (const [id, r] of Object.entries(LAYOUT)) {

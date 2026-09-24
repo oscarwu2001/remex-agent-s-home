@@ -555,3 +555,5 @@ details > summary h2 { margin: 0; }
 .settings .field select { width: 100%; }
 .report-actions { margin: var(--s-2) 0 0; }
 .settings .hint { margin: var(--s-1) 0 var(--s-2); }
+.colourway.style-simple, .colourway.style-detailed { padding: 0 var(--s-4); }
+#room-style { margin-top: var(--s-2); }

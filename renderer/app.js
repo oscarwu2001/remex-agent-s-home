@@ -29,7 +29,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
 // time: 'auto' follows the computer's clock, or a fixed part of the day.
-const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', view: 0, demo: false };
+const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', view: 0, demo: false };
 let saved = {};
 try {
   saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}');
@@ -39,6 +39,7 @@ try {
 }
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
 if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
+if (prefs.detail !== 'simple' && prefs.detail !== 'detailed') prefs.detail = 'simple';
 if ('night' in prefs) {
   // The old Night switch becomes a fixed night; otherwise follow the clock.
   if (prefs.night && saved.time === undefined) prefs.time = 'night';
@@ -67,6 +68,7 @@ function applyPrefs() {
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
   for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === prefs.theme;
+  for (const r of document.querySelectorAll('input[name="detail"]')) r.checked = r.value === prefs.detail;
   $('opt-demo').checked = prefs.demo;
   const sel = $('opt-time');
   sel.value = prefs.time;
@@ -80,6 +82,14 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
     savePrefs();
     applyPrefs();
     render(true);
+  });
+}
+
+for (const radio of document.querySelectorAll('input[name="detail"]')) {
+  radio.addEventListener('change', () => {
+    prefs.detail = radio.value;
+    savePrefs();
+    drawScene();
   });
 }
 
@@ -105,7 +115,7 @@ setInterval(() => {
 // every frame while towers rise and sink after a turn.
 function drawGeometry() {
   shownPhase = phase();
-  const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase));
+  const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase), { detail: prefs.detail });
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
