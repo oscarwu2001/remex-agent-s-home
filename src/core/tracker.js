@@ -23,6 +23,7 @@ const TIMING = {
 };
 
 const HISTORY_LIMIT = 12;
+const BUFFER_LIMIT = 500; // events held for a sidechain not yet linked
 
 function newActor(startedAt) {
   return {
@@ -47,7 +48,14 @@ class Tracker {
     this.timing = { ...TIMING, ...timing };
     this.sessions = new Map(); // sessionId -> session
     this.streams = new Map(); // streamKey -> { role, sessionId, taskId?, buffer?, firstSeen }
-    this.stats = { malformedLines: 0, unlinkedSidechains: 0, lastProblem: undefined };
+    this.stats = {
+      malformedLines: 0,
+      unlinkedSidechains: 0,
+      unmatchedRelays: 0,
+      untimedEntries: 0,
+      lastProblem: undefined,
+    };
+    this.unmatchedRelayIds = new Set();
   }
 
   // ---- input -------------------------------------------------------------
@@ -76,7 +84,11 @@ class Tracker {
     }
 
     for (const raw of events) {
-      const ev = { ...raw, ts: raw.ts ?? receivedAt };
+      // An entry with no usable timestamp still counts, but must not make an
+      // old session look fresh, so it never moves lastAt forward.
+      const untimed = raw.ts === undefined;
+      if (untimed) this.stats.untimedEntries += 1;
+      const ev = { ...raw, ts: raw.ts ?? receivedAt, untimed };
       if (stream.role === 'main') this.applyMain(session, ev);
       else this.applySidechain(session, stream, ev);
     }
@@ -102,8 +114,13 @@ class Tracker {
     if (ev.via) {
       // Relayed from inside a sub-agent (progress entry).
       const sub = session.subagents.get(ev.via);
-      if (sub) this.applyActor(sub.actor, ev);
-      session.actor.lastAt = Math.max(session.actor.lastAt, ev.ts);
+      if (sub) {
+        this.applyActor(sub.actor, ev);
+      } else if (!this.unmatchedRelayIds.has(ev.via)) {
+        this.unmatchedRelayIds.add(ev.via);
+        this.stats.unmatchedRelays += 1;
+      }
+      if (!ev.untimed) session.actor.lastAt = Math.max(session.actor.lastAt, ev.ts);
       return;
     }
 
@@ -122,6 +139,20 @@ class Tracker {
         actor: { ...newActor(ev.ts), lastKind: 'prompt' },
       });
       this.retryLinks(session);
+      if (this.unmatchedRelayIds.delete(ev.id)) this.stats.unmatchedRelays -= 1;
+    }
+
+    if (ev.kind === 'task-notification') {
+      const sub = session.subagents.get(ev.toolUseId);
+      if (sub && sub.endedAt === undefined) {
+        sub.endedAt = ev.ts;
+        sub.endReason = ev.status === 'completed' ? 'finished'
+          : ev.status === 'failed' ? 'error'
+            : ev.status === 'killed' || ev.status === 'stopped' ? 'interrupted'
+              : 'finished';
+      }
+      if (!ev.untimed) session.actor.lastAt = Math.max(session.actor.lastAt, ev.ts);
+      return; // not a turn of the session's own
     }
 
     if (ev.kind === 'tool-end') {
@@ -148,7 +179,7 @@ class Tracker {
 
   applySidechain(session, stream, ev) {
     if (stream.taskId === undefined) {
-      stream.buffer.push(ev);
+      if (stream.buffer.length < BUFFER_LIMIT) stream.buffer.push(ev);
       if (ev.kind === 'user-prompt' && stream.prompt === undefined) stream.prompt = ev.text;
       this.tryLink(session, stream);
       return;
@@ -160,14 +191,11 @@ class Tracker {
   tryLink(session, stream) {
     if (stream.taskId !== undefined || stream.prompt === undefined) return false;
     const open = [...session.subagents.values()].filter((s) => !s.linked);
+    // Prompt text only. Guessing ("the one helper still running") would put
+    // one helper's work on another's figure with no sign anything was wrong.
     const exact = open.filter((s) => s.prompt && samePrompt(s.prompt, stream.prompt));
-    let match;
-    if (exact.length === 1) match = exact[0];
-    else if (exact.length === 0) {
-      const running = open.filter((s) => s.endedAt === undefined);
-      if (running.length === 1) match = running[0];
-    }
-    if (!match) return false;
+    if (exact.length === 0) return false;
+    const match = exact[0];
 
     match.linked = true;
     stream.taskId = match.id;
@@ -187,7 +215,7 @@ class Tracker {
   }
 
   applyActor(actor, ev) {
-    actor.lastAt = Math.max(actor.lastAt, ev.ts);
+    if (!ev.untimed) actor.lastAt = Math.max(actor.lastAt, ev.ts);
     switch (ev.kind) {
       case 'tool-start':
       case 'task-start': {
@@ -313,15 +341,18 @@ class Tracker {
     return { generatedAt: now, sessions, stats: { ...this.stats } };
   }
 
-  // Drop state for sessions that have been stale a long time.
+  // Drop state for sessions that have been stale a long time. A session
+  // counts as active while any of its helpers is.
   prune(now = Date.now()) {
     const cutoff = this.timing.staleSessionMs * 3;
     for (const [id, s] of this.sessions) {
-      if (now - s.actor.lastAt > cutoff) {
-        this.sessions.delete(id);
-        for (const [key, stream] of this.streams) {
-          if (stream.sessionId === id) this.streams.delete(key);
-        }
+      const lastAt = Math.max(s.actor.lastAt, ...[...s.subagents.values()].map((a) => a.actor.lastAt));
+      if (now - lastAt <= cutoff) continue;
+      this.sessions.delete(id);
+      for (const [key, stream] of this.streams) {
+        if (stream.sessionId !== id) continue;
+        if (stream.counted) this.stats.unlinkedSidechains -= 1;
+        this.streams.delete(key);
       }
     }
   }

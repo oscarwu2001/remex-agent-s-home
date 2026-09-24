@@ -144,3 +144,103 @@ test('room overrides move an agent type', () => {
   feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'k', 'Task', { subagent_type: 'reviewer', prompt: 'p' })]);
   assert.equal(t.snapshot(s(2)).sessions[0].agents[0].room, 'general-ward');
 });
+
+test('legacy layout: sidechain lines inside the parent file drive the helper', () => {
+  const t = new Tracker();
+  const p = 'Explore the loader modules and list their entry points';
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'taskE', 'Task', { subagent_type: 'Explore', prompt: p }),
+    prompt(2, p, sidechain(undefined)),
+    toolUse(3, 'in1', 'Glob', { pattern: '**/*.py' }, sidechain(undefined)),
+  ]);
+  const [sess] = t.snapshot(s(4)).sessions;
+  assert.equal(sess.status, 'delegating'); // the sidechain prompt did not interrupt it
+  assert.equal(sess.agents[0].status, 'working');
+  assert.equal(sess.agents[0].activity.label, 'Searching the code');
+});
+
+test('progress relays drive the helper they name; unknown ones are counted', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'taskR', 'Task', { subagent_type: 'reviewer', prompt: 'r' })]);
+  const relay = (sec, parent, inner) => ({
+    type: 'progress', sessionId: 'sess-1', timestamp: new Date(s(sec)).toISOString(),
+    parentToolUseID: parent, data: { message: inner },
+  });
+  feed(t, MAIN, [
+    relay(2, 'taskR', toolUse(2, 'x1', 'Read', { file_path: '/a.py' })),
+    relay(3, 'taskNobody', toolUse(3, 'x2', 'Read', {})),
+    relay(3.5, 'taskNobody', toolUse(3.5, 'x3', 'Read', {})),
+  ]);
+  const snap = t.snapshot(s(4));
+  assert.equal(snap.sessions[0].agents[0].activity.label, 'Reading a file');
+  assert.equal(snap.stats.unmatchedRelays, 1);
+});
+
+test('without an exact prompt match a sidechain is never guessed onto a helper', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'only', 'Task', { subagent_type: 'runner', prompt: 'Run the tests' })]);
+  feed(t, '/p/sess-1/subagents/agent-z.jsonl', [
+    prompt(2, 'A completely different prompt that belongs to someone else', sidechain('z')),
+    toolUse(3, 'b', 'Bash', { command: 'x' }, sidechain('z')),
+  ]);
+  const snap = t.snapshot(s(2) + TIMING.unlinkedGraceMs + 1);
+  assert.equal(snap.sessions[0].agents[0].history.length, 0);
+  assert.equal(snap.stats.unlinkedSidechains, 1);
+});
+
+test('a task notification ends a background helper with the right reason', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'bg1', 'Agent', { subagent_type: 'runner', prompt: 'a', run_in_background: true }),
+    toolUse(1, 'bg2', 'Agent', { subagent_type: 'reviewer', prompt: 'b', run_in_background: true }),
+    toolResult(1.2, 'bg1', 'launched'), toolResult(1.2, 'bg2', 'launched'),
+  ]);
+  const note = (sec, id, status) => ({
+    ...prompt(sec, `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>${status}</status>`),
+    origin: { kind: 'task-notification' },
+  });
+  feed(t, MAIN, [note(30, 'bg1', 'completed')]);
+  const agents = t.snapshot(s(31)).sessions[0].agents;
+  assert.deepEqual(agents.map((a) => [a.type, a.status, a.endReason]),
+    [['runner', 'done', 'finished'], ['reviewer', 'thinking', undefined]]);
+  feed(t, MAIN, [note(40, 'bg2', 'failed')]);
+  assert.equal(t.snapshot(s(41)).sessions[0].agents.find((a) => a.type === 'reviewer').endReason, 'error');
+});
+
+test('prune keeps a session whose helper is still writing', () => {
+  const t = new Tracker();
+  const p = 'Review the whole registration module very carefully';
+  feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'long', 'Task', { subagent_type: 'reviewer', prompt: p })]);
+  const SUB = '/p/sess-1/subagents/agent-long.jsonl';
+  feed(t, SUB, [prompt(2, p, sidechain('long'))]);
+  const late = 40 * 60; // 40 minutes of helper work
+  feed(t, SUB, [toolUse(late, 'r', 'Read', {}, sidechain('long'))]);
+  t.prune(s(late + 1));
+  const [sess] = t.snapshot(s(late + 1)).sessions;
+  assert.equal(sess.agents[0].status, 'working');
+  assert.equal(t.snapshot(s(late + 1)).stats.unlinkedSidechains, 0);
+});
+
+test('prune drops long-stale sessions and their unlinked counts', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [prompt(0, 'go')]);
+  feed(t, '/p/sess-1/subagents/agent-o.jsonl', [prompt(1, 'orphan prompt with no matching call anywhere', sidechain('o'))]);
+  assert.equal(t.snapshot(s(1) + TIMING.unlinkedGraceMs + 1).stats.unlinkedSidechains, 1);
+  t.prune(s(1) + TIMING.staleSessionMs * 3 + 1);
+  assert.equal(t.sessions.size, 0);
+  assert.equal(t.snapshot(s(1) + TIMING.staleSessionMs * 3 + 2).stats.unlinkedSidechains, 0);
+});
+
+test('entries without a timestamp are counted and do not freshen a session', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [prompt(0, 'go'), say(1, 'done')]);
+  const noTime = { ...toolUse(0, 'u', 'Read', {}) };
+  delete noTime.timestamp;
+  const later = s(1) + TIMING.staleSessionMs + 5_000;
+  t.ingest(MAIN, noTime, later);
+  const snap = t.snapshot(later + 1);
+  assert.equal(snap.stats.untimedEntries, 1);
+  assert.equal(snap.sessions.length, 0);
+});

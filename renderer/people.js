@@ -70,6 +70,7 @@ export function personMarkup(roomId) {
   const look = LOOKS[roomId] || LOOKS['general-ward'];
   const [robeLight, robeDark] = look.robe;
   return (
+    '<rect class="hit" x="-15" y="-48" width="30" height="58"/>' +
     '<ellipse class="select-ring" cx="0" cy="0" rx="17" ry="8.5"/>' +
     '<ellipse cx="0" cy="0" rx="10" ry="4.6" fill="#3c3552" opacity="0.18"/>' +
     '<g class="figure">' +
@@ -84,37 +85,51 @@ export function personMarkup(roomId) {
   );
 }
 
-// Status glyphs differ in shape as well as colour.
+// Status glyphs differ in shape as well as colour: every status, and every
+// way of finishing, has its own silhouette.
+const INK = '#585c7c';
+const BG = '<circle r="9.5" class="b-bg"/>';
+
 export function bubbleMarkup(status) {
   switch (status) {
-    case 'working':
-      return '<circle r="9" class="b-bg"/><path class="spin" d="M0,-5 A5,5 0 1 1 -5,0" fill="none" stroke="#468e8b" stroke-width="2.2" stroke-linecap="round"/>';
-    case 'thinking':
-    case 'reporting':
+    case 'working': // spinner
+      return `${BG}<path class="spin" d="M0,-5 A5,5 0 1 1 -5,0" fill="none" stroke="#2f6f6b" stroke-width="2.2" stroke-linecap="round"/>`;
+    case 'thinking': // pill with three pulsing dots
       return (
         '<rect x="-13" y="-7" width="26" height="14" rx="7" class="b-bg"/>' +
         '<circle class="dot d1" cx="-6" cy="0" r="2"/><circle class="dot d2" cx="0" cy="0" r="2"/><circle class="dot d3" cx="6" cy="0" r="2"/>'
       );
-    case 'blocked':
-      return '<circle r="9.5" fill="#d9605a"/><text class="b-q" y="4.5" text-anchor="middle">?</text>';
-    case 'your-turn':
+    case 'reporting': // a sheet of notes
+      return (
+        `${BG}<rect x="-4.5" y="-6" width="9" height="12" rx="1.2" fill="#ffffff" stroke="${INK}" stroke-width="1.4"/>` +
+        `<path d="M-2.2,-2.5 H2.2 M-2.2,0.5 H2.2 M-2.2,3.3 H0.8" stroke="${INK}" stroke-width="1.2" stroke-linecap="round"/>`
+      );
+    case 'blocked': // red disc with a question mark
+      return '<circle r="9.5" fill="#b8443f"/><text class="b-q" y="4.5" text-anchor="middle">?</text>';
+    case 'your-turn': // speech bubble
       return (
         '<path d="M-12,-8 H12 A3,3 0 0 1 15,-5 V4 A3,3 0 0 1 12,7 H-2 L-7,12 L-6,7 H-12 A3,3 0 0 1 -15,4 V-5 A3,3 0 0 1 -12,-8 Z" class="b-bg"/>' +
-        '<rect x="-8" y="-3" width="16" height="2" rx="1" fill="#585c7c"/><rect x="-8" y="2" width="10" height="2" rx="1" fill="#585c7c"/>'
+        `<rect x="-8" y="-3" width="16" height="2" rx="1" fill="${INK}"/><rect x="-8" y="2" width="10" height="2" rx="1" fill="${INK}"/>`
       );
-    case 'delegating':
-      return (
-        '<circle r="9" class="b-bg"/>' +
-        '<path d="M-4,-5 H4 L0,0 L4,5 H-4 L0,0 Z" fill="#a68ebc"/>'
-      );
-    case 'done':
-      return '<circle r="9" fill="#468e8b"/><path d="M-4,0 L-1,3 L4.5,-3.5" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+    case 'delegating': // hourglass
+      return `${BG}<path d="M-4,-5 H4 L0,0 L4,5 H-4 L0,0 Z" fill="#8467a3"/>`;
+    case 'done': // filled disc, tick
+      return '<circle r="9.5" fill="#2f6f6b"/><path d="M-4,0 L-1,3 L4.5,-3.5" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+    case 'quiet': // dashed ring, tick: a presumption, not a report
+      return `<circle r="8.5" fill="#ffffff" stroke="#2f6f6b" stroke-width="1.6" stroke-dasharray="3 2.2"/><path d="M-4,0 L-1,3 L4.5,-3.5" fill="none" stroke="#2f6f6b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case 'failed': // red diamond, cross
+      return '<path d="M0,-10.5 L10.5,0 L0,10.5 L-10.5,0 Z" fill="#b8443f"/><path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>';
+    case 'stopped': // grey square, stop bar
+      return `<rect x="-9" y="-9" width="18" height="18" rx="3" fill="${INK}"/><rect x="-3.5" y="-3.5" width="7" height="7" rx="1" fill="#ffffff"/>`;
+    case 'idle': // crescent moon
+      return `${BG}<path d="M2.5,-5.5 A6,6 0 1 0 5.5,3 A4.6,4.6 0 1 1 2.5,-5.5 Z" fill="${INK}"/>`;
     default:
       return '';
   }
 }
 
 const SPEED = 3.2; // tiles per second
+const TAG_CHARS = 13;
 
 export class Person {
   constructor({ id, roomId, layer, at, onSelect }) {
@@ -148,9 +163,12 @@ export class Person {
   }
 
   setLabel(name, statusText) {
-    if (this.tagText.textContent !== name) {
-      this.tagText.textContent = name;
-      const w = Math.max(28, name.length * 6.3 + 12);
+    // Tags are capped so long project names cannot cover a neighbour; the
+    // full name is on the board and in the accessible name.
+    const shown = name.length > TAG_CHARS ? `${name.slice(0, TAG_CHARS - 1)}…` : name;
+    if (this.tagText.textContent !== shown) {
+      this.tagText.textContent = shown;
+      const w = Math.max(28, shown.length * 6.3 + 12);
       this.tagRect.setAttribute('x', String(-w / 2));
       this.tagRect.setAttribute('y', '-7');
       this.tagRect.setAttribute('width', String(w));

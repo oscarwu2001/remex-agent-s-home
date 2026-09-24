@@ -3,7 +3,6 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const { Tracker } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
@@ -16,11 +15,23 @@ const ROSTER_MS = 30_000;
 let win;
 let tracker;
 let watcher;
-const problems = []; // shown in the app, newest last
+// Problems shown under "Needs attention". `label` is safe on a shared
+// screen; `detail` may hold a path and is hidden in privacy mode. Repeats are
+// counted, not re-added, so a noisy folder cannot push others off the list.
+const startupProblems = [];
+const problems = new Map(); // label|detail -> { label, detail, count, at }
+const PROBLEM_LIMIT = 20;
 
-function problem(message) {
-  problems.push({ at: Date.now(), message });
-  if (problems.length > 20) problems.shift();
+function problem(label, detail = '') {
+  const key = `${label}|${detail}`;
+  const p = problems.get(key);
+  if (p) {
+    p.count += 1;
+    p.at = Date.now();
+    return;
+  }
+  problems.set(key, { label, detail, count: 1, at: Date.now() });
+  if (problems.size > PROBLEM_LIMIT) problems.delete(problems.keys().next().value);
 }
 
 function loadOverrides() {
@@ -29,19 +40,24 @@ function loadOverrides() {
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch (err) {
-    if (err.code !== 'ENOENT') problem(`Could not read ${file}: ${err.code}. Using the default rooms.`);
+    // No rooms.json is the normal case: the default rooms apply.
+    if (err.code !== 'ENOENT') {
+      startupProblems.push({ label: `rooms.json could not be read (${err.code}); using the default rooms`, detail: file, count: 1 });
+    }
     return { file, overrides: {} };
   }
   try {
     return { file, overrides: validateOverrides(JSON.parse(text)) };
   } catch (err) {
-    problem(`${path.basename(file)} ignored: ${err.message}`);
+    const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
+    startupProblems.push({ label: `rooms.json ignored: ${reason}; using the default rooms`, detail: file, count: 1 });
     return { file, overrides: {} };
   }
 }
 
 function rosterDirs() {
-  const dirs = [{ dir: path.join(os.homedir(), '.claude', 'agents'), scope: 'user' }];
+  // User agents live next to each transcripts root (~/.claude, $CLAUDE_CONFIG_DIR).
+  const dirs = defaultRoots().map((root) => ({ dir: path.join(path.dirname(root), 'agents'), scope: 'user' }));
   const seen = new Set();
   for (const s of tracker.sessions.values()) {
     if (s.cwd && !seen.has(s.cwd)) {
@@ -116,7 +132,7 @@ app.whenReady().then(() => {
       ...tracker.snapshot(),
       watcher: watcher.status(),
       roster: roster.agents,
-      problems: [...problems.map((p) => p.message), ...roster.problems],
+      problems: [...startupProblems, ...problems.values(), ...roster.problems],
     });
   }, PUSH_MS);
 

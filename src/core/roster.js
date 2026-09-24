@@ -11,9 +11,20 @@ function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
   const fields = {};
-  for (const line of m[1].split(/\r?\n/)) {
-    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line);
-    if (kv) fields[kv[1]] = kv[2].replace(/^["']|["']$/g, '').trim();
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(lines[i]);
+    if (!kv) continue;
+    let value = kv[2].trim();
+    if (/^[|>][-+]?$/.test(value)) {
+      // YAML block scalar: the indented lines that follow.
+      const block = [];
+      while (i + 1 < lines.length && /^(\s+|$)/.test(lines[i + 1]) && !/^[A-Za-z_][\w-]*:/.test(lines[i + 1])) {
+        block.push(lines[++i].trim());
+      }
+      value = block.join(value.startsWith('|') ? '\n' : ' ').trim();
+    }
+    fields[kv[1]] = value.replace(/^["']|["']$/g, '').trim();
   }
   return fields;
 }
@@ -32,7 +43,8 @@ function readRoster(dirs, overrides = {}) {
     try {
       names = fs.readdirSync(dir).filter((n) => n.endsWith('.md'));
     } catch (err) {
-      if (err.code !== 'ENOENT') problems.push(`Cannot list agents in ${dir}: ${err.code}`);
+      // A missing agents folder is normal: most projects have none.
+      if (err.code !== 'ENOENT') problems.push({ label: `An agents folder could not be listed (${err.code})`, detail: dir });
       continue;
     }
     for (const n of names) {
@@ -40,11 +52,11 @@ function readRoster(dirs, overrides = {}) {
       try {
         fm = parseFrontmatter(fs.readFileSync(path.join(dir, n), 'utf8'));
       } catch (err) {
-        problems.push(`Cannot read agent ${n}: ${err.code || err.message}`);
+        problems.push({ label: `An agent definition could not be read (${err.code || 'error'})`, detail: n });
         continue;
       }
       if (!fm || !fm.name) {
-        problems.push(`Agent file ${n} has no "name" in its frontmatter`);
+        problems.push({ label: 'An agent definition has no "name" in its frontmatter', detail: n });
         continue;
       }
       // Project agents override user agents of the same name, as in Claude Code.

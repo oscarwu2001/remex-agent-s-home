@@ -93,3 +93,35 @@ test('CLAUDE_CONFIG_DIR adds a root ahead of the home folder', () => {
   const roots = defaultRoots({ CLAUDE_CONFIG_DIR: '/cfg' }, '/home/u');
   assert.deepEqual(roots, [path.join('/cfg', 'projects'), path.join('/home/u', '.claude', 'projects')]);
 });
+
+test('starting exactly on a line boundary keeps that first line', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'p'));
+  const a = '{"n":1}\n';
+  fs.writeFileSync(path.join(root, 'p', 'b.jsonl'), `${a}{"n":2}\n`);
+  const { w, got } = collect(root, { maxInitialBytes: Buffer.byteLength('{"n":2}\n') });
+  w.tick();
+  assert.deepEqual(got.entries, [['b.jsonl', 2]]);
+});
+
+test('an error while handling one line is reported and the rest still arrive', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'p'));
+  fs.writeFileSync(path.join(root, 'p', 'c.jsonl'), '{"n":1}\n{"n":2}\n{"n":3}\n');
+  const seen = [];
+  const problems = [];
+  const w = new TranscriptWatcher({
+    roots: [root],
+    onEntry: (file, e) => {
+      if (e.n === 2) throw new Error('boom');
+      seen.push(e.n);
+    },
+    onMalformed: () => {},
+    onProblem: (label, detail) => problems.push([label, detail]),
+    options: { listEveryMs: 0 },
+  });
+  w.tick();
+  assert.deepEqual(seen, [1, 3]);
+  assert.equal(problems.length, 1);
+  assert.doesNotMatch(problems[0][0], /c\.jsonl|\//); // the label carries no path
+});

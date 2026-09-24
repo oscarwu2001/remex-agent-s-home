@@ -53,6 +53,7 @@ export function demoSnapshot(nowMs, epochMs) {
       let status = 'working';
       if (done) status = 'done';
       else if (inStep < 1.2) status = 'thinking';
+      else if (t > end - 1.5) status = 'reporting';
       else if (type === 'runner' && t > 14 && t < 19) status = 'blocked';
       const history = tools.slice(0, idx + 1).map((tool, k) => ({
         ts: at(start + k * span), ...activity(tool),
@@ -66,7 +67,8 @@ export function demoSnapshot(nowMs, epochMs) {
         startedAt: at(start),
         lastActivityAt: at(Math.min(t, end)),
         endedAt: done ? at(end) : undefined,
-        endReason: done ? 'finished' : undefined,
+        // one helper fails, so every way of finishing is on show
+        endReason: done ? (type === 'statusline-setup' ? 'error' : 'finished') : undefined,
         errors: 0,
         status,
         activity: status === 'working' || status === 'blocked' ? activity(tools[idx]) : null,

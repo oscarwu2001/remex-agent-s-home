@@ -37,3 +37,11 @@ test('agent frontmatter is read from Windows and Unix line endings', () => {
   });
   assert.equal(parseFrontmatter('no frontmatter'), null);
 });
+
+test('block-scalar descriptions are read as text, not as "|"', () => {
+  const text = '---\nname: planner\ndescription: |\n  Plans the work.\n  Then hands off.\ntools: Read\n---\n';
+  const fm = parseFrontmatter(text);
+  assert.equal(fm.description, 'Plans the work.\nThen hands off.');
+  assert.equal(fm.tools, 'Read');
+  assert.equal(parseFrontmatter('---\nname: a\ndescription: >\n  one\n  two\n---\n').description, 'one two');
+});

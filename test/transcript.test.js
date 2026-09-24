@@ -42,10 +42,31 @@ test('plain text from the assistant keeps its stop reason', () => {
   assert.deepEqual(events.map((e) => [e.kind, e.stopReason]), [['assistant-text', 'end_turn']]);
 });
 
-test('a typed prompt is a user-prompt; meta user lines are not', () => {
+test('a typed prompt is a user-prompt; meta lines and agent messages are not', () => {
   assert.equal(eventsFromEntry(prompt(0, 'hello')).events[0].kind, 'user-prompt');
+  assert.equal(eventsFromEntry({ ...prompt(0, 'hi'), origin: { kind: 'human' } }).events[0].kind, 'user-prompt');
   const meta = { ...prompt(0, 'caveat'), isMeta: true };
-  assert.deepEqual(eventsFromEntry(meta).events, []);
+  assert.deepEqual(eventsFromEntry(meta).events.map((e) => e.kind), ['activity']);
+  const peer = { ...prompt(0, 'report from a helper'), origin: { kind: 'peer' } };
+  assert.deepEqual(eventsFromEntry(peer).events.map((e) => e.kind), ['activity']);
+});
+
+test('a task notification names the helper that finished', () => {
+  const text = '<task-notification>\n<task-id>abc</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>';
+  const entry = { ...prompt(4, text), origin: { kind: 'task-notification' } };
+  const [ev] = eventsFromEntry(entry).events;
+  assert.deepEqual([ev.kind, ev.toolUseId, ev.status], ['task-notification', 'toolu_bg', 'completed']);
+});
+
+test('a malformed line never echoes its content in the error', () => {
+  try {
+    parseLine('patient MRN-12345 {');
+    assert.fail('should throw');
+  } catch (err) {
+    assert.ok(err instanceof MalformedLineError);
+    assert.doesNotMatch(err.message, /patient|MRN|12345/);
+    assert.match(err.message, /\(19 bytes\)/);
+  }
 });
 
 test('progress entries relay sub-agent tool calls with the Task id attached', () => {
@@ -63,4 +84,13 @@ test('progress entries relay sub-agent tool calls with the Task id attached', ()
 test('unknown entry types are proof of life only', () => {
   const { events } = eventsFromEntry({ type: 'attachment', timestamp: new Date(T0).toISOString() });
   assert.deepEqual(events, [{ kind: 'activity', ts: T0 }]);
+});
+
+test('a notification queued into a running turn is still recognised', () => {
+  const entry = {
+    type: 'attachment', sessionId: 'sess-1', timestamp: new Date(T0).toISOString(),
+    attachment: { type: 'queued_command', prompt: '<task-notification>\n<tool-use-id>toolu_q</tool-use-id>\n<status>failed</status>' },
+  };
+  const [ev] = eventsFromEntry(entry).events;
+  assert.deepEqual([ev.kind, ev.toolUseId, ev.status], ['task-notification', 'toolu_q', 'failed']);
 });

@@ -54,22 +54,28 @@ line into events: a tool call starts, a tool returns, a `Task`/`Agent` call
 spawns a helper, the answer ends. From those events it decides what each
 figure is doing:
 
-| Bubble | Meaning |
-| --- | --- |
-| spinner | working (the board says what: reading, editing, running a command…) |
-| three dots | thinking |
-| red **?** | a Bash/Edit/Write/Web call has been pending 7 s: waiting for your approval, or just a long command |
-| hourglass | the session is waiting on a helper |
-| speech bubble | the session has finished and it's your turn |
-| check | a helper finished and is walking home |
+| Bubble | Board says | Meaning |
+| --- | --- | --- |
+| spinner | *Reading a file*, *Running a command*… | working |
+| three dots | Thinking | waiting on the model |
+| sheet of notes | Writing up findings | a helper is writing its report |
+| red **?** | Needs approval, or a long tool is running | a Bash/Edit/Write/Web call has been pending for 7 s. The app can't tell which of the two it is, so it says both |
+| hourglass | With *reviewer* | the session is waiting on a helper |
+| speech bubble | Your turn | the session has finished its answer |
+| tick | Finished | a helper returned and is walking home |
+| dashed tick | Presumed finished | a background helper went quiet for 2 minutes |
+| red diamond | Failed | a helper returned an error |
+| dark square | Stopped | a helper was interrupted |
 
 Click a figure or a row on the board to open its **chart**, which shows its
 recent tool calls.
 
 **Privacy.** The app is local only. It makes no network requests and never
-writes to `.claude`. **Hide file names and commands** is on by default, so
-the board shows "Reading a file" and not the file's name. Turn it off when
-you're not sharing your screen.
+writes to `.claude`. **Hide file names and commands** is on by default. With
+it on, the board shows "Reading a file" but not the file's name, and it hides
+task descriptions and folder paths too. Error messages never quote the
+contents of a transcript line. Turn privacy off when you're not sharing your
+screen.
 
 **Your own agents.** Agents in `~/.claude/agents/*.md` and in each open
 project's `.claude/agents/` are listed in the **Staff directory** with the room

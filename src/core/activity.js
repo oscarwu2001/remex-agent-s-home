@@ -20,7 +20,7 @@ function host(url) {
   try {
     return new URL(url).host;
   } catch {
-    return '';
+    return ''; // not a URL: there is no host to show, and nothing is lost
   }
 }
 

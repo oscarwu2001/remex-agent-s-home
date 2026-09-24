@@ -142,7 +142,7 @@ function syncPeople(snapshot) {
       if (w.kind === 'agent') p.walk([...routeTo(w.room), home]);
       people.set(key, p);
     }
-    p.setStatus(w.data.status);
+    p.setStatus(glyphKey(w.data));
     p.setLabel(w.name, statusText(w.data));
     p.el.classList.toggle('selected', key === selected);
     if (w.kind === 'agent' && w.data.status === 'done' && !p.leaving) {
@@ -186,20 +186,28 @@ requestAnimationFrame(frame);
 
 // ---- words -----------------------------------------------------------------
 
+// Distinct words lead each status, so they can be told apart at a glance.
 function statusText(x) {
   switch (x.status) {
     case 'working': return x.activity ? x.activity.label : 'Working';
-    case 'delegating': return x.activity ? x.activity.label.replace('Consulting', 'Waiting on') : 'Waiting on a helper';
-    case 'blocked': return 'Waiting: approval or a long-running tool';
+    case 'delegating': return x.activity ? x.activity.label.replace('Consulting', 'With') : 'With a helper';
+    case 'blocked': return 'Needs approval, or a long tool is running';
     case 'thinking': return 'Thinking';
-    case 'reporting': return 'Writing up';
-    case 'your-turn': return 'Waiting for you';
+    case 'reporting': return 'Writing up findings';
+    case 'your-turn': return 'Your turn';
     case 'done':
       if (x.endReason === 'interrupted') return 'Stopped';
-      if (x.endReason === 'error') return 'Finished with an error';
+      if (x.endReason === 'error') return 'Failed';
+      if (x.endReason === 'went quiet') return 'Presumed finished (went quiet)';
       return 'Finished';
     default: return 'Idle';
   }
+}
+
+// A finished helper's glyph says how it finished, not just that it did.
+function glyphKey(x) {
+  if (x.status !== 'done') return x.status;
+  return { error: 'failed', interrupted: 'stopped', 'went quiet': 'quiet' }[x.endReason] ?? 'done';
 }
 
 function elapsed(fromMs, nowMs) {
@@ -219,8 +227,8 @@ function escapeXml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-function glyph(status) {
-  return `<svg class="glyph" viewBox="-16 -16 32 32" aria-hidden="true">${bubbleMarkup(status) || '<circle r="4" fill="#bdb6d4"/>'}</svg>`;
+function glyph(x) {
+  return `<svg class="glyph" viewBox="-16 -16 32 32" aria-hidden="true">${bubbleMarkup(glyphKey(x))}</svg>`;
 }
 
 function roomName(id) {
@@ -241,11 +249,11 @@ bridge.onSnapshot?.((s) => {
 function rowHtml(key, x, name, sub) {
   const what = statusText(x);
   const detail = !prefs.private && x.activity?.detail ? ` · ${x.activity.detail}` : '';
-  const warn = x.status === 'blocked' || x.status === 'your-turn';
+  const warn = x.status === 'blocked' || x.status === 'your-turn' || glyphKey(x) === 'failed';
   const where = sub ? ` in the ${roomName(x.room)}` : '';
-  return `<button class="row${sub ? ' sub' : ''}" data-key="${key}" aria-pressed="${key === selected}"
+  return `<button class="row${sub ? ' sub' : ''}" data-key="${escapeXml(key)}" aria-pressed="${key === selected}"
       title="${escapeXml(`${name}${where}: ${what}${detail}`)}">
-      ${glyph(x.status)}
+      ${glyph(x)}
       <span class="who"><span class="name">${escapeXml(name)}</span>
         <span class="what${warn ? ' warn' : ''}">${escapeXml(what + detail)}</span></span>
       <span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
@@ -311,22 +319,51 @@ function renderCensus(s) {
   return (s.demo ? 'Demo · ' : '') + parts.join(' · ');
 }
 
+// Folder paths carry the user name, so they only show with privacy off.
 function renderSource(s) {
   if (s.demo) return 'Showing demo patients. Turn off “Demo patients” to see your own sessions.';
   const roots = s.watcher.roots;
   if (!roots.length) return 'Connecting…';
+  const where = (list) => (prefs.private ? 'your Claude Code transcripts folder' : list.map((r) => r.path).join(', '));
   const ok = roots.filter((r) => r.state === 'ok');
-  if (ok.length) return `Watching ${ok.map((r) => r.path).join(', ')} · ${s.watcher.filesTailed} transcript${s.watcher.filesTailed === 1 ? '' : 's'} open`;
-  return `No transcript folder yet at ${roots.map((r) => r.path).join(' or ')}. It appears after your first Claude Code session.`;
+  const n = s.watcher.filesTailed;
+  if (ok.length) return `Watching ${where(ok)} · ${n} transcript${n === 1 ? '' : 's'} open`;
+  if (roots.every((r) => r.state === 'missing')) {
+    return `No transcripts yet in ${where(roots)}. They appear after your first Claude Code session.`;
+  }
+  return `Cannot read ${where(roots)}. See “Needs attention”.`;
 }
 
+// Each problem: a label that is safe on a shared screen, and a detail
+// (paths, file names) that shows only with privacy off.
 function renderProblems(s) {
-  const list = [...(s.problems || [])];
-  if (s.stats.malformedLines) {
-    list.push(`${s.stats.malformedLines} transcript line${s.stats.malformedLines === 1 ? '' : 's'} could not be read${s.stats.lastProblem ? ` (last: ${s.stats.lastProblem})` : ''}.`);
+  const plural = (n, one, many) => (n === 1 ? one : many);
+  const list = (s.problems || []).map((p) => ({
+    label: p.count > 1 ? `${p.label} (×${p.count})` : p.label,
+    detail: p.detail,
+  }));
+  for (const r of s.watcher.roots || []) {
+    if (r.state !== 'ok' && r.state !== 'missing' && r.state !== 'pending') {
+      list.push({ label: `A transcripts folder is ${r.state}`, detail: r.path });
+    }
   }
-  if (s.stats.unlinkedSidechains) {
-    list.push(`${s.stats.unlinkedSidechains} helper transcript${s.stats.unlinkedSidechains === 1 ? '' : 's'} could not be matched to the call that started ${s.stats.unlinkedSidechains === 1 ? 'it' : 'them'}; ${s.stats.unlinkedSidechains === 1 ? 'it is' : 'they are'} not shown.`);
+  const st = s.stats;
+  if (st.malformedLines) {
+    list.push({
+      label: `${st.malformedLines} transcript ${plural(st.malformedLines, 'line', 'lines')} could not be read`,
+      detail: st.lastProblem ? `last: ${st.lastProblem}` : '',
+    });
+  }
+  if (st.unlinkedSidechains) {
+    const n = st.unlinkedSidechains;
+    list.push({ label: `${n} helper ${plural(n, 'transcript', 'transcripts')} could not be matched to the call that started ${plural(n, 'it', 'them')}, so ${plural(n, 'it is', 'they are')} not shown` });
+  }
+  if (st.unmatchedRelays) {
+    const n = st.unmatchedRelays;
+    list.push({ label: `${n} relayed helper ${plural(n, 'update', 'updates')} named a call that is not in view, so ${plural(n, 'it is', 'they are')} not shown` });
+  }
+  if (st.untimedEntries) {
+    list.push({ label: `${st.untimedEntries} transcript ${plural(st.untimedEntries, 'entry has', 'entries have')} no timestamp and did not count as activity` });
   }
   return list;
 }
@@ -362,7 +399,9 @@ function render(force = false) {
   $('chart').hidden = !chart;
   if (chart) $('chart-body').innerHTML = chart;
   $('problems').hidden = problems.length === 0;
-  $('problem-list').innerHTML = problems.map((p) => `<li>${escapeXml(p)}</li>`).join('');
+  $('problem-list').innerHTML = problems
+    .map((p) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}</li>`)
+    .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
 }

@@ -12,11 +12,11 @@
   --line: #eadfd3;
   --ink: #3b3450;
   --ink-muted: #675f7a;
-  --accent: #3f8783;
+  --accent: #2f6f6b;
   --accent-soft: #dcefeb;
-  --warn: #b5443f;
+  --warn: #a33a36;
   --warn-soft: #fbe3df;
-  --focus: #3f8783;
+  --focus: #2f6f6b;
   --label-bg: rgba(255, 250, 244, 0.92);
 
   --r-sm: 6px;
@@ -122,14 +122,16 @@ body {
 /* ---- people ----------------------------------------------------------- */
 
 .person { cursor: pointer; outline: none; }
+.person .hit { fill: transparent; }
 .person .select-ring { fill: none; stroke: transparent; stroke-width: 2; }
-.person.selected .select-ring,
-.person:focus-visible .select-ring { stroke: var(--focus); stroke-dasharray: 4 3; }
+/* selected: dashed ring; keyboard focus: thicker solid ring */
+.person.selected .select-ring { stroke: var(--focus); stroke-dasharray: 4 3; }
+.person:focus-visible .select-ring { stroke: var(--focus); stroke-width: 3.5; stroke-dasharray: none; }
 .person .tag rect { fill: var(--label-bg); }
 .person .tag text { font: 600 10.5px var(--font); fill: var(--ink); }
 body.no-tags .person:not(.selected):not(:focus-visible) .tag { display: none; }
 
-.b-bg { fill: #ffffff; stroke: #d8cfc6; stroke-width: 1; }
+.b-bg { fill: #ffffff; stroke: #9c8f84; stroke-width: 1; }
 .b-q { font: 700 13px var(--font); fill: #ffffff; }
 .dot { fill: #675f7a; }
 .spin { transform-origin: 0 0; animation: spin 1s linear infinite; }
@@ -182,12 +184,13 @@ h2 {
   color: var(--ink-muted);
 }
 
-details > summary { list-style: none; cursor: pointer; }
+details > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 details > summary::-webkit-details-marker { display: none; }
 details > summary h2 { display: inline; }
 details > summary h2::before { content: "▸ "; }
 details[open] > summary h2::before { content: "▾ "; }
-details[open] > summary { margin-bottom: var(--s-3); }
+details[open] > summary { margin-bottom: var(--s-2); }
+details > summary h2 { margin: 0; }
 .count { font-variant-numeric: tabular-nums; }
 
 .card {
@@ -275,15 +278,17 @@ details[open] > summary { margin-bottom: var(--s-3); }
 .problems { background: var(--warn-soft); }
 .problems h2 { color: var(--warn); }
 .problems ul { margin: 0; padding-left: var(--s-4); font-size: 12px; overflow-wrap: anywhere; }
+.problems li + li { margin-top: var(--s-1); }
+.problems .d { color: var(--ink-muted); }
 
 .controls {
   margin-top: auto;
-  padding: var(--s-3) var(--s-5) var(--s-4);
+  padding: var(--s-2) var(--s-5) var(--s-3);
   border-top: 1px solid var(--line);
   display: grid;
-  gap: var(--s-1);
+  gap: 0;
 }
-.switch { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; font-size: 13px; cursor: pointer; }
+.switch { display: flex; align-items: center; gap: var(--s-2); min-height: 44px; font-size: 13px; cursor: pointer; }
 .switch input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
 
 @media (max-width: 1100px) {

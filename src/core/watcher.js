@@ -77,7 +77,7 @@ class TranscriptWatcher {
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch (err) {
-      if (err.code !== 'ENOENT') this.onProblem(`Cannot list ${dir}: ${err.code || err.message}`);
+      if (err.code !== 'ENOENT') this.onProblem(`A transcript folder could not be listed (${err.code || 'error'})`, dir);
       return;
     }
     for (const ent of entries) {
@@ -95,13 +95,16 @@ class TranscriptWatcher {
     try {
       stat = fs.statSync(file);
     } catch (err) {
-      if (err.code !== 'ENOENT') this.onProblem(`Cannot read ${path.basename(file)}: ${err.code}`);
+      if (err.code !== 'ENOENT') this.onProblem(`A transcript could not be opened (${err.code || 'error'})`, file);
       return;
     }
     if (now - stat.mtimeMs > this.opt.activeWindowMs) return;
     const start = Math.max(0, stat.size - this.opt.maxInitialBytes);
-    // Starting mid-file: the first partial line is dropped, not parsed.
-    this.files.set(file, { offset: start, remainder: Buffer.alloc(0), mtimeMs: 0, skipFirst: start > 0 });
+    // Starting mid-file: drop the partial first line, unless we happen to
+    // start exactly on a line boundary.
+    this.files.set(file, {
+      offset: start, remainder: Buffer.alloc(0), mtimeMs: 0, skipFirst: start > 0 && !startsAtLine(file, start),
+    });
   }
 
   readNew(file, state, now) {
@@ -110,7 +113,7 @@ class TranscriptWatcher {
       stat = fs.statSync(file);
     } catch (err) {
       this.files.delete(file);
-      if (err.code !== 'ENOENT') this.onProblem(`Stopped reading ${path.basename(file)}: ${err.code}`);
+      if (err.code !== 'ENOENT') this.onProblem(`Stopped reading a transcript (${err.code || 'error'})`, file);
       return;
     }
     if (stat.size < state.offset) {
@@ -125,36 +128,38 @@ class TranscriptWatcher {
     }
 
     const length = stat.size - state.offset;
-    const buf = Buffer.alloc(length);
+    let buf = Buffer.alloc(length);
     let fd;
     try {
       fd = fs.openSync(file, 'r');
       const read = fs.readSync(fd, buf, 0, length, state.offset);
+      buf = buf.subarray(0, read);
       state.offset += read;
-      this.consume(file, state, buf.subarray(0, read), now);
     } catch (err) {
-      this.onProblem(`Read failed for ${path.basename(file)}: ${err.code || err.message}`);
+      this.onProblem(`Reading a transcript failed (${err.code || 'error'})`, file);
+      return;
     } finally {
       if (fd !== undefined) fs.closeSync(fd);
     }
     state.mtimeMs = stat.mtimeMs;
+    for (const line of this.split(state, buf)) this.emitLine(file, line, now);
   }
 
-  consume(file, state, chunk, now) {
-    let data = state.remainder.length ? Buffer.concat([state.remainder, chunk]) : chunk;
+  // Complete lines from a chunk; the unfinished tail is kept for next time.
+  // State is settled before any line is handed on, so a failure downstream
+  // cannot desynchronise the tail.
+  split(state, chunk) {
+    const data = state.remainder.length ? Buffer.concat([state.remainder, chunk]) : chunk;
+    const lines = [];
     let start = 0;
     for (let i = 0; i < data.length; i++) {
       if (data[i] !== 0x0a) continue;
-      const line = data.subarray(start, i).toString('utf8');
+      if (state.skipFirst) state.skipFirst = false;
+      else lines.push(data.subarray(start, i).toString('utf8'));
       start = i + 1;
-      if (state.skipFirst) {
-        state.skipFirst = false;
-        continue;
-      }
-      this.emitLine(file, line, now);
     }
-    // Bytes after the last newline are an unfinished line; keep them.
     state.remainder = Buffer.from(data.subarray(start));
+    return lines;
   }
 
   emitLine(file, line, now) {
@@ -165,7 +170,26 @@ class TranscriptWatcher {
       this.onMalformed(file, err);
       return;
     }
-    if (entry) this.onEntry(file, entry, now);
+    if (!entry) return;
+    try {
+      this.onEntry(file, entry, now);
+    } catch (err) {
+      this.onProblem(`A transcript line could not be processed (${err.name})`, `${path.basename(file)}: ${err.message}`);
+    }
+  }
+}
+
+function startsAtLine(file, pos) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(1);
+    fs.readSync(fd, b, 0, 1, pos - 1);
+    return b[0] === 0x0a;
+  } catch {
+    return false; // unknown: dropping one line is the safe choice
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
