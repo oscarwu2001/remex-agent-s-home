@@ -244,3 +244,17 @@ test('entries without a timestamp are counted and do not freshen a session', () 
   assert.equal(snap.stats.untimedEntries, 1);
   assert.equal(snap.sessions.length, 0);
 });
+
+test('one prompt shared by helpers of different types is not guessed', () => {
+  const t = new Tracker();
+  const p = 'Check the registration module for problems of any kind';
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'k1', 'Task', { subagent_type: 'reviewer', prompt: p }),
+    toolUse(1, 'k2', 'Task', { subagent_type: 'silent-failure-hunter', prompt: p }),
+  ]);
+  feed(t, '/p/sess-1/subagents/agent-s.jsonl', [prompt(2, p, sidechain('s')), toolUse(3, 'g', 'Grep', {}, sidechain('s'))]);
+  const snap = t.snapshot(s(2) + TIMING.unlinkedGraceMs + 1);
+  assert.ok(snap.sessions[0].agents.every((a) => a.history.length === 0));
+  assert.equal(snap.stats.unlinkedSidechains, 1);
+});

@@ -195,6 +195,8 @@ class Tracker {
     // one helper's work on another's figure with no sign anything was wrong.
     const exact = open.filter((s) => s.prompt && samePrompt(s.prompt, stream.prompt));
     if (exact.length === 0) return false;
+    // Identical prompts for different agent types cannot be told apart.
+    if (new Set(exact.map((s) => s.type)).size > 1) return false;
     const match = exact[0];
 
     match.linked = true;
