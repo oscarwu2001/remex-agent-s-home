@@ -1066,6 +1066,37 @@ $('layout-body').addEventListener('submit', async (e) => {
 
 renderLayoutEditor();
 
+// ---- performance report --------------------------------------------------------
+
+if (!bridge.buildReport) {
+  // The browser preview cannot read transcripts; the desktop app can.
+  $('report-open').disabled = true;
+  $('report-files').hidden = true;
+  $('report-status').textContent = 'The report is built by the desktop app.';
+}
+
+$('report-open').addEventListener('click', async () => {
+  const button = $('report-open');
+  button.disabled = true;
+  const status = $('report-status');
+  status.textContent = 'Reading your transcripts…';
+  try {
+    const res = await bridge.buildReport(Number($('report-days').value));
+    if (!res.ok) {
+      status.textContent = res.error;
+      return;
+    }
+    const x = res.summary;
+    const pctText = x.successRate === undefined ? '' : `, ${Math.round(x.successRate * 100)}% finished`;
+    status.textContent = `Opened: last ${x.days} days, ${x.runs} helper run${x.runs === 1 ? '' : 's'}${pctText}.`;
+  } catch (err) {
+    status.textContent = `The report could not be built: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+$('report-files').addEventListener('click', () => bridge.showReportFiles?.());
+
 // ---- settings panel ------------------------------------------------------------
 
 function setSettings(open) {

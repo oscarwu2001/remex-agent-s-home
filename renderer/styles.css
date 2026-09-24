@@ -553,3 +553,5 @@ details > summary h2 { margin: 0; }
 .sun.noon { transform-origin: 0 0; }
 .sun.noon .sun-glow { opacity: 0.75; }
 .settings .field select { width: 100%; }
+.report-actions { margin: var(--s-2) 0 0; }
+.settings .hint { margin: var(--s-1) 0 var(--s-2); }

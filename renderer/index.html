@@ -98,6 +98,23 @@
         <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
       </section>
 
+      <section class="settings-group" aria-labelledby="report-h">
+        <h3 id="report-h">Performance report</h3>
+        <p class="hint">How each agent has been doing: runs, finished rate, re-runs, time, tokens and a score, by day and by week.</p>
+        <label class="field" for="report-days">Period
+          <select id="report-days">
+            <option value="7">Last 7 days</option>
+            <option value="28" selected>Last 28 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+        <div class="form-actions report-actions">
+          <button type="button" class="button" id="report-open">Open report</button>
+          <button type="button" class="link-btn" id="report-files">Show the files</button>
+        </div>
+        <p class="hint" id="report-status" aria-live="polite"></p>
+      </section>
+
       <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
         <h3 id="layout-h">Hospital layout <span class="count" id="layout-count"></span></h3>
         <div id="layout-body"></div>

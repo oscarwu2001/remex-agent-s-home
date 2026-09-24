@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -188,6 +188,65 @@ app.whenReady().then(() => {
     version: app.getVersion(),
   });
   ipcMain.handle('home:config', config);
+
+  // The performance report, built in a separate process so reading weeks of
+  // transcripts never freezes the hospital, then shown in its own window.
+  // It reads the same folders this app watches, WSL homes included.
+  const reportsDir = path.join(app.getPath('userData'), 'reports');
+  let lastReport;
+  let reportWin;
+  ipcMain.handle('home:build-report', (_event, days) => new Promise((resolve) => {
+    const n = Number(days);
+    if (![7, 28, 90].includes(n)) {
+      resolve({ ok: false, error: 'Choose 7, 28 or 90 days.' });
+      return;
+    }
+    const roots = [...watcher.roots, ...wslWatcher.roots];
+    const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
+      ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots)], { stdio: 'pipe' });
+    let err = '';
+    let answered = false;
+    child.stderr.on('data', (d) => { err += d; });
+    child.stdout.on('data', () => {}); // the CLI summary; nothing to show here
+    child.on('message', (result) => {
+      answered = true;
+      if (result && result.ok) {
+        lastReport = result;
+        openReport(result.html);
+        resolve({ ok: true, summary: result.summary, builtAt: Date.now() });
+      } else {
+        resolve({ ok: false, error: (result && result.error) || 'The report could not be built.' });
+      }
+    });
+    child.on('exit', (code) => {
+      if (answered) return;
+      resolve({ ok: false, error: `The report could not be built (exit ${code})${err ? `: ${err.trim().split('\n').pop()}` : ''}` });
+    });
+  }));
+
+  function openReport(file) {
+    if (reportWin && !reportWin.isDestroyed()) {
+      reportWin.loadFile(file);
+      reportWin.focus();
+      return;
+    }
+    reportWin = new BrowserWindow({
+      width: 1180,
+      height: 900,
+      title: 'Agent performance',
+      autoHideMenuBar: true,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    reportWin.webContents.on('will-navigate', (e) => e.preventDefault());
+    reportWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    reportWin.loadFile(file);
+  }
+
+  ipcMain.handle('home:show-report-files', () => {
+    if (lastReport) shell.showItemInFolder(lastReport.html);
+    else shell.openPath(reportsDir);
+    return true;
+  });
 
   // Saving a layout: validate, write, then use it. Helpers already on shift
   // keep their room; new ones follow the new assignments.

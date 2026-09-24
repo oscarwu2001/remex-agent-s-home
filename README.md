@@ -71,6 +71,8 @@ The layout is saved in `%APPDATA%\Agents Home\layout.json`. Assignments written 
 
 ## Performance report
 
+Open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:
+
 ```powershell
 npm run report                 # last 28 days
 npm run report -- --days 7     # last week

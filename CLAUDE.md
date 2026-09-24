@@ -11,7 +11,7 @@ Vocabulary is in `CONTEXT.md`.
 - `npm start`: run the app against your real transcripts.
 - `npm run demo`: run the app with scripted demo patients.
 - `npm run preview`: serve the renderer to a browser at `http://localhost:5178/?demo=1` (design work, screenshots).
-- `npm run report`: build the agent performance report (HTML and CSV) in `out/reports/` from the real transcripts.
+- `npm run report`: build the agent performance report (HTML and CSV) in `out/reports/` from the real transcripts. The app builds the same report from Settings, in a utility process (`src/report/agent-report.js`), into its own data folder.
 - `npm run dist:win`: build `dist/AgentsHome-Setup-<v>.exe` and the portable exe. Windows only (Linux needs Wine); CI builds it on every push.
 
 There are no `needs_data`, `slow` or GPU markers here. Every test is fast and uses invented transcripts.
@@ -31,6 +31,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 - `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `roster.js`, `activity.js`, `metrics.js` for the report).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
 - `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital, `people.js` figures, `app.js` glue and board, `demo.js`.
+- `src/report/`: the performance report (HTML + CSV), run by the app or `scripts/agent-report.js`.
 - `test/`: `node:test`, one file per core module.
 
 ## Delegation
