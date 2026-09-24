@@ -24,7 +24,14 @@ const CELL = 8;
 // viewer is lowest and the farthest is highest. Index = cellDepth + 2.
 // The core runs 6, 4, 2, 2, 0 from back to front; the ring carries on.
 const ELEVATION = [9, 8, 6, 4, 2, 2, 0, -1, -2];
-const elevationAt = (c, r) => ELEVATION[cellDepth(c, r) + 2];
+// Mid-swing a cell's depth is fractional, and its height is read between
+// the two nearest steps, so towers rise and sink as the building turns.
+function elevationAt(c, r) {
+  const i = Math.min(ELEVATION.length - 1, Math.max(0, cellDepth(c, r) + 2));
+  const lo = Math.floor(i);
+  const hi = Math.min(ELEVATION.length - 1, lo + 1);
+  return ELEVATION[lo] + (ELEVATION[hi] - ELEVATION[lo]) * (i - lo);
+}
 // Tower colours for departments, taken in turn from the colourway.
 const DEPT_MATERIALS = ['rose', 'sky', 'mint', 'lilac', 'sand', 'coral', 'teal'];
 const deptMaterial = new Map(); // dept id -> material key
@@ -133,6 +140,27 @@ export function slotPoint(roomId, index) {
   const lap = Math.floor(index / slots.length);
   const jitter = lap ? [((lap * 37) % 7) / 10 - 0.3, ((lap * 53) % 7) / 10 - 0.3] : [0, 0];
   return [r.x + u + jitter[0], r.y + v + jitter[1], r.z];
+}
+
+// Where an attending goes to do a kind of work, in room-local tiles; the
+// index spreads several attendings out.
+const WORK_SPOTS = {
+  shelf: ['research-office', (i) => [1.5, 3.3 + (i % 3) * 0.8]], // the bookshelf
+  bench: ['laboratory', (i) => [1.9, 1.7 + (i % 4) * 0.9]], // the lab bench
+  counter: ['nurses-station', (i) => [1.6 + (i % 4) * 1.1, 2.2]], // front of the counter
+};
+
+export function workSpot(kind, index) {
+  const [room, at] = WORK_SPOTS[kind];
+  const r = LAYOUT[room];
+  if (!r) return undefined;
+  const [u, v] = at(index);
+  return { room, point: [r.x + u, r.y + v, r.z] };
+}
+
+// The route from one room to another, through the station.
+export function routeBetween(fromRoom, toRoom) {
+  return [...routeTo(fromRoom).reverse(), ...routeTo(toRoom).slice(1)];
 }
 
 export function slotCount(roomId) {

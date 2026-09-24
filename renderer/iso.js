@@ -1,4 +1,4 @@
-import { shade } from './themes.js';
+import { shade, mix } from './themes.js';
 
 // Isometric projection and flat-shaded primitives, Monument Valley style:
 // no outlines, three tones per solid (top light, left mid, right dark).
@@ -13,20 +13,39 @@ export const ZH = 35; // screen height of one unit of z
 // The view: the world turned in quarter steps about its centre, so the
 // tower can be walked around. Everything projects through P, so figures,
 // labels and geometry all follow.
+// The view can sit at any angle while it swings round, and settles on whole
+// quarter turns. VIEW is measured in quarter turns (1 = 90 degrees).
 const CX = 11;
 const CY = 11;
 let VIEW = 0;
+let COS = 1;
+let SIN = 0;
 
 export function setView(quarterTurns) {
   VIEW = ((quarterTurns % 4) + 4) % 4;
+  const a = (VIEW * Math.PI) / 2;
+  // Exact values on the quarters, so resting views have no rounding drift.
+  const snap = (v) => (Math.abs(v) < 1e-9 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-9 ? Math.sign(v) : v);
+  COS = snap(Math.cos(a));
+  SIN = snap(Math.sin(a));
 }
 
 export function getView() {
   return VIEW;
 }
 
+// The quarter the view is nearest to: which walls stand and which faces
+// carry ornaments switch over at the halfway point of a swing.
+export function restingView() {
+  return Math.round(VIEW) % 4;
+}
+
 function turn(a, b) {
-  for (let i = 0; i < VIEW; i++) [a, b] = [-b, a];
+  return [a * COS - b * SIN, a * SIN + b * COS];
+}
+
+function turnResting(a, b) {
+  for (let i = 0; i < restingView(); i++) [a, b] = [-b, a];
   return [a, b];
 }
 
@@ -51,7 +70,7 @@ export function viewDepth(x, y) {
 // Whether a face whose outward normal is (nx, ny) in world axes faces the
 // viewer in the current view.
 export function faceVisible(nx, ny) {
-  const [a, b] = turn(nx, ny);
+  const [a, b] = turnResting(nx, ny);
   return a > 0.5 || b > 0.5;
 }
 
@@ -91,24 +110,36 @@ export function applyTheme(theme) {
   for (const [room, base] of Object.entries(theme.rooms)) M[room] = { ...shade(base, theme), base };
 }
 
-// Faces are worked out in view space, so the lit and shaded sides are
-// always the ones facing the viewer, whichever way the tower is turned.
+// A box is drawn as a prism at whatever angle the view is at: the side
+// faces turned toward the viewer, then the top. A face pointing down-right
+// on screen takes the material's right (shaded) tone, down-left its left
+// tone, and a face in between blends the two, so shading turns smoothly.
+const blends = new Map();
+function blend(m, t) {
+  if (t <= 0.02) return m.left;
+  if (t >= 0.98) return m.right;
+  const k = `${m.left}${m.right}${Math.round(t * 20)}`;
+  if (!blends.has(k)) blends.set(k, mix(m.left, m.right, Math.round(t * 20) / 20));
+  return blends.get(k);
+}
+
 export function box(x, y, z, w, d, h, m, extra = '') {
-  const corners = [toView(x, y), toView(x + w, y), toView(x, y + d), toView(x + w, y + d)];
-  const vx = Math.min(...corners.map((c) => c[0]));
-  const vy = Math.min(...corners.map((c) => c[1]));
-  const vw = Math.max(...corners.map((c) => c[0])) - vx;
-  const vd = Math.max(...corners.map((c) => c[1])) - vy;
   const t = z + h;
+  const corners = [[x, y], [x + w, y], [x + w, y + d], [x, y + d]];
+  const normals = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // edge i runs corner i -> i+1
   const face = (list, fill) =>
-    `<polygon points="${fmt(list, Pv)}" fill="${fill}" stroke="${fill}" stroke-width="0.6" stroke-linejoin="round"/>`;
-  return (
-    `<g ${extra}>` +
-    face([[vx, vy + vd, t], [vx + vw, vy + vd, t], [vx + vw, vy + vd, z], [vx, vy + vd, z]], m.left) +
-    face([[vx + vw, vy, t], [vx + vw, vy + vd, t], [vx + vw, vy + vd, z], [vx + vw, vy, z]], m.right) +
-    face([[vx, vy, t], [vx + vw, vy, t], [vx + vw, vy + vd, t], [vx, vy + vd, t]], m.top) +
-    '</g>'
-  );
+    `<polygon points="${pts(list)}" fill="${fill}" stroke="${fill}" stroke-width="0.6" stroke-linejoin="round"/>`;
+  let sides = '';
+  for (let i = 0; i < 4; i++) {
+    const [nx, ny] = turn(...normals[i]);
+    if (nx + ny <= 1e-6) continue; // faces away from the viewer
+    const [ax, ay] = corners[i];
+    const [bx, by] = corners[(i + 1) % 4];
+    const toRight = Math.min(1, Math.max(0, (nx - ny + 1) / 2));
+    sides += face([[ax, ay, t], [bx, by, t], [bx, by, z], [ax, ay, z]], blend(m, toRight));
+  }
+  const top = face([[x, y, t], [x + w, y, t], [x + w, y + d, t], [x, y + d, t]], m.top);
+  return `<g ${extra}>${sides}${top}</g>`;
 }
 
 // Floor with a quiet two-tone tile pattern.

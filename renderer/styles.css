@@ -368,7 +368,6 @@ details > summary h2 { margin: 0; }
 
 #scene { cursor: grab; touch-action: none; }
 #scene.dragging, #scene.turning-drag { cursor: grabbing; }
-#scene.turning-drag #world { transition: transform 0.08s linear; }
 #scene.turning #world { opacity: 0.001; }
 #world { transition: opacity 0.25s ease; }
 
@@ -526,3 +525,31 @@ details > summary h2 { margin: 0; }
   margin: 0 0 var(--s-2); font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--ink-muted);
 }
+
+/* ---- time of day ----------------------------------------------------------- */
+
+/* Each part of the day has its own sky; noon keeps the colourway's own. */
+:root[data-phase="dawn"] { --sky-top: #c9c3ec; --sky-mid: #f9c4c4; --sky-bottom: #ffe0c2; --mist: #ffe0c2; --cloud: #fff1ec; }
+:root[data-phase="morning"] { --sky-top: #bfe3f7; --sky-mid: #dff0f6; --sky-bottom: #fbf6ea; --mist: #fbf6ea; --cloud: #ffffff; }
+:root[data-phase="afternoon"] { --sky-top: #b9d2ef; --sky-mid: #f7d9b5; --sky-bottom: #ffe6c0; --mist: #ffe6c0; --cloud: #fff6e8; }
+.stage { transition: background 1.2s ease; }
+
+/* The sun and moon hang in the sky itself, behind the building, and cross
+   it through the day. */
+.sky-body { position: absolute; width: 84px; height: 84px; margin: -42px 0 0 -42px; z-index: 0; pointer-events: none; transition: left 1.5s ease, top 1.5s ease; }
+.sky-body svg { width: 100%; height: 100%; overflow: visible; }
+#scene { position: relative; z-index: 1; }
+:root[data-phase="dawn"] .sky-body { left: 16%; top: 20%; }
+:root[data-phase="morning"] .sky-body { left: 30%; top: 8%; }
+:root[data-phase="noon"] .sky-body { left: 62%; top: 5%; }
+:root[data-phase="afternoon"] .sky-body { left: 88%; top: 7%; }
+:root[data-phase="night"] .sky-body { left: 88%; top: 7%; }
+.camera, .cam-hint, .source { z-index: 2; }
+.sun.dawn .sun-face { fill: #ffc48a; stroke: #ffa56b; }
+.sun.dawn .sun-rays { fill: #ffb27a; }
+.sun.dawn .sun-glow { fill: #ffd9b8; }
+.sun.afternoon .sun-face { fill: #ffd27a; stroke: #ffb44f; }
+.sun.afternoon .sun-rays { fill: #ffc25e; }
+.sun.noon { transform-origin: 0 0; }
+.sun.noon .sun-glow { opacity: 0.75; }
+.settings .field select { width: 100%; }

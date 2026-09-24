@@ -10,6 +10,7 @@
 </head>
 <body>
   <main class="stage" aria-label="Hospital map">
+    <div class="sky-body" id="sky-body" aria-hidden="true"></div>
     <svg id="scene" role="img" aria-labelledby="scene-title">
       <title id="scene-title">Isometric hospital with a room for each kind of agent</title>
       <defs id="defs"></defs>
@@ -78,7 +79,16 @@
             <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span>Grove</label>
           </div>
         </fieldset>
-        <label class="switch"><input type="checkbox" id="opt-night"> <span>Night</span></label>
+        <label class="field" for="opt-time">Time of day
+          <select id="opt-time">
+            <option value="auto">Follow my clock</option>
+            <option value="dawn">Early morning</option>
+            <option value="morning">Morning</option>
+            <option value="noon">Noon</option>
+            <option value="afternoon">Afternoon</option>
+            <option value="night">Night</option>
+          </select>
+        </label>
       </section>
 
       <section class="settings-group" aria-labelledby="screen-h">

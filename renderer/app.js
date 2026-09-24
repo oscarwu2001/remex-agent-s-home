@@ -1,10 +1,10 @@
 import {
-  buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, currentHeights, setHeights, floorOutline, roomFrame, configureRooms, cellOutline,
+  buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, setHeights, workSpot, routeBetween, floorOutline, roomFrame, configureRooms, cellOutline,
 } from './scene.js';
-import { setView, getView } from './iso.js';
+import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
-import { THEMES, DEFAULT_THEME, themeFor } from './themes.js';
+import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 let config = await bridge.config();
@@ -24,19 +24,32 @@ let layoutError = '';
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
 const peopleLayer = $('people');
-const world = $('world');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
-const prefs = { private: true, names: true, theme: DEFAULT_THEME, night: false, view: 0, demo: false };
+// time: 'auto' follows the computer's clock, or a fixed part of the day.
+const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', view: 0, demo: false };
+let saved = {};
 try {
-  Object.assign(prefs, JSON.parse(localStorage.getItem('agents-home-prefs') || '{}'));
+  saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}');
+  Object.assign(prefs, saved);
 } catch {
   /* storage unavailable or unreadable: defaults stand */
 }
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
 if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
+if ('night' in prefs) {
+  // The old Night switch becomes a fixed night; otherwise follow the clock.
+  if (prefs.night && saved.time === undefined) prefs.time = 'night';
+  delete prefs.night;
+}
+if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.time = 'auto';
+
+// The part of the day being shown right now.
+function phase() {
+  return prefs.time === 'auto' ? phaseAt(new Date()) : prefs.time;
+}
 
 function savePrefs() {
   try {
@@ -48,32 +61,51 @@ function savePrefs() {
 
 function applyPrefs() {
   document.documentElement.dataset.theme = prefs.theme;
-  document.documentElement.dataset.time = prefs.night ? 'night' : 'day';
+  document.documentElement.dataset.time = phase() === 'night' ? 'night' : 'day';
+  document.documentElement.dataset.phase = phase();
   document.body.classList.toggle('no-tags', !prefs.names);
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
   for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === prefs.theme;
   $('opt-demo').checked = prefs.demo;
-  $('opt-night').checked = prefs.night;
+  const sel = $('opt-time');
+  sel.value = prefs.time;
+  sel.options[0].textContent = `Follow my clock (now: ${PHASES.find((p) => p.id === phaseAt(new Date())).name.toLowerCase()})`;
 }
 
-for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo'], ['opt-night', 'night']]) {
+for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo']]) {
   $(id).addEventListener('change', (e) => {
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
     savePrefs();
     applyPrefs();
-    if (key === 'night') drawScene();
     render(true);
   });
 }
+
+$('opt-time').addEventListener('change', (e) => {
+  prefs.time = e.target.value;
+  savePrefs();
+  applyPrefs();
+  drawScene();
+});
+
+// Following the clock: look again every minute and redraw when the part of
+// the day changes.
+let shownPhase;
+setInterval(() => {
+  if (phase() === shownPhase) return;
+  applyPrefs();
+  drawScene();
+}, 60_000);
 
 // ---- scene -----------------------------------------------------------------
 
 // Redrawn when the colourway, day/night or the view turn changes, and on
 // every frame while towers rise and sink after a turn.
 function drawGeometry() {
-  const { defs, geometry } = buildScene(themeFor(prefs.theme, prefs.night));
+  shownPhase = phase();
+  const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase));
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
@@ -107,7 +139,8 @@ function drawBackdrop() {
   // Stars only come out at night; a fixed pseudo-random field, not Math.random,
   // so they do not jump on every redraw.
   let stars = '';
-  if (prefs.night) {
+  const night = phase() === 'night';
+  if (night) {
     for (let i = 0; i < 70; i++) {
       const fx = ((i * 73) % 97) / 97;
       const fy = ((i * 41) % 89) / 89 * 0.6;
@@ -115,22 +148,22 @@ function drawBackdrop() {
       stars += `<circle class="star s${i % 3}" cx="${(o.x + o.w * fx).toFixed(1)}" cy="${(o.y + o.h * fy).toFixed(1)}" r="${r.toFixed(1)}"/>`;
     }
   }
-  // A cute tiny sun by day, a crescent moon by night, high in one corner.
-  const [cx, cy] = [o.x + o.w * 0.9, o.y + o.h * 0.13];
-  const sky = prefs.night
-    ? `<g class="moon" transform="translate(${cx} ${cy})">
+  // A cute tiny sun that crosses the sky through the day and a crescent
+  // moon at night, drawn in the sky layer behind the building.
+  $('sky-body').innerHTML = night
+    ? `<svg viewBox="-48 -48 96 96"><g class="moon">
         <circle r="30" class="moon-glow"/>
         <path d="M6,-20 A20,20 0 1 0 20,6 A15,15 0 1 1 6,-20 Z" class="moon-face"/>
-      </g>`
-    : `<g transform="translate(${cx} ${cy})"><g class="sun">
+      </g></svg>`
+    : `<svg viewBox="-48 -48 96 96"><g class="sun ${phase()}">
         <circle r="34" class="sun-glow"/>
         <g class="sun-rays">${Array.from({ length: 8 }, (_, i) => `<rect x="-2.5" y="-31" width="5" height="9" rx="2.5" transform="rotate(${i * 45})"/>`).join('')}</g>
         <circle r="17" class="sun-face"/>
         <path d="M-8,-2 q2.5,-3 5,0 M3,-2 q2.5,-3 5,0" class="sun-eyes"/>
         <path d="M-4,5 q4,4 8,0" class="sun-eyes"/>
         <circle cx="-10" cy="4" r="2.6" class="sun-blush"/><circle cx="10" cy="4" r="2.6" class="sun-blush"/>
-      </g></g>`;
-  $('clouds').innerHTML = sky + stars + clouds;
+      </g></svg>`;
+  $('clouds').innerHTML = stars + clouds;
 }
 
 // Room signs and floor click targets: both open that room. In build mode,
@@ -225,50 +258,70 @@ function showOverview() {
   updateCameraUi();
 }
 
-// A quarter turn. The tower turns at once, keeping the heights it had; then
-// every room rises or sinks to its height in the new view (nearest lowest,
-// farthest highest) and the stairs between them change with it.
-let leveling;
-function turnView(step) {
-  const before = currentHeights();
-  setView(getView() + step);
-  prefs.view = getView();
-  savePrefs();
-  // Anyone mid-walk finishes their walk at once: their route belonged to the old heights.
+// Turning. The whole building swings round smoothly, and because heights are
+// worked out from the angle, towers rise and sink and the stairs change
+// during the swing itself. It always comes to rest facing one of the four
+// directions. `angle` counts quarter turns without wrapping, so a swing
+// never takes the long way round.
+let angle = 0;
+let swing;
+let drawQueued = false;
+
+function showAngle(a) {
+  setView(a);
+  setHeights(targetHeights());
+  drawGeometry();
+  drawLabels();
+  placeLabels();
+}
+
+// Walks in progress end at once: their routes were planned for other heights.
+function settleWalkers() {
   for (const p of people.values()) {
     if (p.walking && !p.leaving) {
       p.path = [];
-      p.pos = p.seat.slice();
+      if (p.seat) p.pos = p.seat.slice();
     }
   }
-  svg.classList.add('turning');
-  drawScene();
-  requestAnimationFrame(() => svg.classList.remove('turning'));
-  frameCamera();
-  riseAndSink(before, targetHeights());
 }
 
-function riseAndSink(from, to) {
-  cancelAnimationFrame(leveling);
-  const ms = reducedMotion.matches ? 0 : 750;
+// Turned part-way, the building is wider than when square on, so the
+// camera steps back a little for the swing and comes in again after.
+function swingRoom() {
+  if (focusedRoom || cam.w < overview.w * 0.95) return;
+  const k = 1.22;
+  flyTo({ x: overview.x - (overview.w * (k - 1)) / 2, y: overview.y - (overview.h * (k - 1)) / 2, w: overview.w * k, h: overview.h * k }, 250);
+}
+
+function turnTo(target, ms = 900) {
+  cancelAnimationFrame(swing);
+  settleWalkers();
+  swingRoom();
+  const from = angle;
   const start = performance.now();
-  const ease = (t) => 1 - (1 - t) ** 3;
+  const dur = reducedMotion.matches ? 0 : ms * Math.min(1, Math.abs(target - from) || 1);
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
   const stepTo = (now) => {
-    const t = ms ? Math.min(1, (now - start) / ms) : 1;
-    const k = ease(t);
-    const h = {};
-    for (const id of Object.keys(to)) h[id] = (from[id] ?? to[id]) + (to[id] - (from[id] ?? to[id])) * k;
-    setHeights(h);
-    drawGeometry();
-    drawLabels();
-    placeLabels();
-    if (t < 1) leveling = requestAnimationFrame(stepTo);
-    else {
-      drawScene();
-      frameCamera();
+    const t = dur ? Math.min(1, (now - start) / dur) : 1;
+    angle = from + (target - from) * ease(t);
+    showAngle(angle);
+    if (t < 1) {
+      swing = requestAnimationFrame(stepTo);
+      return;
     }
+    angle = target;
+    prefs.view = ((target % 4) + 4) % 4;
+    savePrefs();
+    drawScene();
+    if (focusedRoom) visitRoom(focusedRoom);
+    else flyTo(overview, 350);
+    updateCameraUi();
   };
-  leveling = requestAnimationFrame(stepTo);
+  swing = requestAnimationFrame(stepTo);
+}
+
+function turnView(step) {
+  turnTo(Math.round(angle) + step);
 }
 
 function frameCamera() {
@@ -305,15 +358,16 @@ svg.addEventListener('wheel', (e) => {
   updateCameraUi();
 }, { passive: false });
 
-// Drag sideways to turn the tower a quarter at a time (keep dragging for
-// more turns). Right-drag, or Shift-drag, moves the view instead.
-const TURN_PX = 110;
+// Drag sideways to swing the building round; it follows the mouse and, on
+// release, settles on the nearest of the four directions. Right-drag, or
+// Shift-drag, moves the view instead.
+const PX_PER_QUARTER = 260;
 let drag;
 svg.addEventListener('contextmenu', (e) => e.preventDefault());
 svg.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.button !== 2) return;
   const mode = e.button === 2 || e.shiftKey ? 'pan' : 'turn';
-  drag = { mode, x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false };
+  drag = { mode, x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false, angle };
 });
 window.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -324,12 +378,20 @@ window.addEventListener('pointermove', (e) => {
   drag.moved = true;
   svg.classList.add(drag.mode === 'pan' ? 'dragging' : 'turning-drag');
   if (drag.mode === 'turn') {
-    // A little give while dragging, so the tower feels grabbed.
-    world.style.transform = `translateX(${(dx * 0.25).toFixed(1)}px)`;
-    if (Math.abs(dx) >= TURN_PX) {
-      turnView(dx > 0 ? -1 : 1);
-      drag.x = e.clientX;
-      world.style.transform = '';
+    if (!drag.swinging) {
+      drag.swinging = true;
+      cancelAnimationFrame(swing);
+      settleWalkers();
+      swingRoom();
+      drag.angle = angle;
+    }
+    angle = drag.angle - dx / PX_PER_QUARTER;
+    if (!drawQueued) {
+      drawQueued = true;
+      requestAnimationFrame(() => {
+        drawQueued = false;
+        showAngle(angle);
+      });
     }
     return;
   }
@@ -341,7 +403,7 @@ window.addEventListener('pointermove', (e) => {
 });
 window.addEventListener('pointerup', () => {
   svg.classList.remove('dragging', 'turning-drag');
-  world.style.transform = '';
+  if (drag?.swinging) turnTo(Math.round(angle), 450);
   // Let the click that follows this pointerup see whether it was a drag.
   setTimeout(() => { drag = undefined; }, 0);
 });
@@ -368,7 +430,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') showOverview();
 });
 
-setView(prefs.view ?? 0);
+angle = prefs.view ?? 0;
+setView(angle);
 drawScene();
 setViewBox(overview);
 updateCameraUi();
@@ -429,7 +492,7 @@ function syncPeople(snapshot) {
   const wanted = new Map();
   for (const s of snapshot.sessions) {
     wanted.set(`s:${s.id}`, { kind: 'session', room: 'nurses-station', data: s, name: s.project });
-    for (const a of s.agents) wanted.set(`a:${a.id}`, { kind: 'agent', room: a.room, data: a, name: a.type });
+    for (const a of s.agents) wanted.set(`a:${a.id}`, { kind: 'agent', room: a.room, data: a, name: a.type, session: s.id });
   }
 
   // A helper whose room is gone (a department removed while it was on
@@ -454,7 +517,11 @@ function syncPeople(snapshot) {
         onSelect: select,
       });
       p.seat = home;
-      if (w.kind === 'agent') p.walk([...routeTo(w.room), home]);
+      p.home = home.slice();
+      if (w.kind === 'agent') {
+        p.walk([...routeTo(w.room), home]);
+        escort(people.get(`s:${w.session}`), w.room);
+      }
       people.set(key, p);
     }
     if (p.roomId !== w.room && !p.leaving) {
@@ -465,6 +532,7 @@ function syncPeople(snapshot) {
     }
     p.setStatus(glyphKey(w.data));
     p.setActivity(w.data.activity?.kind);
+    if (w.kind === 'session' && !p.leaving) steer(p, w.data, sessionIndex(key, snapshot));
     p.setLabel(w.name, statusText(w.data));
     p.el.classList.toggle('selected', key === selected);
     if (w.kind === 'agent' && w.data.status === 'done' && !p.leaving) {
@@ -479,6 +547,66 @@ function syncPeople(snapshot) {
       p.leave(key.startsWith('a:') ? [...routeTo(p.roomId).reverse()] : []);
     }
   }
+}
+
+// ---- the attending goes where its work is ------------------------------------
+
+const DWELL_MS = 4000; // the same kind of work this long before it moves
+
+function sessionIndex(key, snap) {
+  return Math.max(0, snap.sessions.findIndex((s) => `s:${s.id}` === key));
+}
+
+// What the attending should be doing, as a place: its desk at the station,
+// the Research Office shelf, the Laboratory bench, or the front of the
+// counter when it is your turn.
+function wantedPlace(x) {
+  if (x.status === 'your-turn') return 'counter';
+  if (x.status === 'working') {
+    const k = x.activity?.kind;
+    if (k === 'read' || k === 'search' || k === 'web') return 'shelf';
+    if (k === 'run') return 'bench';
+    return 'desk';
+  }
+  return undefined; // thinking, waiting on a helper or on approval: stay put
+}
+
+function goTo(p, place, index) {
+  const spot = place === 'desk' ? { room: 'nurses-station', point: p.home } : workSpot(place, index);
+  if (!spot) return;
+  const from = p.roomId;
+  p.walk([...routeBetween(from, spot.room), spot.point]);
+  p.roomId = spot.room;
+  p.seat = spot.point.slice();
+  p.place = place;
+}
+
+function steer(p, x, index) {
+  if (p.escorting && p.walking) return;
+  p.escorting = false;
+  const want = wantedPlace(x);
+  if (!want) return;
+  const now = performance.now();
+  if (want !== p.wantPlace) {
+    p.wantPlace = want;
+    p.wantSince = now;
+  }
+  const settled = want === 'counter' || now - p.wantSince >= DWELL_MS;
+  if (settled && want !== (p.place ?? 'desk') && !p.walking) goTo(p, want, index);
+}
+
+// Handing over: the attending walks the new helper to the door of its room,
+// then comes back to wait at its desk.
+function escort(p, room) {
+  if (!p || p.leaving || room === 'nurses-station') return;
+  const toDoor = routeBetween(p.roomId, room).slice(0, -1); // stop at the doorway
+  if (toDoor.length < 2) return;
+  const back = routeTo(room).slice(0, -1).reverse();
+  p.walk([...toDoor, ...back, p.home]);
+  p.roomId = 'nurses-station';
+  p.seat = p.home.slice();
+  p.place = 'desk';
+  p.escorting = true;
 }
 
 let last = performance.now();

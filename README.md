@@ -51,12 +51,13 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 
 ## Getting around
 
-- **Turn the hospital:** drag sideways with the mouse, or press Q and E. It turns a quarter at a time and can face all four ways. Heights follow the view the way they do in Monument Valley: the side nearest you sinks lowest, the far side rises highest, and the stairs between rooms change with them as the towers rise and sink into place.
+- **Turn the hospital:** drag sideways with the mouse. The whole building swings round with the mouse, and when you let go it settles facing the nearest of the four directions. Q and E turn it a quarter at a time. Heights follow the view the way they do in Monument Valley: as it turns, the side coming toward you sinks, the side moving away rises, and the stairs between rooms change with them.
 - **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
 - **Zoom and move:** scroll to zoom. Right-drag (or Shift-drag) to move.
-- **Settings** (the gear at the top of the panel): colourway, night, privacy, name tags, demo patients and the hospital layout.
-- **Night:** each colourway has a night version with stars, a moon and lit windows. By day a small sun keeps watch.
-- Figures act out their work: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
+- **Settings** (the gear at the top of the panel): colourway, time of day, privacy, name tags, demo patients and the hospital layout.
+- **Time of day:** by default the hospital follows your computer's clock. Early morning (5–8) has a lavender-to-peach sky and a low rosy sun. Morning (8–11) and noon (11–14) are bright, with the sun climbing. Afternoon (14–18) turns golden, with the sun going down on the other side. Night (18–5) brings stars, a moon and lit windows. You can also pin one part of the day in Settings.
+- **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
+- Helpers act out their work too: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
 ## Grow the hospital
 

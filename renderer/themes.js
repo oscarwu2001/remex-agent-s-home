@@ -82,19 +82,56 @@ export function floorTones(base, theme) {
   return [mix(base, '#ffffff', a), mix(base, '#ffffff', b)];
 }
 
-// The colourway to draw: by day as defined, by night every colour sinks
+// Parts of the day, from the computer's clock.
+export const PHASES = [
+  { id: 'dawn', name: 'Early morning', from: 5 },
+  { id: 'morning', name: 'Morning', from: 8 },
+  { id: 'noon', name: 'Noon', from: 11 },
+  { id: 'afternoon', name: 'Afternoon', from: 14 },
+  { id: 'night', name: 'Night', from: 18 },
+];
+
+export function phaseAt(date) {
+  const h = date.getHours();
+  if (h < 5 || h >= 18) return 'night';
+  if (h < 8) return 'dawn';
+  if (h < 11) return 'morning';
+  if (h < 14) return 'noon';
+  return 'afternoon';
+}
+
+// How daylight colours the stone at each part of the day. Noon is the
+// colourway as designed; night has its own variant below.
+const DAYLIGHT = {
+  dawn: { tint: '#ff9f86', amount: 0.14, light: '#ffcfa6' },
+  morning: { tint: '#fff2d0', amount: 0.05 },
+  noon: null,
+  afternoon: { tint: '#ffbf6b', amount: 0.12, light: '#ffd89a' },
+};
+
+// The colourway to draw at a part of the day. By night every colour sinks
 // toward the night air and the tops catch lamplight instead of sun.
-export function themeFor(name, night) {
+export function themeFor(name, phase = 'noon') {
   const day = THEMES[name] ?? THEMES[DEFAULT_THEME];
-  if (!night) return day;
-  const n = day.night;
-  const dusk = (c) => mix(c, n.tint, n.amount);
+  if (phase === 'night') {
+    const n = day.night;
+    const dusk = (c) => mix(c, n.tint, n.amount);
+    return {
+      ...day,
+      light: n.light,
+      shadow: n.shadow,
+      floorMix: [0.34, 0.24],
+      materials: Object.fromEntries(Object.entries(day.materials).map(([k, c]) => [k, dusk(c)])),
+      rooms: Object.fromEntries(Object.entries(day.rooms).map(([k, c]) => [k, dusk(c)])),
+    };
+  }
+  const d = DAYLIGHT[phase];
+  if (!d) return day;
+  const warm = (c) => mix(c, d.tint, d.amount);
   return {
     ...day,
-    light: n.light,
-    shadow: n.shadow,
-    floorMix: [0.34, 0.24],
-    materials: Object.fromEntries(Object.entries(day.materials).map(([k, c]) => [k, dusk(c)])),
-    rooms: Object.fromEntries(Object.entries(day.rooms).map(([k, c]) => [k, dusk(c)])),
+    light: d.light ?? day.light,
+    materials: Object.fromEntries(Object.entries(day.materials).map(([k, c]) => [k, warm(c)])),
+    rooms: Object.fromEntries(Object.entries(day.rooms).map(([k, c]) => [k, warm(c)])),
   };
 }
