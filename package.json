@@ -12,7 +12,7 @@
     "demo": "electron . --demo",
     "test": "node --test \"test/*.test.js\"",
     "preview": "node scripts/preview-server.js",
-    "dist:win": "electron-builder --win nsis portable",
+    "dist:win": "electron-builder --win nsis portable --publish never",
     "dist:dir": "electron-builder --dir"
   },
   "devDependencies": {
