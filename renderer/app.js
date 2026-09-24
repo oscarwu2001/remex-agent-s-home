@@ -1,6 +1,7 @@
 import { buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT } from './scene.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
+import { THEMES, DEFAULT_THEME } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const config = await bridge.config();
@@ -12,13 +13,14 @@ const peopleLayer = $('people');
 
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
-const prefs = { private: true, names: true, night: matchMedia('(prefers-color-scheme: dark)').matches, demo: false };
+const prefs = { private: true, names: true, theme: DEFAULT_THEME, demo: false };
 try {
   Object.assign(prefs, JSON.parse(localStorage.getItem('agents-home-prefs') || '{}'));
 } catch {
   /* storage unavailable or unreadable: defaults stand */
 }
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
+if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
 
 function savePrefs() {
   try {
@@ -29,15 +31,15 @@ function savePrefs() {
 }
 
 function applyPrefs() {
-  document.documentElement.dataset.theme = prefs.night ? 'night' : 'day';
+  document.documentElement.dataset.theme = prefs.theme;
   document.body.classList.toggle('no-tags', !prefs.names);
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
-  $('opt-night').checked = prefs.night;
+  for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === prefs.theme;
   $('opt-demo').checked = prefs.demo;
 }
 
-for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-night', 'night'], ['opt-demo', 'demo']]) {
+for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo']]) {
   $(id).addEventListener('change', (e) => {
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
@@ -49,13 +51,28 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
 
 // ---- scene -----------------------------------------------------------------
 
-const { defs, geometry } = buildScene();
-$('defs').innerHTML = `${defs}
-  <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
-    <stop offset="1" stop-color="var(--mist)" stop-opacity="1"/>
-  </linearGradient>`;
-$('geometry').innerHTML = geometry;
+// Redrawn whenever the colourway changes; the layout never moves.
+function drawScene() {
+  const { defs, geometry } = buildScene(THEMES[prefs.theme]);
+  $('defs').innerHTML = `${defs}
+    <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
+      <stop offset="1" stop-color="var(--mist)" stop-opacity="1"/>
+    </linearGradient>`;
+  $('geometry').innerHTML = geometry;
+}
+document.documentElement.dataset.theme = prefs.theme;
+drawScene();
+
+for (const radio of document.querySelectorAll('input[name="theme"]')) {
+  radio.addEventListener('change', () => {
+    prefs.theme = radio.value;
+    savePrefs();
+    applyPrefs();
+    drawScene();
+  });
+}
+
 // Frame whatever was drawn, with room for labels and bubbles.
 const bounds = (() => {
   const b = $('geometry').getBBox();

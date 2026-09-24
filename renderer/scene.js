@@ -3,20 +3,22 @@
 // the floors and connectors defined here.
 
 import {
-  P, M, poly, box, tiledTop, cylinder, ball, splitGradients, archPoints, uprightRing,
+  P, M, poly, box, tiledTop, cylinder, ball, splitGradients, archPoints, uprightRing, applyTheme, rivet,
 } from './iso.js';
+import { floorTones } from './themes.js';
 
 const BASE_Z = -3; // columns hang down to here and dissolve into mist
 
-// Floor top height z; floor spans [x, x+6) x [y, y+6).
+// Floor top height z; floor spans [x, x+6) x [y, y+6). Tower colours come
+// from the colourway (M[roomId]).
 export const LAYOUT = {
-  radiology: { x: 0, y: 0, z: 6, body: M.lilac, walls: ['north', 'west'] },
-  'vision-clinic': { x: 8, y: 0, z: 4, body: M.sand, walls: ['north'] },
-  laboratory: { x: 0, y: 8, z: 4, body: M.sky, walls: ['west'] },
-  'nurses-station': { x: 8, y: 8, z: 2, body: M.teal, walls: [] },
-  'operating-room': { x: 16, y: 8, z: 2, body: M.mint, walls: ['north'] },
-  'research-office': { x: 8, y: 16, z: 2, body: M.coral, walls: ['west'] },
-  'general-ward': { x: 16, y: 16, z: 0, body: M.rose, walls: ['west'] },
+  radiology: { x: 0, y: 0, z: 6, walls: ['north', 'west'] },
+  'vision-clinic': { x: 8, y: 0, z: 4, walls: ['north'] },
+  laboratory: { x: 0, y: 8, z: 4, walls: ['west'] },
+  'nurses-station': { x: 8, y: 8, z: 2, walls: [] },
+  'operating-room': { x: 16, y: 8, z: 2, walls: ['north'] },
+  'research-office': { x: 8, y: 16, z: 2, walls: ['west'] },
+  'general-ward': { x: 16, y: 16, z: 0, walls: ['west'] },
 };
 
 const SIZE = 6;
@@ -97,29 +99,35 @@ function inset(p, roomId) {
 
 // ---- drawing -------------------------------------------------------------
 
-function column(r) {
-  const { x, y, z, body } = r;
+function column(id, r) {
+  const { x, y, z } = r;
+  const body = M[id];
   return (
     box(x + 0.25, y + 0.25, BASE_Z, SIZE - 0.5, SIZE - 0.5, z - 0.5 - BASE_Z, body) +
     // a thin band where MV towers change material
     box(x + 0.2, y + 0.2, z - 1.6, SIZE - 0.4, SIZE - 0.4, 0.25, M.cream) +
-    box(x, y, z - 0.5, SIZE, SIZE, 0.5, M.stone)
+    box(x, y, z - 0.5, SIZE, SIZE, 0.5, M.stone) +
+    rivets(x, y, z)
   );
 }
 
-function floor(r, tone) {
-  return tiledTop(r.x, r.y, r.z + 0.001, SIZE, SIZE, tone[0], tone[1]);
+// Three rivets on each visible face of a tower, under the band.
+function rivets(x, y, z) {
+  const zz = z - 2.5;
+  const left = (u, h) => [x + 0.25 + u, y + SIZE - 0.25 + 0.001, h];
+  const right = (u, h) => [x + SIZE - 0.25 + 0.001, y + 0.25 + u, h];
+  let s = '';
+  for (const u of [1.6, 2.75, 3.9]) {
+    s += rivet(left, u, zz, 0.34, M.sand.left, M.lilac.right);
+    s += rivet(right, u, zz, 0.34, M.sand.right, M.lilac.right);
+  }
+  return s;
 }
 
-const FLOOR_TONES = {
-  radiology: ['#f1e9f3', '#e9def0'],
-  'vision-clinic': ['#fbf2e2', '#f6e8d0'],
-  laboratory: ['#eef4fa', '#e2ecf6'],
-  'nurses-station': ['#eef7f4', '#e1f0eb'],
-  'operating-room': ['#eef8f3', '#def0e7'],
-  'research-office': ['#fcefe9', '#f7e1d8'],
-  'general-ward': ['#fcf0f0', '#f6e1e2'],
-};
+function floor(id, r) {
+  const [a, b] = floorTones(M[id].base);
+  return tiledTop(r.x, r.y, r.z + 0.001, SIZE, SIZE, a, b);
+}
 
 function walls(r) {
   let s = '';
@@ -315,23 +323,24 @@ function ecg(x, y, z) {
     .join(' ');
 }
 
-// Scenery: a garden island to the lower left and a slim tower carrying the
-// cross emblem to the upper right.
+// Scenery: a garden island to the lower left and a low grove island to the
+// upper right.
 function garden() {
   let s = '';
   s += box(1.5, 17.5, BASE_Z + 1, 4, 4, 3.3 - BASE_Z - 1, M.leaf);
   s += box(1.2, 17.2, 0.6, 4.6, 4.6, 0.4, M.stone);
-  s += tiledTop(1.2, 17.2, 1.001, 4.6, 4.6, '#dff0e2', '#d2e9d6');
+  s += tiledTop(1.2, 17.2, 1.001, 4.6, 4.6, M.mint.top, M.mint.left);
   s += tree(2.4, 18.4, 1, 1.1) + tree(4.4, 19.2, 1, 0.9) + tree(2.8, 20.6, 1, 0.8);
   s += box(3.6, 20.4, 1, 1.2, 0.4, 0.3, M.sand);
   return s;
 }
 
-function emblemTower() {
+function grove() {
   let s = '';
-  s += box(17.5, 1.5, BASE_Z + 2, 3, 3, 7.5 - BASE_Z - 2, M.coral);
-  s += box(17.2, 1.2, 7.5, 3.6, 3.6, 0.35, M.stone);
-  s += cylinder(19, 3, 7.85, 1.1, 0.25, M.cream);
+  s += box(17.8, 1.8, BASE_Z + 2, 2.8, 2.8, 4.2 - BASE_Z - 2, M.leaf);
+  s += box(17.5, 1.5, 4.2, 3.4, 3.4, 0.35, M.stone);
+  s += tiledTop(17.5, 1.5, 4.551, 3.4, 3.4, M.mint.top, M.mint.left);
+  s += tree(18.6, 2.5, 4.55, 1) + tree(19.9, 3.6, 4.55, 0.8);
   return s;
 }
 
@@ -343,25 +352,14 @@ function floaters() {
   );
 }
 
-function crossEmblem() {
-  const [x, y] = P(19, 3, 9.6);
-  return (
-    `<g transform="translate(${x} ${y})"><g class="emblem">` +
-    '<rect x="-9" y="-30" width="18" height="60" rx="3" fill="#ea9380"/>' +
-    '<rect x="-30" y="-9" width="60" height="18" rx="3" fill="#ea9380"/>' +
-    '<rect x="-9" y="-30" width="9" height="60" rx="3" fill="#f5b4a3"/>' +
-    '<rect x="-30" y="-9" width="30" height="9" rx="3" fill="#f5b4a3"/>' +
-    '</g></g>'
-  );
-}
-
 // Draw order: back to front by room centre depth; connectors just before
 // the nearer of their two rooms so stairs tuck under floors correctly.
-export function buildScene() {
+export function buildScene(theme) {
+  applyTheme(theme);
   const items = [];
   for (const [id, r] of Object.entries(LAYOUT)) {
     const depth = r.x + r.y + SIZE;
-    items.push({ depth, s: column(r) + floor(r, FLOOR_TONES[id]) + walls(r) + furniture(id, r) });
+    items.push({ depth, s: column(id, r) + floor(id, r) + walls(r) + furniture(id, r) });
   }
   for (const c of CONNECTORS) {
     const ra = LAYOUT[c.a];
@@ -369,14 +367,15 @@ export function buildScene() {
     const depth = Math.max(ra.x + ra.y, rb.x + rb.y) + SIZE - 0.5;
     items.push({ depth, s: c.kind === 'stairs' ? stairs(c) : bridge(c) });
   }
-  items.push({ depth: 23, s: garden() }, { depth: 22, s: emblemTower() });
+  items.push({ depth: 23, s: garden() }, { depth: 22, s: grove() });
   items.sort((p, q) => p.depth - q.depth);
+  const geometry = floaters() + items.map((i) => i.s).join('');
   return {
+    geometry,
     defs: `${splitGradients()}
       <linearGradient id="window" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="var(--window-top)"/><stop offset="1" stop-color="var(--window-bottom)"/>
       </linearGradient>`,
-    geometry: floaters() + items.map((i) => i.s).join('') + crossEmblem(),
   };
 }
 

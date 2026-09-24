@@ -1,24 +1,4 @@
 :root {
-  --sky-top: #f4c7bd;
-  --sky-mid: #f9dccb;
-  --sky-bottom: #fcefe1;
-  --mist: #fcefe1;
-  --cloud: #fff8f1;
-  --window-top: #fde9dc;
-  --window-bottom: #f8cbbd;
-
-  --panel: #fffaf4;
-  --panel-raised: #ffffff;
-  --line: #eadfd3;
-  --ink: #3b3450;
-  --ink-muted: #675f7a;
-  --accent: #2f6f6b;
-  --accent-soft: #dcefeb;
-  --warn: #a33a36;
-  --warn-soft: #fbe3df;
-  --focus: #2f6f6b;
-  --label-bg: rgba(255, 250, 244, 0.92);
-
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
@@ -32,27 +12,76 @@
   color-scheme: light;
 }
 
-:root[data-theme="night"] {
-  --sky-top: #232648;
-  --sky-mid: #3a3a6a;
-  --sky-bottom: #6a5b86;
-  --mist: #5b4f7a;
-  --cloud: #4a4a7a;
-  --window-top: #ffe7a8;
-  --window-bottom: #f6b77a;
+/* Colourways. The scene's solids come from renderer/themes.js; these are the
+   sky and the board. Every text pair measures 5:1 or better. */
+:root,
+:root[data-theme="blossom"] {
+  --sky-top: #b9dcf3;
+  --sky-mid: #dcd6f3;
+  --sky-bottom: #f6e3ef;
+  --mist: #f6e3ef;
+  --cloud: #fff7fb;
+  --window-top: #fff3d6;
+  --window-bottom: #c9b6f0;
 
-  --panel: #22223a;
-  --panel-raised: #2c2c48;
-  --line: #3b3b5c;
-  --ink: #f3eefa;
-  --ink-muted: #bdb6d4;
-  --accent: #8fd6ce;
-  --accent-soft: #2f4a55;
-  --warn: #ffaaa3;
-  --warn-soft: #4a2b3a;
-  --focus: #8fd6ce;
-  --label-bg: rgba(44, 44, 72, 0.92);
-  color-scheme: dark;
+  --panel: #fff6f4;
+  --panel-raised: #ffffff;
+  --line: #f0dbdc;
+  --ink: #3f2d42;
+  --ink-muted: #6e5870;
+  --accent: #9c3f63;
+  --accent-soft: #f9e2e7;
+  --warn: #a33a36;
+  --warn-soft: #fbe1de;
+  --focus: #9c3f63;
+  --label-bg: rgba(255, 246, 244, 0.93);
+  --swatch: #eeb3bd;
+}
+
+:root[data-theme="tide"] {
+  --sky-top: #cdeee4;
+  --sky-mid: #cfe3f6;
+  --sky-bottom: #e9eefb;
+  --mist: #e9eefb;
+  --cloud: #f8fbff;
+  --window-top: #fff6dd;
+  --window-bottom: #a9b4f0;
+
+  --panel: #f4f8fb;
+  --panel-raised: #ffffff;
+  --line: #d7e4ec;
+  --ink: #1f3448;
+  --ink-muted: #4d6275;
+  --accent: #2a6385;
+  --accent-soft: #dcebf3;
+  --warn: #a33a36;
+  --warn-soft: #fbe3de;
+  --focus: #2a6385;
+  --label-bg: rgba(244, 248, 251, 0.93);
+  --swatch: #86bdd6;
+}
+
+:root[data-theme="grove"] {
+  --sky-top: #d2efe6;
+  --sky-mid: #e3f2dc;
+  --sky-bottom: #f8f5e2;
+  --mist: #f8f5e2;
+  --cloud: #fdfdf5;
+  --window-top: #fffbe0;
+  --window-bottom: #9fd2d9;
+
+  --panel: #f6f8f1;
+  --panel-raised: #ffffff;
+  --line: #dbe6d4;
+  --ink: #243629;
+  --ink-muted: #526656;
+  --accent: #356a4c;
+  --accent-soft: #dfecd8;
+  --warn: #a33a36;
+  --warn-soft: #f8e3da;
+  --focus: #356a4c;
+  --label-bg: rgba(246, 248, 241, 0.93);
+  --swatch: #9dcbb6;
 }
 
 * { box-sizing: border-box; }
@@ -110,13 +139,10 @@ body {
 .room-label .name { font: 600 17px var(--font); fill: var(--ink); letter-spacing: 0.06em; text-transform: uppercase; }
 .room-label .purpose { font: 400 14px var(--font); fill: var(--ink-muted); }
 
-:root[data-theme="night"] #geometry { filter: brightness(0.72) saturate(0.9) hue-rotate(-8deg); }
-:root[data-theme="night"] .ecg { filter: drop-shadow(0 0 3px #8ef0c8); }
 
 .float { animation: float 7s ease-in-out infinite; }
 .f2 { animation-delay: -2.5s; }
 .f3 { animation-delay: -4.5s; }
-.emblem { animation: float 9s ease-in-out infinite; }
 @keyframes float { 50% { transform: translateY(-8px); } }
 
 /* ---- people ----------------------------------------------------------- */
@@ -147,7 +173,7 @@ body.no-tags .person:not(.selected):not(:focus-visible) .tag { display: none; }
 @keyframes sweep { 50% { transform: rotate(-12deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .float, .emblem, .spin, .d1, .d2, .d3, .beam, .person[data-status="blocked"] .bubble { animation: none; }
+  .float, .spin, .d1, .d2, .d3, .beam, .person[data-status="blocked"] .bubble { animation: none; }
 }
 
 /* ---- board ------------------------------------------------------------ */
@@ -258,7 +284,6 @@ details > summary h2 { margin: 0; }
   font: 600 13px var(--font);
   cursor: pointer;
 }
-:root[data-theme="night"] .button { color: #1d2230; }
 
 .chart dl { display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-3); margin: 0 0 var(--s-3); font-size: 13px; }
 .chart dt { color: var(--ink-muted); }
@@ -295,3 +320,27 @@ details > summary h2 { margin: 0; }
   body { grid-template-columns: minmax(0, 1fr) 300px; }
   .board-head, .board-section, .controls { padding-left: var(--s-4); padding-right: var(--s-4); }
 }
+
+/* colourway picker: native radios, each with its name, not colour alone */
+.colourways { border: 0; margin: 0 0 var(--s-1); padding: 0; }
+.colourways legend { padding: 0; margin-bottom: var(--s-1); font-size: 13px; color: var(--ink-muted); }
+.colourways .options { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.colourway {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  font-size: 13px;
+  cursor: pointer;
+}
+.colourway input { position: absolute; opacity: 0; pointer-events: none; }
+.colourway .dot { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.colourway.blossom .dot { background: linear-gradient(135deg, #f7b7c8 50%, #a898e2 50%); }
+.colourway.tide .dot { background: linear-gradient(135deg, #b8d4f7 50%, #737cd8 50%); }
+.colourway.grove .dot { background: linear-gradient(135deg, #b3ebcf 50%, #5fa6b8 50%); }
+.colourway:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.colourway:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }

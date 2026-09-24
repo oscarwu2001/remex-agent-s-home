@@ -1,3 +1,5 @@
+import { shade } from './themes.js';
+
 // Isometric projection and flat-shaded primitives, Monument Valley style:
 // no outlines, three tones per solid (top light, left mid, right dark).
 //
@@ -24,22 +26,16 @@ export function poly(list, fill, extra = '') {
   return `<polygon points="${pts(list)}" fill="${fill}" stroke="${fill}" stroke-width="0.6" stroke-linejoin="round" ${extra}/>`;
 }
 
-// Materials: top / left / right tones.
-export const M = {
-  stone: { top: '#f5ecdf', left: '#e6d4c1', right: '#cdb49e' },
-  cream: { top: '#fbf5ec', left: '#efe2d2', right: '#dac6b1' },
-  coral: { top: '#f5b4a3', left: '#ea9380', right: '#d17665' },
-  rose: { top: '#f3c4c4', left: '#e3a3a8', right: '#c9868e' },
-  mint: { top: '#d3ecdf', left: '#abd7c6', right: '#8abdaa' },
-  teal: { top: '#86c9c1', left: '#5eaca6', right: '#468e8b' },
-  sky: { top: '#cfe0f0', left: '#a7c3df', right: '#88a5c6' },
-  lilac: { top: '#e0d0ea', left: '#c4acd6', right: '#a68ebc' },
-  sand: { top: '#f8e2bd', left: '#ecc995', right: '#d4a977' },
-  white: { top: '#ffffff', left: '#eef1f3', right: '#d6dce2' },
-  steel: { top: '#dde3ea', left: '#bcc6d2', right: '#9aa6b5' },
-  ink: { top: '#6f7396', left: '#585c7c', right: '#464963' },
-  leaf: { top: '#9ccfa6', left: '#79b78a', right: '#5f9c71' },
-};
+// Materials: top / left / right tones, filled in from the active colourway
+// by applyTheme() before the scene is drawn. Keys are the material names
+// in themes.js plus one per room id (that room's tower colour).
+export const M = {};
+
+export function applyTheme(theme) {
+  for (const k of Object.keys(M)) delete M[k];
+  for (const [k, base] of Object.entries(theme.materials)) M[k] = shade(base, theme);
+  for (const [room, base] of Object.entries(theme.rooms)) M[room] = { ...shade(base, theme), base };
+}
 
 export function box(x, y, z, w, d, h, m, extra = '') {
   const t = z + h;
@@ -84,14 +80,15 @@ export function ball(cx, cy, z, r, m) {
 }
 
 export function gradId(m) {
-  return `split-${Object.keys(M).find((k) => M[k] === m) || 'stone'}`;
+  const key = Object.keys(M).find((k) => M[k] === m) || 'stone';
+  return `split-${key.replace(/[^\w-]/g, '')}`;
 }
 
 export function splitGradients() {
   return Object.entries(M)
     .map(
       ([k, m]) =>
-        `<linearGradient id="split-${k}" x1="0" x2="1" y1="0" y2="0">` +
+        `<linearGradient id="split-${k.replace(/[^\w-]/g, '')}" x1="0" x2="1" y1="0" y2="0">` +
         `<stop offset="0.5" stop-color="${m.left}"/><stop offset="0.5" stop-color="${m.right}"/>` +
         '</linearGradient>',
     )
@@ -134,4 +131,17 @@ function ringPath(cx, y, cz, R) {
     d += `${i ? 'L' : 'M'}${sx.toFixed(1)},${sy.toFixed(1)}`;
   }
   return `${d}Z`;
+}
+
+// A round rivet on a vertical face, the MV3 wall ornament. `along(u, z)`
+// maps face coordinates to world points.
+export function rivet(along, u, z, r, ring, core) {
+  const outer = [];
+  const inner = [];
+  for (let i = 0; i < 20; i++) {
+    const a = (2 * Math.PI * i) / 20;
+    outer.push(along(u + r * Math.cos(a), z + r * 0.95 * Math.sin(a)));
+    inner.push(along(u + r * 0.5 * Math.cos(a), z + r * 0.48 * Math.sin(a)));
+  }
+  return poly(outer, ring) + poly(inner, core);
 }

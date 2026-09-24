@@ -1,24 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f4c7bd"/><stop offset="1" stop-color="#fcefe1"/>
+      <stop offset="0" stop-color="#b9dcf3"/><stop offset="0.55" stop-color="#dcd6f3"/><stop offset="1" stop-color="#f6e3ef"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#sky)"/>
-  <!-- tower -->
-  <polygon points="256,196 372,254 372,414 256,472" fill="#d17665"/>
-  <polygon points="256,196 140,254 140,414 256,472" fill="#ea9380"/>
-  <!-- cap slab -->
-  <polygon points="256,150 396,220 256,290 116,220" fill="#f5ecdf"/>
-  <polygon points="116,220 256,290 256,312 116,242" fill="#e6d4c1"/>
-  <polygon points="396,220 256,290 256,312 396,242" fill="#cdb49e"/>
-  <!-- arch -->
-  <path d="M296,520 v-44 a18,18 0 0 1 36,0 v44 Z" fill="#f8cbbd" transform="skewY(-26.565)"/>
-  <!-- cross -->
-  <g transform="translate(256 132)">
-    <rect x="-22" y="-78" width="44" height="116" rx="8" fill="#5eaca6"/>
-    <rect x="-58" y="-42" width="116" height="44" rx="8" fill="#5eaca6"/>
-    <rect x="-22" y="-78" width="22" height="116" rx="8" fill="#86c9c1"/>
-    <rect x="-58" y="-42" width="58" height="22" rx="8" fill="#86c9c1"/>
+  <!-- lower tower: pink lit face, violet shaded face -->
+  <polygon points="256,236 384,300 384,452 256,516 256,516" fill="#b294e0"/>
+  <polygon points="256,236 128,300 128,452 256,516" fill="#f7b7c8"/>
+  <!-- butter ledge -->
+  <polygon points="256,196 404,270 256,344 108,270" fill="#fde8cf"/>
+  <polygon points="108,270 256,344 256,366 108,292" fill="#fbd99a"/>
+  <polygon points="404,270 256,344 256,366 404,292" fill="#e7c08f"/>
+  <!-- upper block -->
+  <polygon points="256,110 336,150 336,248 256,288" fill="#9e86dc"/>
+  <polygon points="256,110 176,150 176,248 256,288" fill="#f3a6c0"/>
+  <polygon points="256,70 350,117 256,164 162,117" fill="#fde3c8"/>
+  <!-- arched window on the lit face -->
+  <path d="M200,138 v-40 a14,14 0 0 1 28,0 v40 Z" fill="#fff3d6" transform="skewY(26.565)"/>
+  <!-- rivets on the lower faces -->
+  <g fill="#fbd99a">
+    <ellipse cx="170" cy="392" rx="13" ry="15"/><ellipse cx="214" cy="414" rx="13" ry="15"/>
+    <ellipse cx="298" cy="414" rx="13" ry="15"/><ellipse cx="342" cy="392" rx="13" ry="15"/>
+  </g>
+  <g fill="#7b6fd6">
+    <ellipse cx="170" cy="392" rx="6" ry="7"/><ellipse cx="214" cy="414" rx="6" ry="7"/>
+    <ellipse cx="298" cy="414" rx="6" ry="7"/><ellipse cx="342" cy="392" rx="6" ry="7"/>
   </g>
 </svg>

@@ -29,7 +29,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 - `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `rooms.js`, `roster.js`, `activity.js`).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
-- `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `scene.js` hospital, `people.js` figures, `app.js` glue and board, `demo.js`.
+- `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital, `people.js` figures, `app.js` glue and board, `demo.js`.
 - `test/`: `node:test`, one file per core module.
 
 ## Delegation
@@ -37,4 +37,4 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 - `runner`: output goes to `out/runner/` (git-ignored). The commands that matter are `npm test` and the Electron smoke run in the README.
 - `reviewer`: load `.claude/skills/project-quality` and work through it.
 - `silent-failure-hunter`: the data path is `watcher.js` → `transcript.js` → `tracker.js` → snapshot → `app.js`.
-- `ui-reviewer`: the medium is **web** (Electron renderer, SVG + CSS). Design tokens are the custom properties at the top of `renderer/styles.css` and the materials `M` in `renderer/iso.js`.
+- `ui-reviewer`: the medium is **web** (Electron renderer, SVG + CSS). There are three colourways (Blossom, Tide, Grove) and no dark mode. Scene colours live in `renderer/themes.js`, and the board and sky tokens are the per-colourway custom properties at the top of `renderer/styles.css`. Keep every text pair at 4.5:1 or better in all three.
