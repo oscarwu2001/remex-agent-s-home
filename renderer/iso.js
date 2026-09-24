@@ -35,6 +35,13 @@ export function toView(x, y) {
   return [CX + a, CY + b];
 }
 
+// How far back a grid cell sits in the current view: 0 for the core's far
+// corner, 4 for its near corner, -2..6 across the whole 5 x 5 ring.
+export function cellDepth(c, r) {
+  const [a, b] = turn(c - 1, r - 1);
+  return a + b + 2;
+}
+
 // Farther from the viewer = smaller. Painter's order sorts on this.
 export function viewDepth(x, y) {
   const [a, b] = toView(x, y);

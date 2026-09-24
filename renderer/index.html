@@ -22,22 +22,21 @@
       </g>
     </svg>
     <div class="camera" role="toolbar" aria-label="View">
-      <button type="button" class="cam-btn" id="cam-left" aria-label="Turn the hospital left" title="Turn left (Q)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H4V2M4.5 7A8.5 8.5 0 1 1 3.5 14"/></svg>
-      </button>
-      <button type="button" class="cam-btn" id="cam-right" aria-label="Turn the hospital right" title="Turn right (E)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7h5V2M19.5 7A8.5 8.5 0 1 0 20.5 14"/></svg>
-      </button>
       <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
       <span class="cam-where" id="cam-where" aria-live="polite"></span>
     </div>
-    <p class="cam-hint">Click a room to visit · scroll to zoom · drag to move</p>
+    <p class="cam-hint">Drag to turn · right-drag to move · scroll to zoom · click a room to visit</p>
     <p class="source" id="source"></p>
   </main>
 
   <aside class="board" aria-label="Ward board">
     <header class="board-head">
-      <h1>Agent's Home</h1>
+      <div class="title-row">
+        <h1>Agent's Home</h1>
+        <button type="button" class="icon-btn" id="settings-open" aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
       <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
     </header>
 
@@ -51,11 +50,6 @@
       <div id="chart-body"></div>
     </section>
 
-    <details class="board-section" id="layout-editor">
-      <summary><h2>Hospital layout <span class="count" id="layout-count"></span></h2></summary>
-      <div id="layout-body"></div>
-    </details>
-
     <details class="board-section" id="directory">
       <summary><h2>Staff directory <span class="count" id="directory-count"></span></h2></summary>
       <ul id="directory-list" class="directory"></ul>
@@ -66,20 +60,39 @@
       <ul id="problem-list"></ul>
     </section>
 
-    <footer class="controls">
-      <fieldset class="colourways" id="colourways">
-        <legend>Colourway</legend>
-        <div class="options">
-          <label class="colourway blossom"><input type="radio" name="theme" value="blossom"><span class="dot" aria-hidden="true"></span>Blossom</label>
-          <label class="colourway tide"><input type="radio" name="theme" value="tide"><span class="dot" aria-hidden="true"></span>Tide</label>
-          <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span>Grove</label>
-        </div>
-      </fieldset>
-      <label class="switch"><input type="checkbox" id="opt-night"> <span>Night</span></label>
-      <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
-      <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
-      <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
-    </footer>
+    <section class="settings" id="settings" hidden aria-labelledby="settings-h" role="dialog">
+      <header class="settings-head">
+        <h2 id="settings-h">Settings</h2>
+        <button type="button" class="icon-btn" id="settings-close" aria-label="Close settings" title="Close (Esc)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <section class="settings-group" aria-labelledby="look-h">
+        <h3 id="look-h">Look</h3>
+        <fieldset class="colourways" id="colourways">
+          <legend>Colourway</legend>
+          <div class="options">
+            <label class="colourway blossom"><input type="radio" name="theme" value="blossom"><span class="dot" aria-hidden="true"></span>Blossom</label>
+            <label class="colourway tide"><input type="radio" name="theme" value="tide"><span class="dot" aria-hidden="true"></span>Tide</label>
+            <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span>Grove</label>
+          </div>
+        </fieldset>
+        <label class="switch"><input type="checkbox" id="opt-night"> <span>Night</span></label>
+      </section>
+
+      <section class="settings-group" aria-labelledby="screen-h">
+        <h3 id="screen-h">On screen</h3>
+        <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
+        <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
+        <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+      </section>
+
+      <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
+        <h3 id="layout-h">Hospital layout <span class="count" id="layout-count"></span></h3>
+        <div id="layout-body"></div>
+      </section>
+    </section>
   </aside>
 
   <script type="module" src="app.js"></script>

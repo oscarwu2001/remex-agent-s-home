@@ -1,5 +1,5 @@
 import {
-  buildScene, labelPoint, slotPoint, routeTo, SPAWN, LAYOUT, floorOutline, roomFrame, configureRooms, cellOutline,
+  buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, currentHeights, setHeights, floorOutline, roomFrame, configureRooms, cellOutline,
 } from './scene.js';
 import { setView, getView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
@@ -24,6 +24,7 @@ let layoutError = '';
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
 const peopleLayer = $('people');
+const world = $('world');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---- preferences (per-viewer conveniences only) ----------------------------
@@ -69,9 +70,9 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
 
 // ---- scene -----------------------------------------------------------------
 
-// Redrawn when the colourway, day/night or the view turn changes; the rooms
-// themselves never move.
-function drawScene() {
+// Redrawn when the colourway, day/night or the view turn changes, and on
+// every frame while towers rise and sink after a turn.
+function drawGeometry() {
   const { defs, geometry } = buildScene(themeFor(prefs.theme, prefs.night));
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
@@ -79,6 +80,10 @@ function drawScene() {
       <stop offset="1" stop-color="var(--mist)" stop-opacity="1"/>
     </linearGradient>`;
   $('geometry').innerHTML = geometry;
+}
+
+function drawScene() {
+  drawGeometry();
   overview = frameOf($('geometry').getBBox());
   drawBackdrop();
   drawLabels();
@@ -220,15 +225,56 @@ function showOverview() {
   updateCameraUi();
 }
 
+// A quarter turn. The tower turns at once, keeping the heights it had; then
+// every room rises or sinks to its height in the new view (nearest lowest,
+// farthest highest) and the stairs between them change with it.
+let leveling;
 function turnView(step) {
+  const before = currentHeights();
   setView(getView() + step);
   prefs.view = getView();
   savePrefs();
+  // Anyone mid-walk finishes their walk at once: their route belonged to the old heights.
+  for (const p of people.values()) {
+    if (p.walking && !p.leaving) {
+      p.path = [];
+      p.pos = p.seat.slice();
+    }
+  }
   svg.classList.add('turning');
   drawScene();
   requestAnimationFrame(() => svg.classList.remove('turning'));
+  frameCamera();
+  riseAndSink(before, targetHeights());
+}
+
+function riseAndSink(from, to) {
+  cancelAnimationFrame(leveling);
+  const ms = reducedMotion.matches ? 0 : 750;
+  const start = performance.now();
+  const ease = (t) => 1 - (1 - t) ** 3;
+  const stepTo = (now) => {
+    const t = ms ? Math.min(1, (now - start) / ms) : 1;
+    const k = ease(t);
+    const h = {};
+    for (const id of Object.keys(to)) h[id] = (from[id] ?? to[id]) + (to[id] - (from[id] ?? to[id])) * k;
+    setHeights(h);
+    drawGeometry();
+    drawLabels();
+    placeLabels();
+    if (t < 1) leveling = requestAnimationFrame(stepTo);
+    else {
+      drawScene();
+      frameCamera();
+    }
+  };
+  leveling = requestAnimationFrame(stepTo);
+}
+
+function frameCamera() {
   if (focusedRoom) visitRoom(focusedRoom);
   else setViewBox(overview);
+  updateCameraUi();
 }
 
 function updateCameraUi() {
@@ -259,10 +305,15 @@ svg.addEventListener('wheel', (e) => {
   updateCameraUi();
 }, { passive: false });
 
+// Drag sideways to turn the tower a quarter at a time (keep dragging for
+// more turns). Right-drag, or Shift-drag, moves the view instead.
+const TURN_PX = 110;
 let drag;
+svg.addEventListener('contextmenu', (e) => e.preventDefault());
 svg.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  drag = { x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false };
+  if (e.button !== 0 && e.button !== 2) return;
+  const mode = e.button === 2 || e.shiftKey ? 'pan' : 'turn';
+  drag = { mode, x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false };
 });
 window.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -271,7 +322,17 @@ window.addEventListener('pointermove', (e) => {
   if (!drag.moved && Math.hypot(dx, dy) < 5) return;
   if (!drag.moved) svg.setPointerCapture?.(e.pointerId);
   drag.moved = true;
-  svg.classList.add('dragging');
+  svg.classList.add(drag.mode === 'pan' ? 'dragging' : 'turning-drag');
+  if (drag.mode === 'turn') {
+    // A little give while dragging, so the tower feels grabbed.
+    world.style.transform = `translateX(${(dx * 0.25).toFixed(1)}px)`;
+    if (Math.abs(dx) >= TURN_PX) {
+      turnView(dx > 0 ? -1 : 1);
+      drag.x = e.clientX;
+      world.style.transform = '';
+    }
+    return;
+  }
   const [, , scale] = toSvgPoint(0, 0);
   cancelAnimationFrame(tween);
   setViewBox({ ...drag.cam, x: drag.cam.x - dx * scale, y: drag.cam.y - dy * scale });
@@ -279,13 +340,11 @@ window.addEventListener('pointermove', (e) => {
   updateCameraUi();
 });
 window.addEventListener('pointerup', () => {
-  svg.classList.remove('dragging');
+  svg.classList.remove('dragging', 'turning-drag');
+  world.style.transform = '';
   // Let the click that follows this pointerup see whether it was a drag.
   setTimeout(() => { drag = undefined; }, 0);
 });
-
-$('cam-left').addEventListener('click', () => turnView(-1));
-$('cam-right').addEventListener('click', () => turnView(1));
 $('cam-overview').addEventListener('click', showOverview);
 $('labels').addEventListener('keydown', (e) => {
   const cell = e.target.closest('[data-cell]');
@@ -303,7 +362,7 @@ $('labels').addEventListener('keydown', (e) => {
 window.addEventListener('keydown', (e) => {
   // Shortcuts only when nothing that takes typing or keys has focus.
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target.closest('input, select, textarea, button, summary, [contenteditable], .row, .person, .room-label, .build-cell')) return;
+  if (e.target.closest('input, select, textarea, summary, [contenteditable]')) return;
   if (e.key === 'q' || e.key === 'Q') turnView(-1);
   else if (e.key === 'e' || e.key === 'E') turnView(1);
   else if (e.key === 'Escape') showOverview();
@@ -391,7 +450,7 @@ function syncPeople(snapshot) {
         id: key,
         roomId: w.room,
         layer: peopleLayer,
-        at: w.kind === 'session' ? home : SPAWN,
+        at: w.kind === 'session' ? home : spawnPoint(),
         onSelect: select,
       });
       p.seat = home;
@@ -410,7 +469,7 @@ function syncPeople(snapshot) {
     p.el.classList.toggle('selected', key === selected);
     if (w.kind === 'agent' && w.data.status === 'done' && !p.leaving) {
       freeSeat(p.roomId, key);
-      p.leave([...routeTo(p.roomId).reverse(), SPAWN]);
+      p.leave([...routeTo(p.roomId).reverse(), spawnPoint()]);
     }
   }
 
@@ -428,6 +487,12 @@ function frame(nowMs) {
   last = nowMs;
   const t = nowMs / 1000;
   for (const [key, p] of people) {
+    // Seated people ride their floor up and down as the heights change.
+    const floorZ = LAYOUT[p.roomId]?.z;
+    if (floorZ !== undefined && !p.walking && !p.leaving) {
+      p.pos[2] = floorZ;
+      if (p.seat) p.seat[2] = floorZ;
+    }
     p.step(dt, t, reducedMotion.matches);
     if (p.gone) {
       p.remove();
@@ -872,6 +937,26 @@ $('layout-body').addEventListener('submit', async (e) => {
 });
 
 renderLayoutEditor();
+
+// ---- settings panel ------------------------------------------------------------
+
+function setSettings(open) {
+  $('settings').hidden = !open;
+  $('settings-open').setAttribute('aria-expanded', String(open));
+  if (open) $('settings-close').focus();
+  else {
+    if (buildMode) setBuildMode(false);
+    $('settings-open').focus();
+  }
+}
+$('settings-open').addEventListener('click', () => setSettings($('settings').hidden));
+$('settings-close').addEventListener('click', () => setSettings(false));
+$('settings').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    setSettings(false);
+  }
+});
 
 applyPrefs();
 render(true);

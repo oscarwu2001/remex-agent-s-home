@@ -51,15 +51,16 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 
 ## Getting around
 
+- **Turn the hospital:** drag sideways with the mouse, or press Q and E. It turns a quarter at a time and can face all four ways. Heights follow the view the way they do in Monument Valley: the side nearest you sinks lowest, the far side rises highest, and the stairs between rooms change with them as the towers rise and sink into place.
 - **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
-- **Zoom and move:** scroll to zoom, drag to move.
-- **Turn the tower:** the ⟲ ⟳ buttons, or Q and E, turn it a quarter at a time, the way Monument Valley does.
+- **Zoom and move:** scroll to zoom. Right-drag (or Shift-drag) to move.
+- **Settings** (the gear at the top of the panel): colourway, night, privacy, name tags, demo patients and the hospital layout.
 - **Night:** each colourway has a night version with stars, a moon and lit windows. By day a small sun keeps watch.
 - Figures act out their work: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
 ## Grow the hospital
 
-The core hospital is a 3 × 3 block. Open **Hospital layout** in the side panel and choose **Add a department**. The free spots around the hospital light up with a "+" (up to 5 × 5 in all). Pick a spot, then choose the department:
+The core hospital is a 3 × 3 block. Open **Settings** (the gear), go to **Hospital layout** and choose **Add a department**. The free spots around the hospital light up with a "+" (up to 5 × 5 in all). Pick a spot, then choose the department:
 
 Spine Surgery · Neurosurgery · ENT · Dental Implantology · Maxillofacial (CMF) · Orthopaedics · Trauma · Sports Medicine · Pulmonology · Interventional Radiology · Cardiac Electrophysiology · Surgical Oncology, or **Your own department** with a name you choose.
 

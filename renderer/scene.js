@@ -4,11 +4,11 @@
 
 import {
   P, M, poly, box, tiledTop, cylinder, ball, splitGradients, archPoints, uprightRing, applyTheme, rivet,
-  viewDepth, faceVisible,
+  viewDepth, faceVisible, cellDepth,
 } from './iso.js';
 import { floorTones } from './themes.js';
 
-const BASE_Z = -3; // columns hang down to here and dissolve into mist
+const BASE_Z = -4; // columns hang down to here and dissolve into mist
 
 // Rooms come from src/core/rooms.js (through the bridge's config): each has
 // a grid cell, and a cell is 8 tiles, a 6-tile room plus a 2-tile gap. This
@@ -20,10 +20,11 @@ export const LAYOUT = {}; // roomId -> { x, y, z, kind? }
 
 const SIZE = 6;
 const CELL = 8;
-const CORE_Z = {
-  radiology: 6, 'vision-clinic': 4, laboratory: 4, 'nurses-station': 2,
-  'operating-room': 2, 'research-office': 2, 'general-ward': 0,
-};
+// Heights follow the view, Monument Valley style: the cell nearest the
+// viewer is lowest and the farthest is highest. Index = cellDepth + 2.
+// The core runs 6, 4, 2, 2, 0 from back to front; the ring carries on.
+const ELEVATION = [9, 8, 6, 4, 2, 2, 0, -1, -2];
+const elevationAt = (c, r) => ELEVATION[cellDepth(c, r) + 2];
 // Tower colours for departments, taken in turn from the colourway.
 const DEPT_MATERIALS = ['rose', 'sky', 'mint', 'lilac', 'sand', 'coral', 'teal'];
 const deptMaterial = new Map(); // dept id -> material key
@@ -40,51 +41,81 @@ const SLOTS = {
   department: [[1.3, 3.2], [4.7, 3.2], [3, 5.2], [1.5, 5.1], [4.6, 5.2], [2.2, 1.4]],
 };
 
-// Where new helpers appear and finished ones leave: the middle of the station.
-export const SPAWN = [11, 12.4, 2];
+// Where new helpers appear and finished ones leave: the middle of the
+// station, which sits at the centre of every view and so never moves.
+export function spawnPoint() {
+  const hub = LAYOUT['nurses-station'];
+  return [11, 12.4, hub ? hub.z : 2];
+}
 
-// Walkable joins between rooms. Points run from room a to room b. The core
-// joins are fixed; each department adds one to the room it was placed next to.
-const CORE_CONNECTORS = [
-  { a: 'nurses-station', b: 'operating-room', kind: 'bridge', axis: 'x', from: [14, 11, 2], to: [16, 11, 2] },
-  { a: 'nurses-station', b: 'research-office', kind: 'bridge', axis: 'y', from: [11, 14, 2], to: [11, 16, 2] },
-  { a: 'nurses-station', b: 'vision-clinic', kind: 'stairs', axis: 'y', from: [11, 8, 2], to: [11, 6, 4] },
-  { a: 'nurses-station', b: 'laboratory', kind: 'stairs', axis: 'x', from: [8, 11, 2], to: [6, 11, 4] },
-  { a: 'laboratory', b: 'radiology', kind: 'stairs', axis: 'y', from: [3, 8, 4], to: [3, 6, 6] },
-  { a: 'operating-room', b: 'general-ward', kind: 'stairs', axis: 'y', from: [19, 14, 2], to: [19, 16, 0] },
+// Walkable joins between rooms: each department adds one to the room it was
+// placed next to. Ends are worked out from the two cells, heights from the
+// rooms at the moment of drawing, so they follow the view.
+const CORE_LINKS = [
+  ['nurses-station', 'operating-room'], ['nurses-station', 'research-office'],
+  ['nurses-station', 'vision-clinic'], ['nurses-station', 'laboratory'],
+  ['laboratory', 'radiology'], ['operating-room', 'general-ward'],
 ];
-let CONNECTORS = [...CORE_CONNECTORS];
+let CONNECTORS = [];
 
-// Lays out the rooms the config lists: core rooms at their fixed heights,
-// departments one step up or down from the room they join, so each gets a
-// short flight of stairs.
+function link(aId, bId) {
+  const a = LAYOUT[aId];
+  const b = LAYOUT[bId];
+  const [ac, ar] = a.cell;
+  const [bc, br] = b.cell;
+  if (bc === ac + 1) return { a: aId, b: bId, axis: 'x', fromXY: [a.x + SIZE, a.y + 3], toXY: [b.x, b.y + 3] };
+  if (bc === ac - 1) return { a: aId, b: bId, axis: 'x', fromXY: [a.x, a.y + 3], toXY: [b.x + SIZE, b.y + 3] };
+  if (br === ar + 1) return { a: aId, b: bId, axis: 'y', fromXY: [a.x + 3, a.y + SIZE], toXY: [b.x + 3, b.y] };
+  return { a: aId, b: bId, axis: 'y', fromXY: [a.x + 3, a.y], toXY: [b.x + 3, b.y + SIZE] };
+}
+
+// The two ends of a join, with the current heights of its rooms.
+function ends(c) {
+  return [[...c.fromXY, LAYOUT[c.a].z], [...c.toXY, LAYOUT[c.b].z]];
+}
+
+// Scenery islands also rise and sink with the view.
+const SCENERY = { garden: { cell: [0, 2], z: 1 }, grove: { cell: [2, 0], z: 1 } };
+
+// Lays out the rooms the config lists and joins each department to the room
+// it was placed next to.
 export function configureRooms(rooms) {
   for (const k of Object.keys(LAYOUT)) delete LAYOUT[k];
-  CONNECTORS = [...CORE_CONNECTORS];
+  CONNECTORS = [];
   deptMaterial.clear();
   let n = 0;
   for (const room of rooms) {
     const [c, r] = room.cell;
-    const x = c * CELL;
-    const y = r * CELL;
-    if (!room.custom) {
-      LAYOUT[room.id] = { x, y, z: CORE_Z[room.id] ?? 2 };
-      continue;
+    if (room.custom && !LAYOUT[room.via]) continue; // validated upstream; never guessed
+    LAYOUT[room.id] = { x: c * CELL, y: r * CELL, z: 0, cell: [c, r], kind: room.custom ? room.kind : undefined };
+    if (room.custom) {
+      deptMaterial.set(room.id, DEPT_MATERIALS[n++ % DEPT_MATERIALS.length]);
+      CONNECTORS.push(link(room.via, room.id));
     }
-    const via = LAYOUT[room.via];
-    if (!via) continue; // validated upstream; a missing link is skipped, not guessed
-    const z = via.z > 0 ? via.z - 1 : via.z + 1;
-    LAYOUT[room.id] = { x, y, z, kind: room.kind };
-    deptMaterial.set(room.id, DEPT_MATERIALS[n++ % DEPT_MATERIALS.length]);
-    const [vc, vr] = [via.x / CELL, via.y / CELL];
-    let from;
-    let to;
-    let axis;
-    if (c === vc + 1) { axis = 'x'; from = [via.x + SIZE, via.y + 3, via.z]; to = [x, y + 3, z]; }
-    else if (c === vc - 1) { axis = 'x'; from = [via.x, via.y + 3, via.z]; to = [x + SIZE, y + 3, z]; }
-    else if (r === vr + 1) { axis = 'y'; from = [via.x + 3, via.y + SIZE, via.z]; to = [x + 3, y, z]; }
-    else { axis = 'y'; from = [via.x + 3, via.y, via.z]; to = [x + 3, y + SIZE, z]; }
-    CONNECTORS.push({ a: room.via, b: room.id, kind: from[2] === to[2] ? 'bridge' : 'stairs', axis, from, to });
+  }
+  for (const [a, b] of CORE_LINKS) if (LAYOUT[a] && LAYOUT[b]) CONNECTORS.unshift(link(a, b));
+  setHeights(targetHeights());
+}
+
+// The heights every room and island should have in the current view.
+export function targetHeights() {
+  const h = {};
+  for (const [id, r] of Object.entries(LAYOUT)) h[id] = elevationAt(...r.cell);
+  for (const [id, s] of Object.entries(SCENERY)) h[id] = elevationAt(...s.cell) - 1;
+  return h;
+}
+
+export function currentHeights() {
+  const h = {};
+  for (const [id, r] of Object.entries(LAYOUT)) h[id] = r.z;
+  for (const [id, s] of Object.entries(SCENERY)) h[id] = s.z;
+  return h;
+}
+
+export function setHeights(h) {
+  for (const [id, z] of Object.entries(h)) {
+    if (LAYOUT[id]) LAYOUT[id].z = z;
+    else if (SCENERY[id]) SCENERY[id].z = z;
   }
 }
 
@@ -122,12 +153,13 @@ export function routeTo(roomId) {
       }
     }
   }
-  if (!prev.has(roomId)) return [SPAWN];
+  if (!prev.has(roomId)) return [spawnPoint()];
   const hops = [];
   for (let r = roomId; prev.get(r); r = prev.get(r).from) hops.unshift(prev.get(r));
-  const points = [SPAWN];
+  const points = [spawnPoint()];
   for (const { from, c } of hops) {
-    const [p, q] = c.a === from ? [c.from, c.to] : [c.to, c.from];
+    const [f, t] = ends(c);
+    const [p, q] = c.a === from ? [f, t] : [t, f];
     points.push(inset(p, from), p, q, inset(q, c.a === from ? c.b : c.a));
   }
   return points;
@@ -190,7 +222,7 @@ function doorways(id) {
   const r = LAYOUT[id];
   const sides = new Set();
   for (const c of CONNECTORS) {
-    for (const [room, p] of [[c.a, c.from], [c.b, c.to]]) {
+    for (const [room, p] of [[c.a, c.fromXY], [c.b, c.toXY]]) {
       if (room !== id) continue;
       if (p[1] === r.y) sides.add('north');
       if (p[1] === r.y + SIZE) sides.add('south');
@@ -223,8 +255,7 @@ function walls(id, r) {
 }
 
 function stairs(c) {
-  const [ax, ay, az] = c.from;
-  const [bx, by, bz] = c.to;
+  const [[ax, ay, az], [bx, by, bz]] = ends(c);
   const n = 8;
   const steps = [];
   const low = Math.min(az, bz);
@@ -250,8 +281,7 @@ function stairs(c) {
 }
 
 function bridge(c) {
-  const [ax, ay, z] = c.from;
-  const [bx, by] = c.to;
+  const [[ax, ay, z], [bx, by]] = ends(c);
   let s;
   if (c.axis === 'x') {
     s = box(Math.min(ax, bx), ay - 1, z - 0.45, Math.abs(bx - ax), 2, 0.45, M.stone);
@@ -455,21 +485,23 @@ function ecg(x, y, z) {
 // Scenery: a garden island to the lower left and a low grove island to the
 // upper right.
 function garden() {
+  const z = SCENERY.garden.z;
   let s = '';
-  s += box(1.5, 17.5, BASE_Z + 1, 4, 4, 3.3 - BASE_Z - 1, M.leaf);
-  s += box(1.2, 17.2, 0.6, 4.6, 4.6, 0.4, M.stone);
-  s += tiledTop(1.2, 17.2, 1.001, 4.6, 4.6, M.mint.top, M.mint.left);
-  s += tree(2.4, 18.4, 1, 1.1) + tree(4.4, 19.2, 1, 0.9) + tree(2.8, 20.6, 1, 0.8);
-  s += box(3.6, 20.4, 1, 1.2, 0.4, 0.3, M.sand);
+  s += box(1.5, 17.5, BASE_Z + 1, 4, 4, z - 0.4 - BASE_Z - 1, M.leaf);
+  s += box(1.2, 17.2, z - 0.4, 4.6, 4.6, 0.4, M.stone);
+  s += tiledTop(1.2, 17.2, z + 0.001, 4.6, 4.6, M.mint.top, M.mint.left);
+  s += tree(2.4, 18.4, z, 1.1) + tree(4.4, 19.2, z, 0.9) + tree(2.8, 20.6, z, 0.8);
+  s += box(3.6, 20.4, z, 1.2, 0.4, 0.3, M.sand);
   return s;
 }
 
 function grove() {
+  const z = SCENERY.grove.z;
   let s = '';
-  s += box(17.8, 1.8, BASE_Z + 2, 2.8, 2.8, 4.2 - BASE_Z - 2, M.leaf);
-  s += box(17.5, 1.5, 4.2, 3.4, 3.4, 0.35, M.stone);
-  s += tiledTop(17.5, 1.5, 4.551, 3.4, 3.4, M.mint.top, M.mint.left);
-  s += tree(18.6, 2.5, 4.55, 1) + tree(19.9, 3.6, 4.55, 0.8);
+  s += box(17.8, 1.8, BASE_Z + 1, 2.8, 2.8, z - 0.35 - BASE_Z - 1, M.leaf);
+  s += box(17.5, 1.5, z - 0.35, 3.4, 3.4, 0.35, M.stone);
+  s += tiledTop(17.5, 1.5, z + 0.001, 3.4, 3.4, M.mint.top, M.mint.left);
+  s += tree(18.6, 2.5, z, 1) + tree(19.9, 3.6, z, 0.8);
   return s;
 }
 
@@ -505,7 +537,8 @@ export function buildScene(theme) {
     const ra = LAYOUT[c.a];
     const rb = LAYOUT[c.b];
     const depth = Math.max(viewDepth(ra.x + SIZE / 2, ra.y + SIZE / 2), viewDepth(rb.x + SIZE / 2, rb.y + SIZE / 2)) - 0.5;
-    items.push({ depth, s: c.kind === 'stairs' ? stairs(c) : bridge(c) });
+    const [f, t] = ends(c);
+    items.push({ depth, s: Math.abs(f[2] - t[2]) < 0.01 ? bridge(c) : stairs(c) });
   }
   items.push({ depth: viewDepth(3.5, 19.5), s: garden() }, { depth: viewDepth(19.2, 3.2), s: grove() });
   items.sort((p, q) => p.depth - q.depth);
