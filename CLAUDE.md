@@ -28,7 +28,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 ## Layout
 
-- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `rooms.js`, `roster.js`, `activity.js`, `metrics.js` for the report).
+- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `roster.js`, `activity.js`, `metrics.js` for the report).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
 - `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital, `people.js` figures, `app.js` glue and board, `demo.js`.
 - `test/`: `node:test`, one file per core module.

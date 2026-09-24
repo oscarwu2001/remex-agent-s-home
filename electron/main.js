@@ -7,16 +7,21 @@ const path = require('path');
 const { Tracker } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
 const { readRoster } = require('../src/core/roster');
+const { wslRoots, rootKey } = require('../src/core/wsl');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
+const WSL_MS = 1_500; // WSL files are read this often, each time after a running check
+const WSL_IDLE_MS = 5_000; // how often to look for a distro while none is running
 
 let win;
 let tracker;
 let watcher;
+let wslWatcher;
+let wsl = { roots: [], problems: [] };
 // Problems shown under "Needs attention". `label` is safe on a shared
 // screen; `detail` may hold a path and is hidden in privacy mode. Repeats are
 // counted, not re-added, so a noisy folder cannot push others off the list.
@@ -82,8 +87,8 @@ function loadOverrides(roomIds) {
 }
 
 function rosterDirs() {
-  // User agents live next to each transcripts root (~/.claude, $CLAUDE_CONFIG_DIR).
-  const dirs = defaultRoots().map((root) => ({ dir: path.join(path.dirname(root), 'agents'), scope: 'user' }));
+  // User agents live next to each transcripts root (~/.claude, $CLAUDE_CONFIG_DIR, WSL homes).
+  const dirs = [...watcher.roots, ...wslWatcher.roots].map((root) => ({ dir: path.join(path.dirname(root), 'agents'), scope: 'user' }));
   const seen = new Set();
   for (const s of tracker.sessions.values()) {
     if (s.cwd && !seen.has(s.cwd)) {
@@ -131,21 +136,45 @@ app.whenReady().then(() => {
   // rooms.json, written by hand, wins over assignments made in the app.
   let overrides = { ...overridesFrom(layout), ...fileOverrides };
   tracker = new Tracker({ overrides });
-  const roots = defaultRoots();
-  watcher = new TranscriptWatcher({
-    roots,
+  const sink = {
     onEntry: (file, entry, now) => tracker.ingest(file, entry, now),
     onMalformed: (file, err) => tracker.noteMalformed(file, err),
     onProblem: problem,
-  });
+  };
+  const roots = defaultRoots();
+  watcher = new TranscriptWatcher({ roots, ...sink });
   watcher.start();
 
+  // Sessions started in a WSL terminal live in each running distro's Linux
+  // home. They get their own watcher, ticked only straight after a check
+  // that the distro still runs: touching a stopped distro's files would
+  // start it again. A root already watched above (CLAUDE_CONFIG_DIR) is
+  // left to that watcher so no transcript is read twice.
+  const known = new Set(roots.map((r) => rootKey(r)));
+  wslWatcher = new TranscriptWatcher({ roots: [], ...sink });
+
+  // The roster reads the agents folder next to each root, WSL ones included,
+  // so it is refreshed from the same loop, straight after the check.
   let roster = { agents: [], problems: [] };
+  let rosterAt = 0;
   function refreshRoster() {
     roster = readRoster(rosterDirs(), overrides);
+    rosterAt = Date.now();
   }
-  refreshRoster();
-  setInterval(refreshRoster, ROSTER_MS);
+
+  (async function followWsl() {
+    try {
+      wsl = await wslRoots();
+      wslWatcher.setRoots(wsl.roots.filter((r) => !known.has(rootKey(r))));
+      wslWatcher.tick();
+      if (Date.now() - rosterAt >= ROSTER_MS) refreshRoster();
+    } catch (err) {
+      problem(`Following WSL sessions failed (${err.name})`, err.message);
+    } finally {
+      setTimeout(followWsl, wsl.roots.length ? WSL_MS : WSL_IDLE_MS);
+    }
+  })();
+
   setInterval(() => tracker.prune(), 60_000);
 
   const config = () => ({
@@ -185,7 +214,7 @@ app.whenReady().then(() => {
     layout = next;
     overrides = { ...overridesFrom(layout), ...fileOverrides };
     tracker.overrides = overrides;
-    refreshRoster();
+    rosterAt = 0; // re-read on the next WSL check, which is at most 5 s away
     return { ok: true, config: config() };
   });
 
@@ -195,9 +224,13 @@ app.whenReady().then(() => {
     if (!win || win.isDestroyed()) return;
     win.webContents.send('home:snapshot', {
       ...tracker.snapshot(),
-      watcher: watcher.status(),
+      watcher: (() => {
+        const a = watcher.status();
+        const b = wslWatcher.status();
+        return { roots: [...a.roots, ...b.roots], filesTailed: a.filesTailed + b.filesTailed };
+      })(),
       roster: roster.agents,
-      problems: [...startupProblems, ...problems.values(), ...roster.problems],
+      problems: [...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems],
     });
   }, PUSH_MS);
 

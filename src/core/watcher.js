@@ -25,7 +25,7 @@ class TranscriptWatcher {
     this.onMalformed = onMalformed;
     this.onProblem = onProblem;
     this.opt = { ...DEFAULTS, ...options };
-    this.files = new Map(); // abs path -> { offset, remainder, mtimeMs }
+    this.files = new Map(); // abs path -> { root, offset, remainder, mtimeMs }
     this.lastListAt = 0;
     this.timer = undefined;
     this.rootState = new Map(); // root -> 'ok' | 'missing' | error message
@@ -41,10 +41,24 @@ class TranscriptWatcher {
     this.timer = undefined;
   }
 
+  // Roots change while running when a WSL distro starts or stops. Files under
+  // a dropped root are left untouched but keep their read position, so when
+  // the root comes back nothing is read, and counted, twice.
+  setRoots(roots) {
+    const next = [...new Set(roots)];
+    if (next.join('\n') === this.roots.join('\n')) return;
+    for (const root of this.roots) {
+      if (!next.includes(root)) this.rootState.delete(root);
+    }
+    this.roots = next;
+    this.lastListAt = 0; // list the new roots on the next tick
+  }
+
   status() {
+    const active = new Set(this.roots);
     return {
       roots: this.roots.map((r) => ({ path: r, state: this.rootState.get(r) || 'pending' })),
-      filesTailed: this.files.size,
+      filesTailed: [...this.files.values()].filter((s) => active.has(s.root)).length,
     };
   }
 
@@ -53,7 +67,10 @@ class TranscriptWatcher {
       this.lastListAt = now;
       for (const root of this.roots) this.listRoot(root, now);
     }
-    for (const [file, state] of this.files) this.readNew(file, state, now);
+    const active = new Set(this.roots);
+    for (const [file, state] of this.files) {
+      if (active.has(state.root)) this.readNew(file, state, now);
+    }
   }
 
   listRoot(root, now) {
@@ -69,10 +86,10 @@ class TranscriptWatcher {
       return;
     }
     this.rootState.set(root, 'ok');
-    this.walk(root, 0, now);
+    this.walk(root, 0, now, root);
   }
 
-  walk(dir, depth, now) {
+  walk(dir, depth, now, root) {
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -83,14 +100,14 @@ class TranscriptWatcher {
     for (const ent of entries) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        if (depth < this.opt.maxDepth) this.walk(full, depth + 1, now);
+        if (depth < this.opt.maxDepth) this.walk(full, depth + 1, now, root);
       } else if (ent.isFile() && ent.name.endsWith('.jsonl') && !this.files.has(full)) {
-        this.consider(full, now);
+        this.consider(full, now, root);
       }
     }
   }
 
-  consider(file, now) {
+  consider(file, now, root) {
     let stat;
     try {
       stat = fs.statSync(file);
@@ -103,7 +120,7 @@ class TranscriptWatcher {
     // Starting mid-file: drop the partial first line, unless we happen to
     // start exactly on a line boundary.
     this.files.set(file, {
-      offset: start, remainder: Buffer.alloc(0), mtimeMs: 0, skipFirst: start > 0 && !startsAtLine(file, start),
+      root, offset: start, remainder: Buffer.alloc(0), mtimeMs: 0, skipFirst: start > 0 && !startsAtLine(file, start),
     });
   }
 

@@ -86,8 +86,11 @@ The **score** is reliability (40), right first time (20), speed (20) and efficie
 ## How it works
 
 Claude Code writes every conversation to a JSONL transcript under
-`%USERPROFILE%\.claude\projects\` (or `$CLAUDE_CONFIG_DIR\projects`). The app
-polls that folder, tails files written in the last 30 minutes, and turns each
+`%USERPROFILE%\.claude\projects\` (or `$CLAUDE_CONFIG_DIR\projects`). Sessions
+run inside WSL write to the Linux home instead; the app finds those by itself
+as `\\wsl.localhost\<distro>\home\<user>\.claude\projects` for every distro
+that is running (it never starts a stopped one). The app polls those folders,
+tails files written in the last 30 minutes, and turns each
 line into events: a tool call starts, a tool returns, a `Task`/`Agent` call
 spawns a helper, the answer ends. From those events it decides what each
 figure is doing:

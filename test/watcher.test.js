@@ -94,6 +94,43 @@ test('CLAUDE_CONFIG_DIR adds a root ahead of the home folder', () => {
   assert.deepEqual(roots, [path.join('/cfg', 'projects'), path.join('/home/u', '.claude', 'projects')]);
 });
 
+test('roots can be added and dropped while running', () => {
+  const a = tmpRoot();
+  const b = tmpRoot();
+  fs.mkdirSync(path.join(a, 'p'));
+  fs.mkdirSync(path.join(b, 'p'));
+  fs.writeFileSync(path.join(a, 'p', 'a.jsonl'), '');
+  fs.writeFileSync(path.join(b, 'p', 'b.jsonl'), '');
+  const { w, got } = collect(a, { listEveryMs: 60_000 });
+  w.tick();
+  w.setRoots([a, b]);
+  w.tick();
+  assert.deepEqual(w.status(), {
+    roots: [{ path: a, state: 'ok' }, { path: b, state: 'ok' }],
+    filesTailed: 2,
+  });
+  w.setRoots([a]);
+  assert.deepEqual(w.status(), { roots: [{ path: a, state: 'ok' }], filesTailed: 1 });
+  assert.deepEqual(got.problems, []);
+});
+
+test('a root that drops out and comes back does not replay what was already read', () => {
+  const a = tmpRoot();
+  const b = tmpRoot();
+  const file = path.join(b, 'b.jsonl');
+  fs.writeFileSync(file, `${JSON.stringify({ type: 'user', n: 1 })}\n`);
+  const { w, got } = collect(a);
+  w.setRoots([a, b]);
+  w.tick();
+  w.setRoots([a]);
+  fs.appendFileSync(file, `${JSON.stringify({ type: 'user', n: 2 })}\n`);
+  w.tick(); // b is not touched while it is out
+  assert.deepEqual(got.entries.map(([, n]) => n), [1]);
+  w.setRoots([a, b]);
+  w.tick();
+  assert.deepEqual(got.entries.map(([, n]) => n), [1, 2]);
+});
+
 test('starting exactly on a line boundary keeps that first line', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, 'p'));
