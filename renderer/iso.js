@@ -1,0 +1,137 @@
+// Isometric projection and flat-shaded primitives, Monument Valley style:
+// no outlines, three tones per solid (top light, left mid, right dark).
+//
+// World axes: x runs toward the lower right of the screen, y toward the
+// lower left, z straight up. One unit of x or y is one floor tile.
+
+export const TW = 32; // half a tile's screen width
+export const TH = 16; // half a tile's screen height
+export const ZH = 35; // screen height of one unit of z
+
+export function P(x, y, z = 0) {
+  return [(x - y) * TW, (x + y) * TH - z * ZH];
+}
+
+export function pts(list) {
+  return list
+    .map((p) => P(p[0], p[1], p[2]))
+    .map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`)
+    .join(' ');
+}
+
+// A seam-free face: stroke in the fill colour closes hairline gaps.
+export function poly(list, fill, extra = '') {
+  return `<polygon points="${pts(list)}" fill="${fill}" stroke="${fill}" stroke-width="0.6" stroke-linejoin="round" ${extra}/>`;
+}
+
+// Materials: top / left / right tones.
+export const M = {
+  stone: { top: '#f5ecdf', left: '#e6d4c1', right: '#cdb49e' },
+  cream: { top: '#fbf5ec', left: '#efe2d2', right: '#dac6b1' },
+  coral: { top: '#f5b4a3', left: '#ea9380', right: '#d17665' },
+  rose: { top: '#f3c4c4', left: '#e3a3a8', right: '#c9868e' },
+  mint: { top: '#d3ecdf', left: '#abd7c6', right: '#8abdaa' },
+  teal: { top: '#86c9c1', left: '#5eaca6', right: '#468e8b' },
+  sky: { top: '#cfe0f0', left: '#a7c3df', right: '#88a5c6' },
+  lilac: { top: '#e0d0ea', left: '#c4acd6', right: '#a68ebc' },
+  sand: { top: '#f8e2bd', left: '#ecc995', right: '#d4a977' },
+  white: { top: '#ffffff', left: '#eef1f3', right: '#d6dce2' },
+  steel: { top: '#dde3ea', left: '#bcc6d2', right: '#9aa6b5' },
+  ink: { top: '#6f7396', left: '#585c7c', right: '#464963' },
+  leaf: { top: '#9ccfa6', left: '#79b78a', right: '#5f9c71' },
+};
+
+export function box(x, y, z, w, d, h, m, extra = '') {
+  const t = z + h;
+  return (
+    `<g ${extra}>` +
+    poly([[x, y + d, t], [x + w, y + d, t], [x + w, y + d, z], [x, y + d, z]], m.left) +
+    poly([[x + w, y, t], [x + w, y + d, t], [x + w, y + d, z], [x + w, y, z]], m.right) +
+    poly([[x, y, t], [x + w, y, t], [x + w, y + d, t], [x, y + d, t]], m.top) +
+    '</g>'
+  );
+}
+
+// Floor with a quiet two-tone tile pattern.
+export function tiledTop(x, y, z, w, d, a, b) {
+  let s = poly([[x, y, z], [x + w, y, z], [x + w, y + d, z], [x, y + d, z]], a);
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < d; j++) {
+      if ((i + j) % 2) continue;
+      s += poly([[x + i, y + j, z], [x + i + 1, y + j, z], [x + i + 1, y + j + 1, z], [x + i, y + j + 1, z]], b);
+    }
+  }
+  return s;
+}
+
+// Upright cylinder; a hard-split gradient gives the lit / shaded halves.
+export function cylinder(cx, cy, z, r, h, m) {
+  const [x0, y0] = P(cx, cy, z);
+  const [, y1] = P(cx, cy, z + h);
+  const rx = r * Math.SQRT2 * TW;
+  const ry = r * Math.SQRT2 * TH;
+  const id = gradId(m);
+  return (
+    `<path d="M${x0 - rx},${y1} L${x0 - rx},${y0} A${rx},${ry} 0 0 0 ${x0 + rx},${y0} L${x0 + rx},${y1} Z" fill="url(#${id})"/>` +
+    `<ellipse cx="${x0}" cy="${y1}" rx="${rx}" ry="${ry}" fill="${m.top}"/>`
+  );
+}
+
+// A round lollipop crown or a ball.
+export function ball(cx, cy, z, r, m) {
+  const [x, y] = P(cx, cy, z);
+  return `<circle cx="${x}" cy="${y}" r="${r * TW}" fill="url(#${gradId(m)})"/>`;
+}
+
+export function gradId(m) {
+  return `split-${Object.keys(M).find((k) => M[k] === m) || 'stone'}`;
+}
+
+export function splitGradients() {
+  return Object.entries(M)
+    .map(
+      ([k, m]) =>
+        `<linearGradient id="split-${k}" x1="0" x2="1" y1="0" y2="0">` +
+        `<stop offset="0.5" stop-color="${m.left}"/><stop offset="0.5" stop-color="${m.right}"/>` +
+        '</linearGradient>',
+    )
+    .join('');
+}
+
+// Points of an arch (rectangle with a round top) in a vertical wall plane.
+// along(u, z) maps wall-local u and height to a world point.
+export function archPoints(along, u0, width, zBase, height, steps = 12) {
+  const r = width / 2;
+  const cu = u0 + r;
+  const springZ = zBase + height - r * 0.9;
+  const out = [along(u0, zBase)];
+  for (let i = 0; i <= steps; i++) {
+    const a = Math.PI - (Math.PI * i) / steps;
+    out.push(along(cu + r * Math.cos(a), springZ + r * 0.9 * Math.sin(a)));
+  }
+  out.push(along(u0 + width, zBase));
+  return out;
+}
+
+// Ring standing in the plane y = cy (the MRI bore).
+export function uprightRing(cx, cy, cz, R, r, depth, m) {
+  const layers = 6;
+  let s = '';
+  for (let k = 0; k <= layers; k++) {
+    const yy = cy - depth / 2 + (depth * k) / layers;
+    const fill = k === layers ? m.top : k > layers / 2 ? m.left : m.right;
+    s += `<path fill-rule="evenodd" fill="${fill}" d="${ringPath(cx, yy, cz, R)} ${ringPath(cx, yy, cz, r)}"/>`;
+  }
+  return s;
+}
+
+function ringPath(cx, y, cz, R) {
+  const n = 40;
+  let d = '';
+  for (let i = 0; i <= n; i++) {
+    const t = (2 * Math.PI * i) / n;
+    const [sx, sy] = P(cx + R * Math.cos(t), y, cz + R * Math.sin(t));
+    d += `${i ? 'L' : 'M'}${sx.toFixed(1)},${sy.toFixed(1)}`;
+  }
+  return `${d}Z`;
+}

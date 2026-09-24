@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4c7bd"/><stop offset="1" stop-color="#fcefe1"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#sky)"/>
+  <!-- tower -->
+  <polygon points="256,196 372,254 372,414 256,472" fill="#d17665"/>
+  <polygon points="256,196 140,254 140,414 256,472" fill="#ea9380"/>
+  <!-- cap slab -->
+  <polygon points="256,150 396,220 256,290 116,220" fill="#f5ecdf"/>
+  <polygon points="116,220 256,290 256,312 116,242" fill="#e6d4c1"/>
+  <polygon points="396,220 256,290 256,312 396,242" fill="#cdb49e"/>
+  <!-- arch -->
+  <path d="M296,520 v-44 a18,18 0 0 1 36,0 v44 Z" fill="#f8cbbd" transform="skewY(-26.565)"/>
+  <!-- cross -->
+  <g transform="translate(256 132)">
+    <rect x="-22" y="-78" width="44" height="116" rx="8" fill="#5eaca6"/>
+    <rect x="-58" y="-42" width="116" height="44" rx="8" fill="#5eaca6"/>
+    <rect x="-22" y="-78" width="22" height="116" rx="8" fill="#86c9c1"/>
+    <rect x="-58" y="-42" width="58" height="22" rx="8" fill="#86c9c1"/>
+  </g>
+</svg>

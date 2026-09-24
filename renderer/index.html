@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent's Home</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="stage" aria-label="Hospital map">
+    <svg id="scene" role="img" aria-labelledby="scene-title">
+      <title id="scene-title">Isometric hospital with a room for each kind of agent</title>
+      <defs id="defs"></defs>
+      <g id="world">
+        <g id="clouds"></g>
+        <g id="geometry"></g>
+        <g id="mist"></g>
+        <g id="labels"></g>
+        <g id="people"></g>
+      </g>
+    </svg>
+    <p class="source" id="source"></p>
+  </main>
+
+  <aside class="board" aria-label="Ward board">
+    <header class="board-head">
+      <h1>Agent's Home</h1>
+      <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
+    </header>
+
+    <section class="board-section" aria-labelledby="on-shift-h">
+      <h2 id="on-shift-h">On shift</h2>
+      <div id="sessions"></div>
+    </section>
+
+    <section class="board-section chart" id="chart" aria-labelledby="chart-h" hidden>
+      <h2 id="chart-h">Chart</h2>
+      <div id="chart-body"></div>
+    </section>
+
+    <details class="board-section" id="directory">
+      <summary><h2>Staff directory <span class="count" id="directory-count"></span></h2></summary>
+      <ul id="directory-list" class="directory"></ul>
+    </details>
+
+    <section class="board-section problems" id="problems" hidden aria-labelledby="problems-h">
+      <h2 id="problems-h">Needs attention</h2>
+      <ul id="problem-list"></ul>
+    </section>
+
+    <footer class="controls">
+      <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
+      <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
+      <label class="switch"><input type="checkbox" id="opt-night"> <span>Night shift</span></label>
+      <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+    </footer>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
