@@ -1,8 +1,11 @@
-// The creatures of the Meadow: each agent can be shown as a cute animal.
-// Ten species, ten looks each (colours, markings and one small accessory).
-// Every drawing stands on (0, 0) and faces the viewer, about 100 units tall.
+// The creatures of the Meadow, built from blocks like the hospital itself:
+// every animal is a handful of boxes drawn with the same isometric
+// projection and the same three-tone shading as the towers. Ten species,
+// ten looks each (colours, markings and one small accessory).
 
-const f1 = (v) => v.toFixed(1);
+import { P, box, viewDepth, faceVisible } from './iso.js';
+import { THEMES, DEFAULT_THEME, shade, mix } from './themes.js';
+
 
 // Ten colourways per species: [body, belly, accent].
 const PALETTES = {
@@ -52,163 +55,431 @@ export function lookOf(species, v) {
   };
 }
 
-// ---- shared parts ---------------------------------------------------------------
+// ---- models -----------------------------------------------------------------------
+//
+// A model is a list of blocks in the creature's own frame, measured in
+// tenths of a floor tile: `a` runs to the creature's right, `b` forward
+// (its face is at +b), z up from the ground. a and b are block centres, z
+// its underside. A block may carry `kids`, smaller blocks stuck to one of
+// its faces (eyes, stripes, a hat); a kid is drawn straight after its
+// parent when that face is turned toward the viewer, so it can never be
+// painted over by the block it sits on.
 
-const ellipse = (cx, cy, rx, ry, fill, extra = '') => `<ellipse cx="${f1(cx)}" cy="${f1(cy)}" rx="${f1(rx)}" ry="${f1(ry)}" fill="${fill}" ${extra}/>`;
-const circle = (cx, cy, r, fill, extra = '') => `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(r)}" fill="${fill}" ${extra}/>`;
-const path = (d, fill, extra = '') => `<path d="${d}" fill="${fill}" ${extra}/>`;
-const INK = '#3d3450';
+const FIXED = {
+  ink: '#3d3450', white: '#ffffff', pink: '#f59bb0', gold: '#f6cf4f', green: '#6cc47a',
+  lens: '#dff3ff', band: '#5b5470', petal: '#f7a6c6', seed: '#f6d36b',
+};
 
-function face(cx, cy, s = 1, { mouth = 'smile' } = {}) {
-  const dx = 9 * s;
-  let out = circle(cx - dx, cy, 3.6 * s, INK) + circle(cx + dx, cy, 3.6 * s, INK) +
-    circle(cx - dx + 1.2 * s, cy - 1.3 * s, 1.2 * s, '#fff') + circle(cx + dx + 1.2 * s, cy - 1.3 * s, 1.2 * s, '#fff') +
-    ellipse(cx - dx - 4 * s, cy + 6 * s, 4 * s, 2.4 * s, '#f59ab0', 'opacity="0.55"') + ellipse(cx + dx + 4 * s, cy + 6 * s, 4 * s, 2.4 * s, '#f59ab0', 'opacity="0.55"');
-  if (mouth === 'smile') out += path(`M${f1(cx - 3 * s)},${f1(cy + 5 * s)} q${f1(3 * s)},${f1(3 * s)} ${f1(6 * s)},0`, 'none', `stroke="${INK}" stroke-width="${f1(1.6 * s)}" stroke-linecap="round"`);
-  if (mouth === 'cat') out += path(`M${f1(cx - 4 * s)},${f1(cy + 5 * s)} q${f1(2 * s)},${f1(2.5 * s)} ${f1(4 * s)},0 q${f1(2 * s)},${f1(2.5 * s)} ${f1(4 * s)},0`, 'none', `stroke="${INK}" stroke-width="${f1(1.5 * s)}" stroke-linecap="round"`);
-  if (mouth === 'wide') out += path(`M${f1(cx - 8 * s)},${f1(cy + 5 * s)} q${f1(8 * s)},${f1(6 * s)} ${f1(16 * s)},0`, 'none', `stroke="${INK}" stroke-width="${f1(1.6 * s)}" stroke-linecap="round"`);
-  return out;
+const blk = (a, b, z, w, d, h, c, more = {}) => ({ a, b, z, w, d, h, c, ...more });
+
+// A kid on a face of `p`, placed by its own a / b / z; `out` is how far it
+// stands proud of that face.
+function on(p, face, a, z, w, h, c, out = 0.2, more = {}) {
+  const front = p.b + p.d / 2 + out / 2;
+  const back = p.b - p.d / 2 - out / 2;
+  const kid = face === 'front' ? blk(a, front, z, w, out, h, c, more)
+    : face === 'back' ? blk(a, back, z, w, out, h, c, more)
+      : face === 'right' ? blk(p.a + p.w / 2 + out / 2, a, z, out, w, h, c, more)
+        : blk(p.a - p.w / 2 - out / 2, a, z, out, w, h, c, more); // left: `a` is the b position
+  kid.face = face;
+  (p.kids ??= []).push(kid);
+  return kid;
 }
 
-// Markings on a round body at (cx, cy) with radii rx, ry.
-function marks(kind, cx, cy, rx, ry, color, id) {
-  const clip = `<clipPath id="${id}"><ellipse cx="${f1(cx)}" cy="${f1(cy)}" rx="${f1(rx)}" ry="${f1(ry)}"/></clipPath>`;
-  let inner = '';
-  if (kind === 'spots') for (const [dx, dy, r] of [[-0.5, -0.3, 0.18], [0.35, -0.45, 0.14], [0.55, 0.2, 0.16], [-0.2, 0.4, 0.12]]) inner += circle(cx + dx * rx, cy + dy * ry, r * rx, color, 'opacity="0.7"');
-  if (kind === 'stripes') for (const dx of [-0.45, 0, 0.45]) inner += path(`M${f1(cx + dx * rx)},${f1(cy - ry)} q${f1(-0.12 * rx)},${f1(0.6 * ry)} 0,${f1(0.9 * ry)}`, 'none', `stroke="${color}" stroke-width="${f1(rx * 0.1)}" stroke-linecap="round" opacity="0.45"`);
-  if (kind === 'patch') inner += ellipse(cx + 0.45 * rx, cy - 0.35 * ry, 0.45 * rx, 0.35 * ry, color, 'opacity="0.65"');
-  return inner ? `${clip}<g clip-path="url(#${id})">${inner}</g>` : '';
+// A kid on top of `p` (always in view: the camera looks down).
+function top(p, a, b, w, d, h, c, more = {}) {
+  const kid = blk(a, b, p.z + p.h, w, d, h, c, { face: 'top', ...more });
+  (p.kids ??= []).push(kid);
+  return kid;
 }
 
-// An accessory on a head at (cx, cy) of radius r.
-function accessory(kind, cx, cy, r, accent) {
-  switch (kind) {
-    case 'bow':
-      return path(`M${f1(cx + r * 0.3)},${f1(cy - r * 0.95)} l${f1(-r * 0.35)},${f1(-r * 0.22)} v${f1(r * 0.44)} z M${f1(cx + r * 0.3)},${f1(cy - r * 0.95)} l${f1(r * 0.35)},${f1(-r * 0.22)} v${f1(r * 0.44)} z`, '#f06a8f') + circle(cx + r * 0.3, cy - r * 0.95, r * 0.09, '#d24d74');
-    case 'party-hat':
-      return path(`M${f1(cx - r * 0.3)},${f1(cy - r * 0.8)} L${f1(cx + r * 0.05)},${f1(cy - r * 1.75)} L${f1(cx + r * 0.4)},${f1(cy - r * 0.8)} z`, accent) + circle(cx + r * 0.05, cy - r * 1.78, r * 0.12, '#fff5b8') +
-        path(`M${f1(cx - r * 0.2)},${f1(cy - r * 1.05)} L${f1(cx + r * 0.3)},${f1(cy - r * 1.05)}`, 'none', 'stroke="#fff" stroke-width="2" opacity="0.8"');
-    case 'scarf':
-      return path(`M${f1(cx - r * 0.75)},${f1(cy + r * 0.72)} q${f1(r * 0.75)},${f1(r * 0.35)} ${f1(r * 1.5)},0 l0,${f1(r * 0.22)} q${f1(-r * 0.75)},${f1(r * 0.35)} ${f1(-r * 1.5)},0 z`, '#f0786e') + path(`M${f1(cx + r * 0.4)},${f1(cy + r * 0.95)} l${f1(r * 0.12)},${f1(r * 0.55)} l${f1(r * 0.25)},${f1(-r * 0.08)} l${f1(-r * 0.1)},${f1(-r * 0.5)} z`, '#e0594f');
-    case 'crown':
-      return path(`M${f1(cx - r * 0.4)},${f1(cy - r * 0.85)} l0,${f1(-r * 0.45)} l${f1(r * 0.2)},${f1(r * 0.22)} l${f1(r * 0.2)},${f1(-r * 0.3)} l${f1(r * 0.2)},${f1(r * 0.3)} l${f1(r * 0.2)},${f1(-r * 0.22)} l0,${f1(r * 0.45)} z`, '#f6cf4f') + circle(cx, cy - r * 1.02, r * 0.07, '#e36a8f');
-    case 'flower': {
-      let s = '';
-      for (let k = 0; k < 5; k++) {
-        const a = (k * 2 * Math.PI) / 5;
-        s += circle(cx - r * 0.55 + Math.cos(a) * r * 0.16, cy - r * 0.75 + Math.sin(a) * r * 0.16, r * 0.13, '#fbd3e0');
-      }
-      return s + circle(cx - r * 0.55, cy - r * 0.75, r * 0.1, '#f6cf4f');
+// A kid wrapped round `p` (a band or collar a little bigger than it).
+function wrap(p, z, h, c, grow = 0.15, d = p.d + grow * 2, b = p.b) {
+  const kid = blk(p.a, b, z, p.w + grow * 2, d, h, c, { face: 'wrap' });
+  (p.kids ??= []).push(kid);
+  return kid;
+}
+
+function face(H, { snout = 0, eye = 1 } = {}) {
+  const ew = Math.max(0.45, Math.min(0.8, H.w * 0.16)) * eye;
+  const ez = H.z + H.h * 0.5;
+  for (const s of [-1, 1]) {
+    const e = on(H, 'front', s * H.w * 0.24, ez, ew, ew * 1.25, 'ink', 0.15);
+    on(e, 'front', e.a - (s * ew) / 5, ez + ew * 0.7, ew * 0.4, ew * 0.4, 'white', 0.08);
+    on(H, 'front', s * H.w * 0.37, H.z + H.h * 0.26, 0.7, 0.45, 'pink', 0.1);
+  }
+  if (!snout) on(H, 'front', 0, H.z + H.h * 0.3, 0.5, 0.35, 'pink', 0.15);
+}
+
+function snoutOn(H, w, h, d, c = 'belly', nose = 'ink') {
+  const s = on(H, 'front', 0, H.z + H.h * 0.14, w, h, c, d);
+  on(s, 'front', 0, s.z + h - 0.5, 0.7, 0.45, nose, 0.12);
+  return s;
+}
+
+function legs(list, spread, front, back, w, d, h, c = 'body') {
+  for (const sa of [-1, 1]) {
+    for (const [sb, bb] of [[1, front], [-1, back]]) {
+      list.push(blk(sa * spread, bb, 0, w, d, h, c, { leg: sa * sb > 0 ? 0 : 1 }));
     }
-    case 'glasses':
-      return circle(cx - r * 0.36, cy - r * 0.02, r * 0.26, 'none', `stroke="${INK}" stroke-width="2"`) + circle(cx + r * 0.36, cy - r * 0.02, r * 0.26, 'none', `stroke="${INK}" stroke-width="2"`) +
-        path(`M${f1(cx - r * 0.1)},${f1(cy - r * 0.02)} h${f1(r * 0.2)}`, 'none', `stroke="${INK}" stroke-width="2"`);
-    case 'sprout':
-      return path(`M${f1(cx)},${f1(cy - r * 0.95)} q${f1(r * 0.05)},${f1(-r * 0.3)} 0,${f1(-r * 0.45)}`, 'none', 'stroke="#5fa35a" stroke-width="2.5" stroke-linecap="round"') +
-        ellipse(cx - r * 0.15, cy - r * 1.4, r * 0.18, r * 0.09, '#7fcf7a', `transform="rotate(-25 ${f1(cx - r * 0.15)} ${f1(cy - r * 1.4)})"`) +
-        ellipse(cx + r * 0.15, cy - r * 1.45, r * 0.18, r * 0.09, '#7fcf7a', `transform="rotate(25 ${f1(cx + r * 0.15)} ${f1(cy - r * 1.45)})"`);
-    case 'bandana':
-      return path(`M${f1(cx - r * 0.85)},${f1(cy - r * 0.45)} q${f1(r * 0.85)},${f1(-r * 0.75)} ${f1(r * 1.7)},0 l0,${f1(r * 0.12)} q${f1(-r * 0.85)},${f1(-r * 0.5)} ${f1(-r * 1.7)},0 z`, accent) + circle(cx + r * 0.9, cy - r * 0.36, r * 0.1, accent);
-    case 'headphones':
-      return path(`M${f1(cx - r * 0.85)},${f1(cy - r * 0.1)} q0,${f1(-r * 1.15)} ${f1(r * 0.85)},${f1(-r * 1.15)} q${f1(r * 0.85)},0 ${f1(r * 0.85)},${f1(r * 1.15)}`, 'none', `stroke="${INK}" stroke-width="3"`) +
-        ellipse(cx - r * 0.88, cy, r * 0.16, r * 0.24, accent) + ellipse(cx + r * 0.88, cy, r * 0.16, r * 0.24, accent);
-    default:
-      return '';
   }
 }
 
-// ---- the species ---------------------------------------------------------------------
-
-const DRAW = {
-  cat: (L, id) =>
-    path('M24,-18 q14,-6 12,-26', 'none', `stroke="${L.body}" stroke-width="7" stroke-linecap="round"`) +
-    ellipse(0, -18, 22, 17, L.body) + marks(L.mark, 0, -18, 22, 17, L.accent, `${id}b`) + ellipse(0, -14, 12, 11, L.belly) +
-    ellipse(-10, -2, 6, 3.5, L.body) + ellipse(10, -2, 6, 3.5, L.body) +
-    path('M-22,-58 l4,-20 l12,12 z', L.body) + path('M22,-58 l-4,-20 l-12,12 z', L.body) + path('M-19,-62 l2,-10 l6,6 z', '#f7b8c8') + path('M19,-62 l-2,-10 l-6,6 z', '#f7b8c8') +
-    circle(0, -52, 24, L.body) + marks(L.mark, 0, -52, 24, 24, L.accent, `${id}h`) + ellipse(0, -44, 11, 8, L.belly) +
-    face(0, -54, 1, { mouth: 'cat' }) + path('M-26,-47 l-10,-2 M-26,-44 l-10,2 M26,-47 l10,-2 M26,-44 l10,2', 'none', `stroke="${INK}" stroke-width="1" opacity="0.5"`) +
-    accessory(L.accessory, 0, -52, 24, L.accent),
-  dog: (L, id) =>
-    path('M22,-22 q12,-4 14,-16', 'none', `stroke="${L.body}" stroke-width="6" stroke-linecap="round"`) +
-    ellipse(0, -18, 21, 17, L.body) + marks(L.mark, 0, -18, 21, 17, L.accent, `${id}b`) + ellipse(0, -14, 11, 11, L.belly) +
-    ellipse(-10, -2, 6, 3.5, L.body) + ellipse(10, -2, 6, 3.5, L.body) +
-    circle(0, -52, 24, L.body) + marks(L.mark, 0, -52, 24, 24, L.accent, `${id}h`) +
-    ellipse(-24, -48, 8, 15, L.accent, 'transform="rotate(18 -24 -48)"') + ellipse(24, -48, 8, 15, L.accent, 'transform="rotate(-18 24 -48)"') +
-    ellipse(0, -42, 12, 9, L.belly) + ellipse(0, -46, 4, 3, INK) + face(0, -55, 1, { mouth: 'none' }) +
-    path('M-4,-40 q4,4 8,0', 'none', `stroke="${INK}" stroke-width="1.6" stroke-linecap="round"`) + ellipse(2, -36, 3, 4, '#f37d8f') +
-    accessory(L.accessory, 0, -52, 24, L.accent),
-  bunny: (L, id) =>
-    circle(20, -14, 7, '#ffffff') + ellipse(0, -18, 20, 17, L.body) + marks(L.mark, 0, -18, 20, 17, L.accent, `${id}b`) + ellipse(0, -14, 11, 11, L.belly) +
-    ellipse(-9, -2, 6, 3.5, L.body) + ellipse(9, -2, 6, 3.5, L.body) +
-    ellipse(-10, -84, 7, 22, L.body, 'transform="rotate(-8 -10 -84)"') + ellipse(10, -84, 7, 22, L.body, 'transform="rotate(8 10 -84)"') +
-    ellipse(-10, -84, 3.5, 16, '#f7b8c8', 'transform="rotate(-8 -10 -84)"') + ellipse(10, -84, 3.5, 16, '#f7b8c8', 'transform="rotate(8 10 -84)"') +
-    circle(0, -50, 22, L.body) + marks(L.mark, 0, -50, 22, 22, L.accent, `${id}h`) + face(0, -50, 1) + ellipse(0, -45, 2.5, 1.8, '#f37d8f') +
-    accessory(L.accessory, 0, -50, 22, L.accent),
-  fox: (L, id) =>
-    path('M16,-14 q30,-6 26,-34 q-6,14 -24,18 z', L.body) + path('M36,-44 q6,-6 6,-10 q-6,4 -12,6 z', '#ffffff') +
-    ellipse(0, -18, 19, 16, L.body) + marks(L.mark, 0, -18, 19, 16, L.accent, `${id}b`) + ellipse(0, -14, 10, 11, L.belly) +
-    ellipse(-9, -2, 5.5, 3.5, L.accent) + ellipse(9, -2, 5.5, 3.5, L.accent) +
-    path('M-22,-60 l2,-24 l14,14 z', L.body) + path('M22,-60 l-2,-24 l-14,14 z', L.body) + path('M-19,-64 l1,-12 l7,7 z', L.accent) + path('M19,-64 l-1,-12 l-7,7 z', L.accent) +
-    circle(0, -52, 23, L.body) + path('M-23,-50 q10,18 23,16 q13,2 23,-16 q-10,10 -23,8 q-13,2 -23,-8 z', L.belly) +
-    face(0, -54, 1, { mouth: 'none' }) + ellipse(0, -44, 3.5, 2.5, INK) + accessory(L.accessory, 0, -52, 23, L.accent),
-  dragon: (L, id) =>
-    path('M18,-12 q26,4 30,-16 l6,-4 l-4,8 l6,2 l-8,2 q-8,16 -30,14 z', L.body) +
-    path('M-16,-34 q-26,-24 -34,-10 q10,0 12,8 q6,-8 12,-2 q4,-6 10,4 z', L.accent) + path('M16,-34 q26,-24 34,-10 q-10,0 -12,8 q-6,-8 -12,-2 q-4,-6 -10,4 z', L.accent) +
-    ellipse(0, -20, 21, 19, L.body) + marks(L.mark, 0, -20, 21, 19, L.accent, `${id}b`) + ellipse(0, -15, 12, 13, L.belly) +
-    path('M-6,-14 h12 M-7,-8 h14 M-6,-20 h12', 'none', `stroke="${L.accent}" stroke-width="1.2" opacity="0.5"`) +
-    ellipse(-10, -2, 6, 3.5, L.body) + ellipse(10, -2, 6, 3.5, L.body) +
-    path('M-13,-72 l-6,-12 l12,6 z', '#fff4d6') + path('M13,-72 l6,-12 l-12,6 z', '#fff4d6') +
-    circle(0, -54, 23, L.body) + marks(L.mark, 0, -54, 23, 23, L.accent, `${id}h`) + ellipse(0, -44, 13, 8, L.belly) +
-    circle(-4, -46, 1.4, INK) + circle(4, -46, 1.4, INK) + face(0, -56, 1, { mouth: 'none' }) +
-    path('M-5,-40 q5,3 10,0', 'none', `stroke="${INK}" stroke-width="1.5" stroke-linecap="round"`) + accessory(L.accessory, 0, -54, 23, L.accent),
-  dinosaur: (L, id) =>
-    path('M16,-14 q28,4 36,-6 q-8,16 -34,16 z', L.body) +
-    path('M-4,-80 l6,-10 l6,10 z M8,-76 l7,-9 l4,11 z M-14,-76 l4,-10 l6,9 z', L.accent) +
-    ellipse(0, -20, 20, 19, L.body) + marks(L.mark, 0, -20, 20, 19, L.accent, `${id}b`) + ellipse(0, -15, 12, 13, L.belly) +
-    ellipse(-10, -2, 7, 4, L.body) + ellipse(10, -2, 7, 4, L.body) + ellipse(-12, -26, 4, 7, L.body, 'transform="rotate(30 -12 -26)"') + ellipse(12, -26, 4, 7, L.body, 'transform="rotate(-30 12 -26)"') +
-    ellipse(0, -56, 25, 22, L.body) + marks(L.mark, 0, -56, 25, 22, L.accent, `${id}h`) + ellipse(0, -47, 15, 9, L.belly) +
-    face(0, -60, 1, { mouth: 'wide' }) + accessory(L.accessory, 0, -58, 23, L.accent),
-  fish: (L, id) =>
-    path('M22,-40 l20,-16 q-4,16 0,32 z', L.accent) + path('M-4,-66 q10,-14 20,-4 z', L.accent) + path('M-2,-18 q8,12 16,2 z', L.accent) +
-    ellipse(0, -42, 28, 22, L.body) + marks(L.mark, 0, -42, 28, 22, L.accent, `${id}b`) + ellipse(-4, -34, 18, 10, L.belly) +
-    path('M-10,-58 q-6,16 0,32', 'none', `stroke="${L.accent}" stroke-width="2" opacity="0.5"`) +
-    circle(-14, -46, 5, '#fff') + circle(-15, -46, 3.2, INK) + circle(-14, -47.5, 1.1, '#fff') +
-    ellipse(-12, -36, 3.5, 2, '#f59ab0', 'opacity="0.55"') + path('M-26,-38 q3,3 6,0', 'none', `stroke="${INK}" stroke-width="1.5" stroke-linecap="round"`) +
-    circle(-34, -60, 3, '#e8f7ff', 'opacity="0.8"') + circle(-38, -70, 2, '#e8f7ff', 'opacity="0.7"') + accessory(L.accessory, 0, -48, 20, L.accent),
-  bird: (L, id) =>
-    ellipse(-6, -2, 3, 4, L.accent) + ellipse(6, -2, 3, 4, L.accent) +
-    path('M-4,-86 q4,-10 10,-6 q-6,2 -4,8 z', L.body) +
-    circle(0, -38, 32, L.body) + marks(L.mark, 0, -38, 32, 32, L.accent, `${id}b`) + ellipse(0, -24, 20, 16, L.belly) +
-    ellipse(-28, -34, 8, 14, L.body, 'transform="rotate(20 -28 -34)"') + ellipse(28, -34, 8, 14, L.body, 'transform="rotate(-20 28 -34)"') +
-    face(0, -46, 1, { mouth: 'none' }) + path('M-5,-40 l5,7 l5,-7 z', L.accent) + accessory(L.accessory, 0, -48, 26, L.accent),
-  turtle: (L, id) => {
-    let s = ellipse(-22, -6, 7, 5, L.body) + ellipse(22, -6, 7, 5, L.body) + ellipse(-16, -2, 6, 4, L.body) + ellipse(16, -2, 6, 4, L.body) +
-      circle(0, -48, 17, L.body) + face(0, -50, 0.8) + accessory(L.accessory, 0, -50, 17, L.accent) +
-      path('M-30,-14 q0,-34 30,-34 q30,0 30,34 z', L.accent) + path('M-26,-14 q0,-28 26,-28 q26,0 26,28 z', L.belly);
-    for (const [cx, cy] of [[0, -30], [-14, -22], [14, -22], [-6, -18], [8, -36]]) s += circle(cx, cy, 5.5, L.accent, 'opacity="0.55"');
-    return s + marks(L.mark, 0, -26, 26, 14, L.body, `${id}b`);
-  },
-  axolotl: (L, id) => {
-    let s = path('M16,-14 q22,2 26,-12 q-6,18 -26,20 z', L.body) + ellipse(0, -18, 20, 15, L.body) + marks(L.mark, 0, -18, 20, 15, L.accent, `${id}b`) + ellipse(0, -14, 11, 9, L.belly) +
-      ellipse(-10, -2, 6, 3, L.body) + ellipse(10, -2, 6, 3, L.body);
-    for (const [side, dy, rot] of [[-1, -8, -30], [-1, 0, -10], [-1, 8, 10], [1, -8, 30], [1, 0, 10], [1, 8, -10]]) {
-      s += ellipse(side * 30, -52 + dy, 9, 4, L.accent, `transform="rotate(${rot} ${side * 30} ${-52 + dy})"`);
+const BUILD = {
+  cat(L) {
+    const parts = [];
+    legs(parts, 1.3, 1.5, -1.9, 1.2, 1.2, 1.6);
+    const body = blk(0, -0.3, 1.6, 3.8, 5, 2.6, 'body');
+    on(body, 'front', 0, 1.9, 2.2, 1.6, 'belly');
+    const head = blk(0, 2.6, 3.0, 4.4, 3.4, 3.4, 'body');
+    snoutOn(head, 2.2, 1.2, 0.3, 'belly', 'pink');
+    face(head, { snout: 1 });
+    for (const s of [-1, 1]) {
+      const ear = top(head, s * 1.4, 2.4, 1.2, 0.8, 1.2, 'body');
+      on(ear, 'front', ear.a, ear.z + 0.15, 0.6, 0.7, 'pink', 0.08);
     }
-    return s + ellipse(0, -50, 27, 20, L.body) + marks(L.mark, 0, -50, 27, 20, L.accent, `${id}h`) + face(0, -52, 1, { mouth: 'wide' }) + accessory(L.accessory, 0, -52, 22, L.accent);
+    const tail = blk(0, -3.2, 2.8, 0.8, 0.8, 3.2, 'body', { wag: 1 });
+    top(tail, 0, -3.2, 0.8, 0.8, 0.8, 'accent');
+    parts.push(body, head, tail);
+    return { parts, body, head };
+  },
+  dog(L) {
+    const parts = [];
+    legs(parts, 1.4, 1.6, -2.0, 1.3, 1.3, 1.6);
+    const body = blk(0, -0.3, 1.6, 4.2, 5.4, 2.8, 'body');
+    on(body, 'front', 0, 1.9, 2.4, 1.8, 'belly');
+    const head = blk(0, 2.8, 3.0, 4.4, 3.6, 3.4, 'body');
+    snoutOn(head, 2.4, 1.4, 1.0);
+    face(head, { snout: 1 });
+    for (const side of ['left', 'right']) on(head, side, head.b, head.z + head.h - 2.6, 1.6, 2.6, 'accent', 0.5);
+    const tail = blk(0, -3.4, 3.4, 0.8, 1.2, 1.8, 'accent', { wag: 1 });
+    parts.push(body, head, tail);
+    return { parts, body, head };
+  },
+  bunny(L) {
+    const parts = [];
+    legs(parts, 1.2, 1.3, -1.5, 1.2, 1.4, 1.0);
+    const body = blk(0, -0.2, 1.0, 3.8, 4.2, 2.8, 'body');
+    on(body, 'front', 0, 1.2, 2.2, 1.8, 'belly');
+    const head = blk(0, 2.2, 2.6, 4.0, 3.4, 3.2, 'body');
+    snoutOn(head, 1.6, 0.8, 0.2, 'belly', 'pink');
+    face(head, { snout: 1 });
+    for (const s of [-1, 1]) {
+      const ear = top(head, s * 1.0, 1.9, 1.0, 0.7, 3.2, 'body');
+      on(ear, 'front', ear.a, ear.z + 0.4, 0.5, 2.2, 'accent', 0.08);
+    }
+    parts.push(body, head, blk(0, -2.7, 1.8, 1.4, 1.2, 1.4, 'belly', { wag: 1 }));
+    return { parts, body, head };
+  },
+  fox(L) {
+    const parts = [];
+    legs(parts, 1.2, 1.6, -1.9, 1.1, 1.1, 1.8, 'accent');
+    const body = blk(0, -0.2, 1.8, 3.6, 5.2, 2.4, 'body');
+    on(body, 'front', 0, 2.0, 2.0, 1.6, 'belly');
+    const head = blk(0, 2.8, 3.2, 4.2, 3.2, 3.0, 'body');
+    snoutOn(head, 1.8, 1.2, 1.0);
+    face(head, { snout: 1 });
+    for (const s of [-1, 1]) {
+      const ear = top(head, s * 1.35, 2.6, 1.2, 0.6, 1.6, 'body');
+      top(ear, ear.a, ear.b, 0.8, 0.6, 0.5, 'accent');
+    }
+    parts.push(body, head,
+      blk(0, -4.2, 2.6, 1.8, 3.2, 1.8, 'body', { wag: 1 }),
+      blk(0, -6.3, 2.7, 1.5, 1.0, 1.6, 'belly', { wag: 1 }));
+    return { parts, body, head };
+  },
+  dragon(L) {
+    const parts = [];
+    legs(parts, 1.5, 1.6, -1.9, 1.3, 1.3, 1.4);
+    const body = blk(0, -0.3, 1.4, 4.2, 5.2, 3.0, 'body');
+    on(body, 'front', 0, 1.6, 2.6, 2.2, 'belly');
+    for (const b of [-2, -0.6, 0.8]) top(body, 0, b, 0.8, 0.8, 0.7, 'accent');
+    const head = blk(0, 3.0, 3.4, 3.8, 3.6, 3.2, 'body');
+    const snout = on(head, 'front', 0, head.z + 0.3, 2.6, 1.4, 'body', 1.0);
+    for (const s of [-1, 1]) on(snout, 'front', s * 0.6, snout.z + 0.8, 0.35, 0.35, 'ink', 0.1);
+    face(head, { snout: 1 });
+    for (const s of [-1, 1]) top(head, s * 1.2, 2.0, 0.6, 0.6, 1.2, 'belly');
+    for (const s of [-1, 1]) parts.push(blk(s * 2.5, -0.6, 3.4, 0.4, 3.0, 2.4, 'accent', { flap: 1 }));
+    parts.push(body, head,
+      blk(0, -3.7, 1.8, 1.6, 2.6, 1.4, 'body', { wag: 1 }),
+      blk(0, -5.5, 1.9, 1.1, 1.2, 1.1, 'accent', { wag: 1.5 }));
+    return { parts, body, head };
+  },
+  dinosaur(L) {
+    const parts = [];
+    for (const s of [-1, 1]) parts.push(blk(s * 1.3, -0.6, 0, 1.6, 1.8, 2.0, 'body', { leg: s > 0 ? 0 : 1 }));
+    const body = blk(0, -0.4, 2.0, 4.2, 5.0, 3.6, 'body');
+    on(body, 'front', 0, 2.3, 2.6, 2.6, 'belly');
+    for (const s of [-1, 1]) on(body, 'front', s * 1.3, 4.0, 0.6, 0.6, 'body', 1.0);
+    for (const b of [-1.8, -0.2, 1.4]) top(body, 0, b, 0.6, 1.0, 1.0, 'accent');
+    const head = blk(0, 2.6, 5.0, 4.0, 4.4, 3.2, 'body');
+    on(head, 'front', 0, 5.3, 3.0, 0.8, 'belly', 0.2);
+    face(head, { snout: 1 });
+    parts.push(body, head,
+      blk(0, -4.6, 2.4, 2.0, 3.6, 2.0, 'body', { wag: 0.6 }),
+      blk(0, -7.2, 2.4, 1.2, 1.8, 1.2, 'accent', { wag: 1.2 }));
+    return { parts, body, head };
+  },
+  fish(L) {
+    const body = blk(0, 0, 0.6, 2.4, 4.4, 3.2, 'body');
+    wrap(body, 1.2, 1.2, 'belly', 0.05, 1.0, 0.6);
+    top(body, 0, -0.4, 0.4, 1.8, 0.9, 'accent');
+    for (const side of ['left', 'right']) on(body, side, 0.4, 1.4, 1.0, 0.7, 'accent', 0.3);
+    face(body, { eye: 0.9 });
+    return { parts: [body, blk(0, -2.9, 0.8, 0.4, 1.6, 2.8, 'accent', { wag: 2 })], body, head: body };
+  },
+  bird(L) {
+    const parts = [];
+    for (const s of [-1, 1]) parts.push(blk(s * 0.8, 0, 0, 0.4, 0.4, 1.2, 'accent', { leg: s > 0 ? 0 : 1 }));
+    const body = blk(0, 0, 1.2, 3.6, 3.8, 3.2, 'body');
+    on(body, 'front', 0, 1.5, 2.4, 2.0, 'belly');
+    const head = blk(0, 0.6, 4.4, 3.2, 3.0, 2.6, 'body');
+    on(head, 'front', 0, head.z + 0.6, 1.0, 0.6, 'accent', 1.0);
+    face(head, { snout: 1 });
+    top(head, 0, 0.4, 0.4, 0.8, 0.9, 'accent');
+    for (const s of [-1, 1]) parts.push(blk(s * 2.0, -0.4, 2.2, 0.4, 2.4, 1.8, 'body', { flap: 1 }));
+    parts.push(body, head, blk(0, -2.4, 3.0, 1.6, 1.2, 0.8, 'body', { wag: 0.5 }));
+    return { parts, body, head };
+  },
+  turtle(L) {
+    const parts = [];
+    legs(parts, 1.6, 1.4, -1.6, 1.2, 1.2, 0.9, 'belly');
+    const body = blk(0, -0.2, 0.7, 4.6, 4.6, 2.0, 'body');
+    wrap(body, 0.7, 0.4, 'belly', 0.1);
+    const cap = top(body, 0, -0.2, 3.2, 3.2, 0.7, 'body');
+    for (const [a, b] of [[-0.8, -1], [0.8, -1], [-0.8, 0.6], [0.8, 0.6]]) top(cap, a, b, 1.0, 1.0, 0.12, 'accent');
+    const head = blk(0, 3.0, 1.2, 2.4, 2.2, 2.0, 'belly');
+    face(head, { eye: 0.9 });
+    parts.push(body, head, blk(0, -2.9, 0.9, 0.8, 1.0, 0.6, 'belly', { wag: 1 }));
+    return { parts, body, head };
+  },
+  axolotl(L) {
+    const parts = [];
+    legs(parts, 1.4, 1.4, -1.6, 0.9, 0.9, 0.8);
+    const body = blk(0, -0.4, 0.8, 3.2, 5.0, 1.8, 'body');
+    const head = blk(0, 3.0, 0.8, 4.6, 3.0, 2.4, 'body');
+    face(head);
+    for (const side of ['left', 'right']) {
+      for (const [b, dz] of [[2.2, 0.6], [3.0, 1.3], [3.8, 0.6]]) on(head, side, b, head.z + dz + 0.6, 0.4, 0.4, 'accent', 0.9);
+    }
+    const tail = blk(0, -4.6, 1.0, 0.6, 3.4, 1.8, 'body', { wag: 1.5 });
+    top(tail, 0, -4.8, 0.6, 2.6, 0.4, 'accent');
+    parts.push(body, head, tail);
+    return { parts, body, head };
   },
 };
 
-let uid = 0;
-// One creature, `scale` times its usual size, standing on (0, 0).
-export function drawCreature(species, variant, scale = 1) {
-  const L = lookOf(species, variant);
-  const id = `cr${++uid}`;
-  return `<g transform="scale(${f1(scale * 10) / 10})">${ellipse(0, 0, 26, 6, '#000', 'opacity="0.1"')}${DRAW[species](L, id)}</g>`;
+function markings(L, body) {
+  const t = body.z + body.h;
+  if (L.mark === 'spots') {
+    top(body, -body.w * 0.2, body.b - body.d * 0.2, 0.9, 0.9, 0.1, 'accent');
+    top(body, body.w * 0.22, body.b + body.d * 0.12, 0.7, 0.7, 0.1, 'accent');
+  } else if (L.mark === 'stripes') {
+    for (const f of [-0.28, -0.05, 0.18]) wrap(body, body.z + body.h * 0.35, body.h * 0.65 + 0.05, 'accent', 0.05, 0.5, body.b + body.d * f);
+  } else if (L.mark === 'patch') {
+    top(body, body.w * 0.15, body.b - body.d * 0.15, body.w * 0.5, body.d * 0.4, 0.1, 'accent');
+  }
+  return t;
 }
 
-// A small picture of a look, for the chooser.
+function accessory(L, H) {
+  const t = H.z + H.h;
+  switch (L.accessory) {
+    case 'bow': {
+      const a = H.w * 0.24;
+      top(H, a, H.b, 0.6, 0.6, 0.6, 'pink');
+      top(H, a - 0.7, H.b, 0.8, 0.6, 0.8, 'pink');
+      top(H, a + 0.7, H.b, 0.8, 0.6, 0.8, 'pink');
+      break;
+    }
+    case 'party-hat': {
+      const a1 = top(H, -H.w * 0.12, H.b, 2.0, 2.0, 0.8, 'accent');
+      const a2 = top(a1, a1.a, a1.b, 1.4, 1.4, 0.8, 'belly');
+      const a3 = top(a2, a2.a, a2.b, 0.8, 0.8, 0.8, 'accent');
+      top(a3, a3.a, a3.b, 0.5, 0.5, 0.5, 'white');
+      break;
+    }
+    case 'scarf': {
+      wrap(H, H.z, 0.7, 'accent', 0.2);
+      on(H, 'front', H.w * 0.25, H.z - 1.1, 0.7, 1.2, 'accent', 0.4);
+      break;
+    }
+    case 'crown': {
+      const ring = top(H, 0, H.b, H.w * 0.6, H.d * 0.6, 0.5, 'gold');
+      for (const [sa, sb] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) top(ring, sa * (ring.w / 2 - 0.2), ring.b + sb * (ring.d / 2 - 0.2), 0.4, 0.4, 0.5, 'gold');
+      break;
+    }
+    case 'flower': {
+      const a = -H.w * 0.26;
+      const b = H.b + H.d * 0.1;
+      for (const [da, db] of [[-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5]]) top(H, a + da, b + db, 0.5, 0.5, 0.35, 'petal');
+      top(H, a, b, 0.5, 0.5, 0.45, 'seed');
+      break;
+    }
+    case 'glasses': {
+      on(H, 'front', 0, H.z + H.h * 0.62, 1.0, 0.2, 'ink', 0.3);
+      for (const s of [-1, 1]) {
+        const frame = on(H, 'front', s * H.w * 0.24, H.z + H.h * 0.42, 1.3, 1.2, 'ink', 0.3);
+        const lens = on(frame, 'front', frame.a, frame.z + 0.2, 0.9, 0.8, 'lens', 0.06);
+        on(lens, 'front', lens.a, lens.z + 0.2, 0.4, 0.4, 'ink', 0.06);
+      }
+      break;
+    }
+    case 'sprout': {
+      const stem = top(H, 0, H.b, 0.3, 0.3, 1.0, 'green');
+      top(stem, -0.45, H.b, 0.7, 0.35, 0.35, 'green');
+      top(stem, 0.45, H.b, 0.7, 0.35, 0.35, 'green');
+      break;
+    }
+    case 'bandana':
+      wrap(H, t - 0.8, 0.8, 'accent', 0.12);
+      break;
+    case 'headphones': {
+      wrap(H, t, 0.35, 'band', 0.25, 0.6);
+      for (const side of ['left', 'right']) {
+        const cup = on(H, side, H.b, H.z + H.h * 0.3, 1.4, 1.4, 'accent', 0.45);
+        on(H, side, H.b, cup.z + cup.h, 0.5, t + 0.35 - (cup.z + cup.h), 'band', 0.3);
+      }
+      break;
+    }
+    default:
+  }
+}
+
+const models = new Map();
+function modelOf(species, variant) {
+  const key = `${species}:${variant}`;
+  if (!models.has(key)) {
+    const L = lookOf(species, variant);
+    const m = BUILD[species](L);
+    markings(L, m.body);
+    accessory(L, m.head);
+    let height = 0;
+    const reach = (p) => {
+      height = Math.max(height, p.z + p.h);
+      for (const k of p.kids ?? []) reach(k);
+    };
+    m.parts.forEach(reach);
+    models.set(key, { ...m, L, height, length: Math.max(...m.parts.map((p) => p.b + p.d / 2)) - Math.min(...m.parts.map((p) => p.b - p.d / 2)) });
+  }
+  return models.get(key);
+}
+
+// ---- drawing ------------------------------------------------------------------------
+
+// Colours follow the scene: shade() from the colourway's light and shadow,
+// and at night each colour sinks toward the night air like the stone does.
+let THEME = THEMES[DEFAULT_THEME];
+let TONE = (c) => c;
+const mats = new Map();
+
+export function setCreatureLight(theme, phase) {
+  THEME = theme;
+  const n = phase === 'night' ? theme.night : null;
+  TONE = n ? (c) => mix(c, n.tint, n.amount * 0.8) : (c) => c;
+  mats.clear();
+}
+
+function material(L, c) {
+  const hex = L[c] ?? FIXED[c] ?? c;
+  if (!mats.has(hex)) mats.set(hex, shade(TONE(hex), THEME));
+  return mats.get(hex);
+}
+
+// The four ways a creature can face, as its forward step in world axes.
+export const FACINGS = [[0, 1], [-1, 0], [0, -1], [1, 0]];
+
+export function facingOf(dx, dy) {
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 3 : 1;
+  return dy > 0 ? 0 : 2;
+}
+
+// The facing whose front is most turned toward the viewer.
+export function facingViewer() {
+  let best = 0;
+  let gain = -Infinity;
+  FACINGS.forEach(([fx, fy], i) => {
+    const g = viewDepth(fx, fy) - viewDepth(0, 0) - i * 1e-6;
+    if (g > gain) [best, gain] = [i, g];
+  });
+  return best;
+}
+
+// Place a creature. `pose` = { x, y, z, scale, facing, step } where step is
+// the walk cycle in radians (legs lift in turn, wings flap, tails wag), or
+// null when standing still. Returns SVG, the height in world units, and
+// the screen points it covers (for thumbnails).
+export function drawCreature(species, variant, pose) {
+  const { x, y, z = 0, scale = 1, facing = 0, step = null } = pose;
+  const m = modelOf(species, variant);
+  const k = scale * 0.13;
+  const [fx, fy] = FACINGS[facing];
+  const [rx, ry] = [fy, -fx]; // the creature's right hand
+  const hop = step === null ? 0 : Math.abs(Math.sin(step)) * 0.9;
+  const pts = [];
+
+  const world = (a, b) => [x + (a * rx + b * fx) * k, y + (a * ry + b * fy) * k];
+  const normal = { front: [fx, fy], back: [-fx, -fy], right: [rx, ry], left: [-rx, -ry] };
+
+  function place(p, da, dz) {
+    const [x0, y0] = world(p.a + da - p.w / 2, p.b - p.d / 2);
+    const [x1, y1] = world(p.a + da + p.w / 2, p.b + p.d / 2);
+    const wx = Math.min(x0, x1);
+    const wy = Math.min(y0, y1);
+    const wz = z + (p.z + dz) * k;
+    return [wx, wy, wz, Math.abs(x1 - x0), Math.abs(y1 - y0), p.h * k];
+  }
+
+  function emit(p, da, dz) {
+    const b = place(p, da, dz);
+    let s = box(...b, material(m.L, p.c));
+    pts.push(P(b[0], b[1], b[2]), P(b[0] + b[3], b[1] + b[4], b[2]), P(b[0] + b[3], b[1], b[2] + b[5]), P(b[0], b[1] + b[4], b[2] + b[5]));
+    for (const kid of p.kids ?? []) {
+      if (normal[kid.face] && !faceVisible(...normal[kid.face])) continue;
+      s += emit(kid, da, dz);
+    }
+    return s;
+  }
+
+  const moving = step !== null;
+  const offset = (p) => {
+    let dz = p.leg === undefined ? hop : 0;
+    let da = 0;
+    if (moving && p.leg !== undefined) dz = Math.max(0, Math.sin(step + p.leg * Math.PI)) * 0.8;
+    if (p.flap) dz += Math.sin(step ?? 0) * (moving ? 0.6 : 0);
+    if (p.wag) da = Math.sin((step ?? 0) * 1.5) * p.wag * (moving ? 0.5 : 0);
+    return [da, dz];
+  };
+
+  const order = m.parts
+    .map((p) => {
+      const [cx, cy] = world(p.a, p.b);
+      return { p, key: (p.leg !== undefined ? -100 : 0) + viewDepth(cx, cy) };
+    })
+    .sort((u, v) => u.key - v.key);
+
+  // A soft shadow on the ground under the body.
+  const [s0x, s0y] = world(-m.body.w * 0.6, m.body.b - m.length * 0.45);
+  const [s1x, s1y] = world(m.body.w * 0.6, m.body.b + m.length * 0.45);
+  const [gx, gy] = [Math.min(s0x, s1x), Math.min(s0y, s1y)];
+  const [gw, gd] = [Math.abs(s1x - s0x), Math.abs(s1y - s0y)];
+  const sh = `<polygon class="critter-shadow" fill="#2a2350" opacity="0.14" points="${[[gx, gy], [gx + gw, gy], [gx + gw, gy + gd], [gx, gy + gd]]
+    .map(([a, b]) => P(a, b, z > 0.05 ? 0 : z).map((v) => v.toFixed(1)).join(',')).join(' ')}"/>`;
+  const svg = sh + order.map(({ p }) => emit(p, ...offset(p))).join('');
+  return { svg, height: z + (m.height + hop) * k, pts };
+}
+
+// A small picture of a look, for the chooser: facing the viewer.
 export function creatureThumb(species, variant) {
-  return `<svg class="thumb" viewBox="-50 -100 100 106" aria-hidden="true">${drawCreature(species, variant, 1)}</svg>`;
+  const { svg, pts } = drawCreature(species, variant, { x: 0, y: 0, facing: facingViewer() });
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const w = Math.max(...xs) - x0;
+  const h = Math.max(...ys) - y0;
+  const side = Math.max(w, h) + 6;
+  return `<svg class="thumb" viewBox="${(x0 + w / 2 - side / 2).toFixed(1)} ${(y0 + h / 2 - side / 2).toFixed(1)} ${side.toFixed(1)} ${side.toFixed(1)}" aria-hidden="true">${svg}</svg>`;
 }
 
 // The same agent always gets the same creature until someone picks another.

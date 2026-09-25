@@ -20,7 +20,7 @@
 | **Office pack** | `office-pack/`: five Claude Code agents (writer, summariser, planner, data-helper, checker) and four skills for people who do not code. Offered by the app and copied into `~/.claude` only on a yes, never over existing files. |
 | **Context** | How much a session's model read in its latest reply (input + cache), against where that model was seen to auto-compact, or else its context window (`usage.js`). Flagged at 85%: save your work. |
 | **Claude Code use** | Tokens across all sessions over 5 hours, today and 7 days, counted once per reply by `UsageScanner`, which reads only appended lines after its first pass. |
-| **Meadow** | The second screen: each local agent as a creature (10 species × 10 looks), sized by its tokens over 28 days, with the report's per-agent numbers (`--stats-only`). Looks are kept per viewer in the app's preferences. |
+| **Meadow** | The second screen: a block island where every agent lives as a blocky isometric creature (10 species × 10 looks) that wanders the tiles. Its residents are the installed agents, every agent called in the transcripts the report reads (`seen` from `--stats-only`, the last 56 days), anyone at work now, and everyone met before (kept in the preferences as `meadowSeen`). Creatures are sized by tokens over 28 days and show the report's per-agent numbers. Looks are kept per viewer in the app's preferences. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

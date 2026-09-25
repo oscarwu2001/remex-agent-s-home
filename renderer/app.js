@@ -2210,6 +2210,7 @@ const meadow = createMeadow({
   prefs,
   savePrefs,
   getSnapshot: () => snapshot,
+  getLight: () => ({ theme: themeFor(prefs.theme, shownPhase ?? phase()), phase: shownPhase ?? phase() }),
   onEnter: () => {
     if (decorating) setDecorating(false);
     if (buildMode) setBuildMode(false);

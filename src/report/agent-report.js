@@ -499,7 +499,10 @@ function run(argv) {
     };
   });
   if (opt.statsOnly) {
-    const result = { ok: true, days: opt.days, agents, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
+    // Every agent called in the two windows read (twice --days), so the
+    // Meadow keeps agents that were busy before but quiet lately.
+    const seen = [...new Set(data.runs.map((r) => r.type).filter(Boolean))].sort();
+    const result = { ok: true, days: opt.days, agents, seen, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
     if (opt.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

@@ -730,31 +730,19 @@ details > summary h2 { margin: 0; }
 
 /* ---- the Meadow ------------------------------------------------------------------ */
 
-:root { --meadow-grass: #bfe6b8; --meadow-grass-2: #a8d9a0; --meadow-side: #e8c8a8; --meadow-side-2: #d4a88a; --meadow-pond: #a9d8f0; --meadow-tree: #f5a8cf; }
-:root[data-theme="tide"] { --meadow-grass: #bfe8d8; --meadow-grass-2: #a4dcc6; --meadow-side: #c9d2f2; --meadow-side-2: #a9b4e6; --meadow-pond: #9ec0f2; --meadow-tree: #8fdcc0; }
-:root[data-theme="grove"] { --meadow-grass: #c8ecb0; --meadow-grass-2: #afdf98; --meadow-side: #e6dcb2; --meadow-side-2: #cbbd8a; --meadow-pond: #a6d8e6; --meadow-tree: #7fd3a6; }
-:root[data-time="night"] { --meadow-grass: #6f8f86; --meadow-grass-2: #5f7f78; --meadow-side: #6d6488; --meadow-side-2: #574f75; --meadow-pond: #4d6fa3; }
 #meadow { display: none; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 body.in-meadow #meadow { display: block; }
 body.in-meadow #scene, body.in-meadow .camera:not(.meadow-only), body.in-meadow .cam-hint, body.in-meadow #decorate { display: none; }
 .camera.meadow-only { display: none; }
 body.in-meadow .camera.meadow-only { display: flex; }
-#meadow .island-top { fill: var(--meadow-grass); }
-#meadow .island-side { fill: var(--meadow-side); stroke: var(--meadow-side-2); stroke-width: 2; }
-#meadow .pond { fill: var(--meadow-pond); stroke: #ffffff; stroke-opacity: 0.6; stroke-width: 3; }
-#meadow .pond-shine { fill: #ffffff; opacity: 0.35; }
 #meadow .meadow-empty { font: 600 22px var(--font); fill: var(--ink-muted); }
-.critter { cursor: pointer; outline: none; }
-.critter .bob { animation: critter-bob 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
-.critter.swim .bob { animation: critter-swim 3.2s ease-in-out infinite; }
-.critter:hover .bob, .critter:focus-visible .bob { animation: critter-hop 0.6s ease-in-out infinite; }
+#meadow-things .critter { cursor: pointer; }
+.critter-ring { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; }
 .critter-name { font: 700 13px var(--font); fill: var(--ink); paint-order: stroke; stroke: var(--label-bg); stroke-width: 4px; }
-.critter.chosen .critter-name { fill: var(--accent); }
-.critter.chosen .bob, .critter:focus-visible .bob { filter: drop-shadow(0 0 4px var(--accent)); }
-@keyframes critter-bob { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-3px) scaleY(1.03); } }
-@keyframes critter-swim { 0%, 100% { transform: translate(0, 0) rotate(-3deg); } 50% { transform: translate(-12px, -3px) rotate(3deg); } }
-@keyframes critter-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-@media (prefers-reduced-motion: reduce) { .critter .bob, .critter.swim .bob, .critter:hover .bob { animation: none; } }
+.critter-name.chosen { font-size: 15px; }
+.critter-pick .chip { color: var(--ink); font-family: inherit; }
+.critter-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 var(--s-3); }
+.critter-pick .chip[aria-pressed="true"] { font-weight: 700; border-color: var(--accent); }
 .critter-head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-2); }
 .critter-head .thumb { width: 72px; height: 76px; flex: none; }
 .critter-head h3 { margin: 0; font-size: 17px; color: var(--ink); }

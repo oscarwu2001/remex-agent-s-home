@@ -67,15 +67,25 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 ## The Meadow
 
 Press **Meadow** at the top of the map for a second screen, away from the
-hospital. Every agent in your `.claude/agents` lives there as a cute
-creature: a cat, dog, bunny, fox, dragon, dinosaur, fish (in the pond),
-bird, turtle or axolotl, each with ten looks. The more tokens an agent used
-in the last 28 days, the bigger it is. Click one to see its performance in
-the sidebar: score, runs, finished rate, re-runs, median time, tokens,
-tool errors, verdicts and runs per day. These are the same numbers as the
-performance report, worked out in the background. You can change the
-animal and its look, or give its creature to another agent. The sidebar
-keeps the board, and **Back to the hospital** returns you to the map.
+hospital: a floating block island drawn in the same Monument Valley
+isometric 3D as the hospital. Every agent lives there as a blocky creature:
+a cat, dog, bunny, fox, dragon, dinosaur, fish (in the pond), bird, turtle or
+axolotl, each with ten looks. That means the agents in your `.claude/agents`,
+plus every agent Claude has ever called (built-in ones like Explore
+included). Once an agent has been seen it keeps its spot, even after months
+of quiet. The creatures wander about like mobs in a block game: each walks to
+a spot along the tiles, turning to face where it's going, rests a moment and
+sets off again, while the fish swim round the pond. They stand still if your
+system asks for reduced motion. The more tokens an agent used in the last 28
+days, the bigger it is.
+
+Click a creature, or its name in the sidebar, to see its performance:
+score, runs, finished rate, re-runs, median time, tokens, tool errors,
+verdicts and runs per day. These are the same numbers as the performance
+report, worked out in the background. The chosen creature stops while you
+look at it. You can change the animal and its look, or give its creature to
+another agent. Q and E (or dragging) turn the island like the hospital. The
+sidebar keeps the board, and **Back to the hospital** returns you to the map.
 
 ## The office team for Claude
 
