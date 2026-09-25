@@ -70,6 +70,7 @@ export function demoSnapshot(nowMs, epochMs) {
         // one helper fails, so every way of finishing is on show
         endReason: done ? (type === 'statusline-setup' ? 'error' : 'finished') : undefined,
         errors: 0,
+        tokens: demoTokens((Math.min(t, end) - start) * 900, i + 1),
         status,
         activity: status === 'working' || status === 'blocked' ? activity(tools[idx]) : null,
         history,
@@ -87,8 +88,11 @@ export function demoSnapshot(nowMs, epochMs) {
       status = t % 4 < 1 ? 'thinking' : 'working';
       act = status === 'working' ? activity(t % 8 < 4 ? 'Edit' : 'Read') : null;
     }
+    const own = demoTokens((nowMs - (epochMs - (key === 'a' ? 14 : 6) * 60_000)) / 1000 * 60, key === 'a' ? 3 : 5);
     return {
       id: `demo-${key}`,
+      tokens: own,
+      tokensWithHelpers: own.total + agents.reduce((n, a) => n + a.tokens.total, 0),
       project: s.project,
       room: 'nurses-station',
       startedAt: epochMs - (key === 'a' ? 14 : 6) * 60_000,
@@ -116,4 +120,15 @@ export function demoSnapshot(nowMs, epochMs) {
     ],
     problems: [],
   };
+}
+
+// Made-up token counts that grow while an actor works: mostly cache reads,
+// as real sessions are.
+function demoTokens(size, seed) {
+  const n = Math.max(0, Math.round(size));
+  const input = Math.round(n * 0.02 * (1 + (seed % 3) / 10));
+  const output = Math.round(n * 0.06);
+  const cacheWrite = Math.round(n * 0.08);
+  const cacheRead = n * 1;
+  return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
 }

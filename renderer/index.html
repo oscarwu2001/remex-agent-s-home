@@ -18,10 +18,13 @@
         <g id="clouds"></g>
         <g id="geometry"></g>
         <g id="mist"></g>
+        <g id="tint"></g>
         <g id="labels"></g>
         <g id="people"></g>
       </g>
     </svg>
+    <div class="weather" id="weather" aria-hidden="true"></div>
+    <p class="clock" id="clock"></p>
     <div class="camera" role="toolbar" aria-label="View">
       <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
       <span class="cam-where" id="cam-where" aria-live="polite"></span>
@@ -106,6 +109,17 @@
             <option value="night">Night</option>
           </select>
         </label>
+        <label class="field" for="opt-weather">Weather
+          <select id="opt-weather">
+            <option value="clear">Clear</option>
+            <option value="cloudy">Cloudy</option>
+            <option value="rain">Rain</option>
+            <option value="snow">Snow</option>
+            <option value="fog">Fog</option>
+            <option value="changing">Changes through the day</option>
+          </select>
+        </label>
+        <p class="hint">Set by hand: the app stays offline, so it cannot look up the weather outside.</p>
       </section>
 
       <section class="settings-group" aria-labelledby="screen-h">

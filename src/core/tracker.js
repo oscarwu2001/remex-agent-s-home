@@ -34,7 +34,32 @@ function newActor(startedAt) {
     startedAt,
     history: [],
     errors: 0,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    usageById: new Map(), // message id -> usage counted so far
   };
+}
+
+const USAGE_FIELDS = [
+  ['input', 'input_tokens'], ['output', 'output_tokens'],
+  ['cacheRead', 'cache_read_input_tokens'], ['cacheWrite', 'cache_creation_input_tokens'],
+];
+const usageSize = (u) => USAGE_FIELDS.reduce((n, [, k]) => n + (Number(u[k]) || 0), 0);
+
+// Claude Code writes one line per content block and repeats the reply's
+// usage on each, sometimes growing as the reply streams. Each reply counts
+// once, at its fullest; a line with no message id can only count as itself.
+function addUsage(actor, messageId, usage) {
+  const prev = messageId === undefined ? undefined : actor.usageById.get(messageId);
+  if (prev && usageSize(prev) >= usageSize(usage)) return;
+  for (const [field, key] of USAGE_FIELDS) {
+    actor.tokens[field] += (Number(usage[key]) || 0) - (prev ? Number(prev[key]) || 0 : 0);
+  }
+  if (messageId !== undefined) actor.usageById.set(messageId, usage);
+}
+
+function tokensOf(actor) {
+  const t = actor.tokens;
+  return { ...t, total: t.input + t.output + t.cacheRead + t.cacheWrite };
 }
 
 function pushHistory(actor, item) {
@@ -83,7 +108,10 @@ class Tracker {
       session.project = path.basename(meta.cwd.replace(/\\/g, '/')) || session.project;
     }
 
-    for (const raw of events) {
+    // Usage rides along as an event of its own, so a helper's tokens wait
+    // in the buffer with the rest of its lines until it is linked.
+    const all = meta.usage ? [...events, { kind: 'usage', messageId: meta.messageId, usage: meta.usage, ts: meta.ts }] : events;
+    for (const raw of all) {
       // An entry with no usable timestamp still counts, but must not make an
       // old session look fresh, so it never moves lastAt forward.
       const untimed = raw.ts === undefined;
@@ -245,6 +273,9 @@ class Tracker {
         actor.pending.clear();
         actor.lastKind = 'turn-end';
         break;
+      case 'usage':
+        addUsage(actor, ev.messageId, ev.usage);
+        break;
       default:
         break; // 'activity': proof of life only
     }
@@ -318,6 +349,7 @@ class Tracker {
           endedAt: sub.endedAt,
           endReason: sub.endReason,
           errors: sub.actor.errors,
+          tokens: tokensOf(sub.actor),
           ...st,
           history: sub.actor.history.slice(),
         });
@@ -333,6 +365,9 @@ class Tracker {
         startedAt: session.actor.startedAt,
         lastActivityAt: lastAt,
         errors: session.actor.errors,
+        tokens: tokensOf(session.actor),
+        // Its own replies plus every helper it has called, finished ones too.
+        tokensWithHelpers: [...session.subagents.values()].reduce((n, sub) => n + tokensOf(sub.actor).total, tokensOf(session.actor).total),
         ...this.statusOf(session.actor, now, { isSession: true }),
         history: session.actor.history.slice(),
         agents,

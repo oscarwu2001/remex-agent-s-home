@@ -258,3 +258,45 @@ test('one prompt shared by helpers of different types is not guessed', () => {
   assert.ok(snap.sessions[0].agents.every((a) => a.history.length === 0));
   assert.equal(snap.stats.unlinkedSidechains, 1);
 });
+
+// An assistant line carrying usage, as Claude Code writes it: the same
+// message id and usage repeated on each content block's line.
+const withUsage = (entry, id, usage) => ({ ...entry, message: { ...entry.message, id, usage } });
+
+test('tokens are counted once per reply, keeping the fullest figure', () => {
+  const t = new Tracker();
+  const u1 = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 };
+  const u1later = { ...u1, output_tokens: 40 };
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    withUsage(say(1, 'thinking about it', null), 'msg-1', u1),
+    withUsage(toolUse(1, 'r1', 'Read', { file_path: '/x/a.py' }), 'msg-1', u1later), // same reply, next block
+    toolResult(2, 'r1'),
+    withUsage(say(3, 'done'), 'msg-2', { input_tokens: 1, output_tokens: 2 }),
+  ]);
+  const [sess] = t.snapshot(s(4)).sessions;
+  assert.deepEqual(sess.tokens, { input: 11, output: 42, cacheRead: 100, cacheWrite: 20, total: 173 });
+});
+
+test('a helper counts its own tokens, including lines seen before it was linked', () => {
+  const t = new Tracker();
+  const promptText = 'Hunt for swallowed exceptions in the loader module';
+  const SUB = '/p/sess-1/subagents/agent-x.jsonl';
+  feed(t, SUB, [
+    prompt(2, promptText, sidechain('x')),
+    withUsage(toolUse(3, 'g1', 'Grep', { pattern: 'except' }, sidechain('x')), 'msg-h', { input_tokens: 7, output_tokens: 3 }),
+  ]);
+  feed(t, MAIN, [
+    withUsage(toolUse(1, 'taskH', 'Task', { subagent_type: 'silent-failure-hunter', prompt: promptText }), 'msg-m', { input_tokens: 2, output_tokens: 1 }),
+  ]);
+  const [sess] = t.snapshot(s(4)).sessions;
+  assert.equal(sess.tokens.total, 3, 'the session counts only its own replies');
+  assert.equal(sess.tokensWithHelpers, 13, 'and, separately, its helpers too');
+  assert.deepEqual(sess.agents[0].tokens, { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, total: 10 });
+});
+
+test('a reply with usage but no id still counts, once per line', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [prompt(0, 'go'), { ...say(1, 'hi'), message: { ...say(1, 'hi').message, usage: { output_tokens: 4 } } }]);
+  assert.equal(t.snapshot(s(2)).sessions[0].tokens.total, 4);
+});

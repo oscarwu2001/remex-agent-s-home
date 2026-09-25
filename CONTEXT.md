@@ -15,6 +15,7 @@
 | **Stream** | The entries of one actor in one file: a file's own turns, or its sidechain entries grouped by `agentId`. |
 | **Linking** | Matching a sidechain stream to the `Task` call that started it, by exact prompt text, never by guessing. A stream that never links is counted as *unlinked*. |
 | **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper and is not a new prompt. |
+| **Tokens** | A reply's `usage` (input + output + cache read + cache write), counted once per message id at its fullest, because Claude Code repeats it on every content block's line. A helper counts its own; a session's row adds every helper it called. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

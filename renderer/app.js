@@ -38,7 +38,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
 // time: 'auto' follows the computer's clock, or a fixed part of the day.
-const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', view: 0, demo: false };
+const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false };
 let saved = {};
 try {
   saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}');
@@ -55,6 +55,25 @@ if ('night' in prefs) {
   delete prefs.night;
 }
 if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.time = 'auto';
+const WEATHERS = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', fog: 'Fog' };
+if (!WEATHERS[prefs.weather] && prefs.weather !== 'changing') prefs.weather = 'clear';
+
+// The weather being shown. "Changes through the day" picks one for every
+// three hours from the date, so it holds steady for a while, is the same on
+// every redraw, and needs nothing from outside. Mostly fair; snow only in
+// the colder months, rain otherwise.
+function weather(date = new Date()) {
+  if (prefs.weather !== 'changing') return prefs.weather;
+  const block = Math.floor(date.getHours() / 3);
+  const seed = (date.getFullYear() * 400 + date.getMonth() * 32 + date.getDate()) * 8 + block;
+  const r = ((seed * 2654435761) >>> 0) / 2 ** 32;
+  const cold = [10, 11, 0, 1].includes(date.getMonth());
+  if (r < 0.45) return 'clear';
+  if (r < 0.7) return 'cloudy';
+  if (r < 0.85) return cold ? 'snow' : 'rain';
+  if (r < 0.93) return 'fog';
+  return 'rain';
+}
 
 // The part of the day being shown right now.
 function phase() {
@@ -73,6 +92,10 @@ function applyPrefs() {
   document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.time = phase() === 'night' ? 'night' : 'day';
   document.documentElement.dataset.phase = phase();
+  document.documentElement.dataset.weather = weather();
+  $('weather').className = `weather ${weather()}`;
+  $('opt-weather').value = prefs.weather;
+  $('opt-weather').options[5].textContent = `Changes through the day (now: ${WEATHERS[weather(new Date())].toLowerCase()})`;
   document.body.classList.toggle('no-tags', !prefs.names);
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
@@ -102,6 +125,24 @@ for (const radio of document.querySelectorAll('input[name="detail"]')) {
   });
 }
 
+$('opt-weather').addEventListener('change', (e) => {
+  prefs.weather = e.target.value;
+  savePrefs();
+  applyPrefs();
+  drawScene();
+  showClock();
+});
+
+// The time, the part of the day and the weather, bottom right of the map.
+// Only the computer's clock is read.
+function showClock() {
+  const now = new Date();
+  const hm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const part = PHASES.find((p) => p.id === phase()).name;
+  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(WEATHERS[weather()])}`;
+}
+setInterval(showClock, 10_000);
+
 $('opt-time').addEventListener('change', (e) => {
   prefs.time = e.target.value;
   savePrefs();
@@ -112,10 +153,12 @@ $('opt-time').addEventListener('change', (e) => {
 // Following the clock: look again every minute and redraw when the part of
 // the day changes.
 let shownPhase;
+let shownWeather;
 setInterval(() => {
-  if (phase() === shownPhase) return;
+  if (phase() === shownPhase && weather() === shownWeather) return;
   applyPrefs();
   drawScene();
+  showClock();
 }, 60_000);
 
 // ---- scene -----------------------------------------------------------------
@@ -124,6 +167,7 @@ setInterval(() => {
 // every frame while towers rise and sink after a turn.
 function drawGeometry() {
   shownPhase = phase();
+  shownWeather = weather();
   const cat = config.decorCatalogue;
   const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase), {
     detail: prefs.detail, decor: config.decor, defaultGardens: cat?.defaultGardens, plants: cat?.plants,
@@ -153,7 +197,9 @@ function frameOf(b) {
 function drawBackdrop() {
   const o = overview;
   $('mist').innerHTML = `<rect x="${o.x - o.w}" y="${o.y + o.h * 0.84}" width="${o.w * 3}" height="${o.h}" fill="url(#mist-grad)"/>`;
-  const clouds = [[0.12, 0.16, 1], [0.78, 0.1, 1.3], [0.86, 0.55, 0.9], [0.06, 0.62, 0.8]]
+  const overcast = ['cloudy', 'rain', 'snow'].includes(weather());
+  const clouds = [[0.12, 0.16, 1], [0.78, 0.1, 1.3], [0.86, 0.55, 0.9], [0.06, 0.62, 0.8],
+    ...(overcast ? [[0.35, 0.06, 1.5], [0.58, 0.14, 1.2], [0.95, 0.3, 1.1], [0.25, 0.4, 0.9], [0.5, 0.02, 1.4]] : [])]
     .map(([fx, fy, k]) => `<g transform="translate(${o.x + o.w * fx} ${o.y + o.h * fy}) scale(${k})"><g class="float">
       <ellipse class="cloud" cx="0" cy="0" rx="70" ry="16"/><ellipse class="cloud" cx="-18" cy="-12" rx="30" ry="16"/>
       <ellipse class="cloud" cx="16" cy="-16" rx="34" ry="20"/></g></g>`)
@@ -186,6 +232,21 @@ function drawBackdrop() {
         <circle cx="-10" cy="4" r="2.6" class="sun-blush"/><circle cx="10" cy="4" r="2.6" class="sun-blush"/>
       </g></svg>`;
   $('clouds').innerHTML = stars + clouds;
+  // The weather's light, over the building but under the room signs, so
+  // the signs keep their contrast. Falling rain and snow are an HTML layer
+  // on top, in screen space, so drops stay the same size at any zoom.
+  const big = `x="${o.x - o.w}" y="${o.y - o.h}" width="${o.w * 3}" height="${o.h * 3}"`;
+  const tint = {
+    cloudy: `<rect ${big} fill="#6e6e96" fill-opacity="0.1"/>`,
+    rain: `<rect ${big} fill="#3c4673" fill-opacity="0.17"/>`,
+    snow: `<rect ${big} fill="#ffffff" fill-opacity="0.08"/>`,
+    fog: `<linearGradient id="fog-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity="0.05"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.2"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0.62"/></linearGradient>
+      <rect x="${o.x - o.w}" y="${o.y}" width="${o.w * 3}" height="${o.h}" fill="url(#fog-grad)"/>
+      <rect x="${o.x - o.w}" y="${o.y + o.h}" width="${o.w * 3}" height="${o.h}" fill="#fff" fill-opacity="0.62"/>`,
+  }[weather()] ?? '';
+  $('tint').innerHTML = tint;
 }
 
 // Room signs and floor click targets: both open that room. In build mode,
@@ -899,17 +960,32 @@ bridge.onSnapshot?.((s) => {
   liveSnapshot = s;
 });
 
+// 1234 -> "1.2k", 3456789 -> "3.5M".
+function compact(n) {
+  if (n < 1000) return String(n);
+  if (n < 1e6) return `${(n / 1000).toFixed(n < 1e4 ? 1 : 0)}k`;
+  return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)}M`;
+}
+
+// A session row counts its helpers' tokens too; a helper row its own.
+function rowTokens(x, sub) {
+  return sub ? x.tokens?.total : x.tokensWithHelpers ?? x.tokens?.total;
+}
+
 function rowHtml(key, x, name, sub) {
   const what = statusText(x);
+  const tokens = rowTokens(x, sub);
+  const tokenText = tokens ? `${compact(tokens)} tokens` : '';
   const detail = !prefs.private && x.activity?.detail ? ` · ${x.activity.detail}` : '';
   const warn = x.status === 'blocked' || x.status === 'your-turn' || glyphKey(x) === 'failed';
   const where = sub ? ` in the ${roomName(x.room)}` : '';
   return `<button class="row${sub ? ' sub' : ''}" data-key="${escapeXml(key)}" aria-pressed="${key === selected}"
-      title="${escapeXml(`${name}${where}: ${what}${detail}`)}">
+      title="${escapeXml(`${name}${where}: ${what}${detail}${tokens ? ` · ${tokens.toLocaleString()} tokens${sub ? '' : ' with helpers'}` : ''}`)}">
       ${glyph(x)}
       <span class="who"><span class="name">${escapeXml(name)}</span>
         <span class="what${warn ? ' warn' : ''}">${escapeXml(what + detail)}</span></span>
-      <span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
+      <span class="when"><span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
+        ${tokenText ? `<span class="tokens">${tokenText}</span>` : ''}</span>
     </button>`;
 }
 
@@ -957,6 +1033,8 @@ function renderChart(s) {
     x.background ? ['Mode', 'Background'] : null,
     x.startedAt ? ['On shift since', clock(x.startedAt)] : null,
     x.errors ? ['Tool errors', String(x.errors)] : null,
+    x.tokens?.total ? ['Tokens', `${x.tokens.total.toLocaleString()} (in ${x.tokens.input.toLocaleString()} · out ${x.tokens.output.toLocaleString()} · cache read ${x.tokens.cacheRead.toLocaleString()} · cache write ${x.tokens.cacheWrite.toLocaleString()})`] : null,
+    !parent && x.tokensWithHelpers > (x.tokens?.total ?? 0) ? ['With helpers', `${x.tokensWithHelpers.toLocaleString()} tokens`] : null,
   ].filter(Boolean);
   const history = [...x.history].reverse()
     .map((h) => `<li><span class="t">${clock(h.ts)}</span>
@@ -974,6 +1052,8 @@ function renderCensus(s) {
   const parts = [`${n} session${n === 1 ? '' : 's'}`, `${helpers} helper${helpers === 1 ? '' : 's'} at work`];
   if (waiting) parts.push(`${waiting} waiting for you`);
   if (blocked) parts.push(`${blocked} may need approval`);
+  const tokens = s.sessions.reduce((k, x) => k + (x.tokensWithHelpers ?? x.tokens?.total ?? 0), 0);
+  if (tokens) parts.push(`${compact(tokens)} tokens`);
   return (s.demo ? 'Demo · ' : '') + parts.join(' · ');
 }
 
@@ -1045,8 +1125,8 @@ function render(force = false) {
   const chart = renderChart(snapshot);
   const problems = renderProblems(snapshot);
   const signature = JSON.stringify([
-    snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail,
-      x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail])]),
+    snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail, compact(x.tokensWithHelpers ?? 0),
+      x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail, compact(a.tokens?.total ?? 0)])]),
     chart, problems, (snapshot.roster || []).length, selected, prefs.private,
   ]);
   if (!force && signature === lastSignature) return;
@@ -1521,5 +1601,6 @@ $('settings').addEventListener('keydown', (e) => {
 });
 
 applyPrefs();
+showClock();
 render(true);
 setInterval(render, 250);
