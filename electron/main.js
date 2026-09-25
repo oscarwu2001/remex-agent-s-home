@@ -14,6 +14,7 @@ const {
 } = require('../src/core/rooms');
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
+const officePack = require('../src/core/officepack');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -464,6 +465,25 @@ app.whenReady().then(() => {
     } catch (err) {
       return { ok: false, error: `The update did not complete: ${err.message}` };
     }
+  });
+
+  // The Office pack: offered to the user, copied in only when they say yes,
+  // into the Claude folder the app already reads (never over a file).
+  const packDir = path.join(__dirname, '..', 'office-pack');
+  const claudeDir = path.dirname(defaultRoots()[0]);
+  ipcMain.handle('pack:status', () => {
+    try {
+      return { ok: true, ...officePack.packStatus(packDir, claudeDir) };
+    } catch (err) {
+      return { ok: false, error: `The Claude folder could not be read (${err.code || err.message})` };
+    }
+  });
+  ipcMain.handle('pack:install', (_event, names) => {
+    if (!Array.isArray(names) || !names.length) return { ok: false, error: 'Nothing was chosen.' };
+    const res = officePack.installPack(packDir, claudeDir, names.map(String));
+    for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    rosterAt = 0; // the new agents show in the hospital at the next check
+    return { ok: res.errors.length === 0, ...res };
   });
 
   createWindow();

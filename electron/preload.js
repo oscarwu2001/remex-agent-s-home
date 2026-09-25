@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('agentsHome', {
   weatherNow: (place, unit) => ipcRenderer.invoke('home:weather-now', place, unit),
   updateInfo: () => ipcRenderer.invoke('home:update-info'),
   update: () => ipcRenderer.invoke('home:update'),
+  packStatus: () => ipcRenderer.invoke('pack:status'),
+  packInstall: (names) => ipcRenderer.invoke('pack:install', names),
   buildReport: (days) => ipcRenderer.invoke('home:build-report', days),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
   onSnapshot: (fn) => {

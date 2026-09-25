@@ -56,6 +56,8 @@
       <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
     </header>
 
+    <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
+
     <section class="board-section" aria-labelledby="on-shift-h">
       <h2 id="on-shift-h">On shift</h2>
       <div id="sessions"></div>
@@ -131,6 +133,11 @@
         <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
         <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
         <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+      </section>
+
+      <section class="settings-group" aria-labelledby="pack-settings-h">
+        <h3 id="pack-settings-h">Office team for Claude</h3>
+        <div id="pack-settings"></div>
       </section>
 
       <section class="settings-group" aria-labelledby="report-h">

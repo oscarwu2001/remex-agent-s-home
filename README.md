@@ -64,6 +64,21 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
 - Helpers act out their work too: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
+## The office team for Claude
+
+Agent's Home can add a small, ready-made team to Claude Code, for people who
+do not code. They keep prompting in Claude as usual, with their own plan, and
+the team shows up in the hospital:
+
+- **Agents:** a writer (Research Office), a summariser (Radiology), a planner (Vision Clinic), a data helper (Laboratory) and a checker (Operating Room).
+- **Skills:** *Question me*, *Teach me*, *Handover note* and *Break into tasks*, adapted from `grilling`, `teach`, `handoff` and `to-tickets`.
+
+On first start the app asks, in one short card, whether to add them. If
+Claude has no agents yet, one **Add** does it. If it already has some, you
+tick the ones you want. Anything already in `~/.claude` is never replaced.
+**Not now** is remembered, and **Settings → Office team for Claude** keeps
+the list. The files are in `office-pack/` if you'd rather copy them by hand.
+
 ## Grow the hospital
 
 The core hospital is a 3 × 3 block. Open **Settings** (the gear), go to **Hospital layout** and choose **Add a department**. The free spots around the hospital light up with a "+" (up to 5 × 5 in all). Pick a spot, then choose **A department** or **A garden**. A garden is a new 4 × 4 plot to plant, with a name if you like. For a department, choose which one:

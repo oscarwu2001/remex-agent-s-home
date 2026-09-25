@@ -1881,6 +1881,107 @@ $('update-run').addEventListener('click', async () => {
   }
 });
 
+// ---- the Office pack: a ready-made team offered to Claude ---------------------------
+
+// Asked once in a short card on the board: "Not now" is remembered until the
+// pack has something new. The same list stays in Settings.
+const packLabel = (name) => ({ handover: 'Handover note', 'break-down': 'Break into tasks' }[name]
+  ?? name.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
+let pack; // { hasOwnAgents, items: [{ kind, name, summary, installed }] }
+let packNote = '';
+let packError = '';
+
+async function loadPack() {
+  if (!bridge.packStatus) return;
+  const res = await bridge.packStatus();
+  if (!res.ok) {
+    packError = res.error;
+    pack = undefined;
+  } else {
+    pack = res;
+  }
+  renderPack();
+}
+
+// The card shows names only; Settings adds what each one does.
+function packChoices(id, withSummary) {
+  return pack.items.filter((i) => !i.installed).map((i) => `<label class="check">
+    <input type="checkbox" name="${id}" value="${escapeXml(i.name)}" checked>
+    <span><strong>${escapeXml(packLabel(i.name))}</strong>${withSummary ? ` <span class="muted">${escapeXml(i.summary)}</span>` : ''}</span></label>`).join('');
+}
+
+function renderPack() {
+  const offer = $('pack-offer');
+  const settings = $('pack-settings');
+  if (!bridge.packStatus) {
+    offer.hidden = true;
+    settings.innerHTML = '<p class="hint">The desktop app can add the office team to Claude; this preview cannot.</p>';
+    return;
+  }
+  if (!pack) {
+    offer.hidden = true;
+    settings.innerHTML = packError ? `<p class="form-error">${escapeXml(packError)}</p>` : '';
+    return;
+  }
+  const missing = pack.items.filter((i) => !i.installed);
+  const key = missing.map((i) => i.name).join(',');
+  const note = packNote ? `<p class="hint" role="status">${escapeXml(packNote)}</p>` : '';
+  const err = packError ? `<p class="form-error" role="alert">${escapeXml(packError)}</p>` : '';
+  // The board card: short. A new Claude folder gets one button; one that
+  // already has agents gets the list to choose from.
+  offer.hidden = !(missing.length && prefs.packDismissed !== key) && !packNote;
+  if (!offer.hidden) {
+    offer.innerHTML = missing.length && prefs.packDismissed !== key ? `
+      <h2 id="pack-h">Add the office team to Claude?</h2>
+      ${pack.hasOwnAgents ? `<div class="checks pack-names">${packChoices('pack-pick', false)}</div>` : '<p class="hint">Helpers for emails, summaries, plans and numbers.</p>'}
+      ${err}<div class="form-actions">
+        <button type="button" class="button" id="pack-add">${pack.hasOwnAgents ? 'Add selected' : 'Add'}</button>
+        <button type="button" class="link-btn" id="pack-later">Not now</button></div>`
+      : `<h2 id="pack-h">Office team</h2>${note}<div class="form-actions"><button type="button" class="link-btn" id="pack-ok">OK</button></div>`;
+  }
+  settings.innerHTML = `${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
+      <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
+    ${missing.length ? `<div class="checks">${packChoices('pack-pick-settings', true)}</div>
+      <button type="button" class="button" id="pack-add-settings">Add to Claude</button>` : '<p class="hint">All of the office team is in Claude.</p>'}
+    ${err}${note}`;
+}
+
+async function addPack(names, fromCard = false) {
+  if (!names.length) return;
+  packError = '';
+  const res = await bridge.packInstall(names);
+  // From the card, whatever was left unticked counts as "not now".
+  if (fromCard) {
+    prefs.packDismissed = pack.items.filter((i) => !i.installed && !names.includes(i.name)).map((i) => i.name).join(',');
+    savePrefs();
+  }
+  const added = res.installed?.length ?? 0;
+  packNote = added ? `Added to Claude. Start a new Claude session to use ${added === 1 ? 'it' : 'them'}.` : '';
+  if (res.errors?.length) packError = res.errors.join('; ');
+  else if (!res.ok) packError = res.error;
+  await loadPack();
+}
+
+document.addEventListener('click', (e) => {
+  const id = e.target.id;
+  if (id === 'pack-add') {
+    const picks = pack.hasOwnAgents ? [...document.querySelectorAll('input[name="pack-pick"]:checked')].map((x) => x.value)
+      : pack.items.filter((i) => !i.installed).map((i) => i.name);
+    addPack(picks, true);
+  } else if (id === 'pack-add-settings') {
+    addPack([...document.querySelectorAll('input[name="pack-pick-settings"]:checked')].map((x) => x.value));
+  } else if (id === 'pack-later') {
+    prefs.packDismissed = pack.items.filter((i) => !i.installed).map((i) => i.name).join(',');
+    savePrefs();
+    renderPack();
+  } else if (id === 'pack-ok') {
+    packNote = '';
+    renderPack();
+  }
+});
+
+loadPack();
+
 // ---- settings panel ------------------------------------------------------------
 
 function setSettings(open) {

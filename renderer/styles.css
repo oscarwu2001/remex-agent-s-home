@@ -683,3 +683,14 @@ details > summary h2 { margin: 0; }
 .ghost-plant { opacity: 0.72; }
 .chip .thumb { width: 26px; height: 26px; margin-left: calc(-1 * var(--s-1)); flex: none; }
 .button:disabled { background: var(--line); color: var(--ink-muted); cursor: not-allowed; box-shadow: none; }
+
+/* ---- office pack offer ---------------------------------------------------------- */
+
+.pack-offer { background: var(--accent-soft); }
+.pack-offer h2 { color: var(--ink); }
+.pack-offer .checks { max-height: none; }
+.pack-offer .check, #pack-settings .check { align-items: flex-start; }
+.pack-offer .check input, #pack-settings .check input { margin-top: 2px; flex: none; }
+.pack-row { margin: 0 0 var(--s-1); font-size: 13px; color: var(--ink); }
+.muted { color: var(--ink-muted); font-size: 12px; }
+.pack-names { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s-2); }

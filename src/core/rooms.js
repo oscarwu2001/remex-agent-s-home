@@ -61,6 +61,12 @@ const DEFAULT_ASSIGNMENTS = {
   'general-purpose': 'research-office',
   'claude-code-guide': 'research-office',
   researcher: 'research-office',
+  // The Office pack (office-pack/), the team for people who do not code.
+  writer: 'research-office',
+  summariser: 'radiology',
+  planner: 'vision-clinic',
+  'data-helper': 'laboratory',
+  checker: 'operating-room',
 };
 
 // Then keyword rules, for agents the defaults do not name.
