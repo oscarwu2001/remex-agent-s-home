@@ -64,6 +64,19 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
 - Helpers act out their work too: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
+## The Meadow
+
+Press **Meadow** at the top of the map for a second screen, away from the
+hospital. Every agent in your `.claude/agents` lives there as a cute
+creature: a cat, dog, bunny, fox, dragon, dinosaur, fish (in the pond),
+bird, turtle or axolotl, each with ten looks. The more tokens an agent used
+in the last 28 days, the bigger it is. Click one to see its performance in
+the sidebar: score, runs, finished rate, re-runs, median time, tokens,
+tool errors, verdicts and runs per day. These are the same numbers as the
+performance report, worked out in the background. You can change the
+animal and its look, or give its creature to another agent. The sidebar
+keeps the board, and **Back to the hospital** returns you to the map.
+
 ## The office team for Claude
 
 Agent's Home can add a small, ready-made team to Claude Code, for people who

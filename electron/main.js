@@ -294,6 +294,33 @@ app.whenReady().then(() => {
     });
   }));
 
+  // Numbers per agent for the creature screen: the report's own figures,
+  // worked out in the background, with no files written. Kept 5 minutes.
+  let agentStats;
+  ipcMain.handle('home:agent-stats', () => new Promise((resolve) => {
+    if (agentStats && Date.now() - agentStats.at < 5 * 60_000) {
+      resolve(agentStats.result);
+      return;
+    }
+    const roots = [...watcher.roots, ...wslWatcher.roots];
+    const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
+      ['--days', '28', '--stats-only', '--roots', JSON.stringify(roots)], { stdio: 'pipe' });
+    let err = '';
+    let answered = false;
+    child.stderr.on('data', (d) => { err += d; });
+    child.stdout.on('data', () => {}); // nothing printed in stats-only mode
+    child.on('message', (result) => {
+      answered = true;
+      const reply = result && result.ok ? { ok: true, days: result.days, agents: result.agents }
+        : { ok: false, error: (result && result.error) || 'The numbers could not be worked out.' };
+      if (reply.ok) agentStats = { at: Date.now(), result: reply };
+      resolve(reply);
+    });
+    child.on('exit', (code) => {
+      if (!answered) resolve({ ok: false, error: `The numbers could not be worked out (exit ${code})${err ? `: ${err.trim().split('\n').pop()}` : ''}` });
+    });
+  }));
+
   function openReport(file) {
     if (reportWin && !reportWin.isDestroyed()) {
       reportWin.loadFile(file);

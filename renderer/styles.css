@@ -727,3 +727,39 @@ details > summary h2 { margin: 0; }
 .piece .size { font-size: 10px; color: var(--ink-muted); font-weight: 600; }
 .pieces-h { margin: var(--s-2) 0 var(--s-1); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); }
 .more-pieces summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent); margin: var(--s-1) 0 var(--s-2); }
+
+/* ---- the Meadow ------------------------------------------------------------------ */
+
+:root { --meadow-grass: #bfe6b8; --meadow-grass-2: #a8d9a0; --meadow-side: #e8c8a8; --meadow-side-2: #d4a88a; --meadow-pond: #a9d8f0; --meadow-tree: #f5a8cf; }
+:root[data-theme="tide"] { --meadow-grass: #bfe8d8; --meadow-grass-2: #a4dcc6; --meadow-side: #c9d2f2; --meadow-side-2: #a9b4e6; --meadow-pond: #9ec0f2; --meadow-tree: #8fdcc0; }
+:root[data-theme="grove"] { --meadow-grass: #c8ecb0; --meadow-grass-2: #afdf98; --meadow-side: #e6dcb2; --meadow-side-2: #cbbd8a; --meadow-pond: #a6d8e6; --meadow-tree: #7fd3a6; }
+:root[data-time="night"] { --meadow-grass: #6f8f86; --meadow-grass-2: #5f7f78; --meadow-side: #6d6488; --meadow-side-2: #574f75; --meadow-pond: #4d6fa3; }
+#meadow { display: none; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+body.in-meadow #meadow { display: block; }
+body.in-meadow #scene, body.in-meadow .camera:not(.meadow-only), body.in-meadow .cam-hint, body.in-meadow #decorate { display: none; }
+.camera.meadow-only { display: none; }
+body.in-meadow .camera.meadow-only { display: flex; }
+#meadow .island-top { fill: var(--meadow-grass); }
+#meadow .island-side { fill: var(--meadow-side); stroke: var(--meadow-side-2); stroke-width: 2; }
+#meadow .pond { fill: var(--meadow-pond); stroke: #ffffff; stroke-opacity: 0.6; stroke-width: 3; }
+#meadow .pond-shine { fill: #ffffff; opacity: 0.35; }
+#meadow .meadow-empty { font: 600 22px var(--font); fill: var(--ink-muted); }
+.critter { cursor: pointer; outline: none; }
+.critter .bob { animation: critter-bob 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+.critter.swim .bob { animation: critter-swim 3.2s ease-in-out infinite; }
+.critter:hover .bob, .critter:focus-visible .bob { animation: critter-hop 0.6s ease-in-out infinite; }
+.critter-name { font: 700 13px var(--font); fill: var(--ink); paint-order: stroke; stroke: var(--label-bg); stroke-width: 4px; }
+.critter.chosen .critter-name { fill: var(--accent); }
+.critter.chosen .bob, .critter:focus-visible .bob { filter: drop-shadow(0 0 4px var(--accent)); }
+@keyframes critter-bob { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-3px) scaleY(1.03); } }
+@keyframes critter-swim { 0%, 100% { transform: translate(0, 0) rotate(-3deg); } 50% { transform: translate(-12px, -3px) rotate(3deg); } }
+@keyframes critter-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@media (prefers-reduced-motion: reduce) { .critter .bob, .critter.swim .bob, .critter:hover .bob { animation: none; } }
+.critter-head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-2); }
+.critter-head .thumb { width: 72px; height: 76px; flex: none; }
+.critter-head h3 { margin: 0; font-size: 17px; color: var(--ink); }
+.critter-head .hint { margin: 0; }
+.critter-looks .thumb { width: 48px; height: 50px; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 36px; margin: var(--s-2) 0; }
+.spark span { flex: 1; min-height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.8; }
+.meadow-panel .title-row h2 { margin: 0; }

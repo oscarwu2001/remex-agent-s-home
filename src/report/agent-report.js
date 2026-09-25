@@ -31,6 +31,7 @@ function args(argv) {
     else if (a === '--by-project') opt.byProject = true;
     else if (a === '--roots') opt.roots = JSON.parse(argv[++i]); // the app passes its own (WSL included)
     else if (a === '--json') opt.json = true; // one JSON line on stdout, for the app
+    else if (a === '--stats-only') opt.statsOnly = true; // numbers per agent, no files (the creature screen)
     else if (a === '--help' || a === '-h') opt.help = true;
     else throw new Error(`Unknown option ${a}. Try --help.`);
   }
@@ -487,6 +488,22 @@ function run(argv) {
   const roll = rollUp({ runs, sessions });
   const days = Array.from({ length: opt.days }, (_, i) => dayKey(since + i * 86_400_000 + 3_600_000));
 
+  // Per agent, for the app's creature screen: counts only, nothing identifying.
+  const agents = roll.types.map((t) => {
+    const o = roll.overall[t];
+    return {
+      name: t, runs: o.runs, finished: o.finished, failed: o.failed, stopped: o.stopped, successRate: o.successRate,
+      rerunRate: o.rerunRate, medianMs: o.medianMs, p90Ms: o.p90Ms, medianTokens: o.medianTokens, totalTokens: o.totalTokens,
+      toolErrorRate: o.toolErrorRate, verdicts: o.verdicts, score: o.score.value, scoreReason: o.score.reason,
+      daily: roll.daily.filter((d) => d.type === t).map((d) => ({ day: d.period, runs: d.runs, score: d.score.value })),
+    };
+  });
+  if (opt.statsOnly) {
+    const result = { ok: true, days: opt.days, agents, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
+    if (opt.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
+  }
+
   fs.mkdirSync(opt.out, { recursive: true });
   const stamp = dayKey(now);
   const htmlFile = path.join(opt.out, `agent-report-${stamp}.html`);
@@ -534,7 +551,7 @@ function run(argv) {
     runs: all.runs, successRate: all.successRate, medianMs: all.medianMs, days: opt.days,
     notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length,
   };
-  const result = { ok: true, html: htmlFile, dir: opt.out, summary };
+  const result = { ok: true, html: htmlFile, dir: opt.out, summary, agents };
   if (opt.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;

@@ -5,6 +5,7 @@ import {
 } from './scene.js';
 import { P } from './iso.js';
 import { BLOSSOMING } from './decor.js';
+import { createMeadow } from './meadow.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -47,7 +48,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // live: the real weather, off unless the user turns it on. `place` is the
 // town they chose ({ name, region, country, latitude, longitude }).
 const prefs = {
-  budget5h: 0, notify: true,
+  budget5h: 0, notify: true, creatures: {},
   private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
   live: { on: false, place: null, unit: 'celsius' },
 };
@@ -1291,6 +1292,7 @@ function render(force = false) {
   ]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
+  meadow.refresh();
 
   // Re-render, then put keyboard focus back where it was.
   const focusKey = document.activeElement?.dataset?.key;
@@ -2200,6 +2202,19 @@ document.addEventListener('click', (e) => {
 });
 
 loadPack();
+
+// ---- the Meadow: agents as creatures -------------------------------------------------
+
+const meadow = createMeadow({
+  bridge,
+  prefs,
+  savePrefs,
+  getSnapshot: () => snapshot,
+  onEnter: () => {
+    if (decorating) setDecorating(false);
+    if (buildMode) setBuildMode(false);
+  },
+});
 
 // ---- settings panel ------------------------------------------------------------
 

@@ -24,12 +24,17 @@
         <g id="people"></g>
       </g>
     </svg>
+    <svg id="meadow" viewBox="0 0 1000 800" role="group" aria-label="The Meadow: your agents as creatures"></svg>
+    <div class="camera meadow-only" role="toolbar" aria-label="Meadow">
+      <button type="button" class="cam-btn wide" id="meadow-back-stage">← Back to the hospital</button>
+    </div>
     <div class="weather" id="weather" aria-hidden="true"></div>
     <div class="gust" id="gust" aria-hidden="true"></div>
     <p class="clock" id="clock"></p>
     <div class="camera" role="toolbar" aria-label="View">
       <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
       <span class="cam-where" id="cam-where" aria-live="polite"></span>
+      <button type="button" class="cam-btn wide" id="cam-meadow" title="Your agents as creatures">Meadow</button>
       <button type="button" class="cam-btn wide accent" id="cam-decorate" aria-expanded="false" aria-controls="decorate" hidden>Decorate</button>
     </div>
     <p class="cam-hint">Drag to turn · right-drag to move · scroll to zoom · click a room or garden to visit</p>
@@ -55,6 +60,12 @@
       </div>
       <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
     </header>
+
+    <section class="board-section meadow-panel" id="meadow-panel" hidden aria-labelledby="meadow-h">
+      <div class="title-row"><h2 id="meadow-h">The Meadow</h2>
+        <button type="button" class="link-btn" id="meadow-back">Back to the hospital</button></div>
+      <div id="meadow-body"></div>
+    </section>
 
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
 
