@@ -129,13 +129,29 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
   }
   const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
   if (!isObject(prefs.ledger)) prefs.ledger = {};
+  // Entries that fail these checks are dropped: they can only come from an
+  // older version or a hand-edited preferences file, and keeping them would
+  // break the drawing. The worst loss is one index entry or one creature.
+  const rarities = ['R', 'SR', 'SSR'];
+  const lookOk = (v) => Number.isInteger(v) && v >= 0 && v < VARIANTS;
   if (!isObject(prefs.dex)) prefs.dex = {};
+  for (const [key, e] of Object.entries(prefs.dex)) {
+    const [kind, stage] = key.split(':');
+    const ok = kinds.has(kind) && /^[1-9]$/.test(stage ?? '') && Number(stage) <= STAGES && isObject(e)
+      && rarities.includes(e.rarity) && Array.isArray(e.looks) && e.looks.every(lookOk);
+    if (!ok) delete prefs.dex[key];
+  }
   if (!isObject(prefs.play) || !Number.isFinite(prefs.play.points) || !Number.isFinite(prefs.play.minutes)) prefs.play = earn(undefined, Date.now());
+  // Whole points, never negative; and the clock starts now, so time the app
+  // was closed never counts.
+  prefs.play = { points: Math.max(0, Math.floor(prefs.play.points)), minutes: Math.max(0, prefs.play.minutes), last: Date.now() };
   // Mystery creatures: { id, born (app minutes when bought), and once
-  // hatched species, variant, stage, rarity }.
-  prefs.wild = (Array.isArray(prefs.wild) ? prefs.wild : []).filter((w) => w && typeof w.id === 'string' && Number.isFinite(w.born)
+  // hatched species, variant, stage, rarity }. One per id, at most MAX_WILD.
+  const ids = new Set();
+  prefs.wild = (Array.isArray(prefs.wild) ? prefs.wild : []).filter((w) => w && typeof w.id === 'string' && !ids.has(w.id) && ids.add(w.id)
+    && Number.isFinite(w.born)
     && (w.species === undefined || (kinds.has(w.species) && Number.isInteger(w.stage) && w.stage >= 1 && w.stage <= STAGES
-      && Number.isInteger(w.variant) && w.variant >= 0 && w.variant < VARIANTS && ['R', 'SR', 'SSR'].includes(w.rarity))));
+      && lookOk(w.variant) && rarities.includes(w.rarity)))).slice(0, MAX_WILD);
 
   // Everything the Meadow keeps, from the preferences or, in the demo, from
   // memory (the demo never saves).
@@ -145,9 +161,11 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
   const dex = () => (demo() ? demoState.dex : prefs.dex);
   const saveNest = () => { if (!demo()) savePrefs(); };
 
-  // A resident is an agent (by name) or a mystery creature ('wild:<id>').
-  const isWild = (key) => key.startsWith('wild:');
-  const wildOf = (key) => wild().find((w) => `wild:${w.id}` === key);
+  // A resident is an agent (by name) or a mystery creature ('✦<id>').
+  // Mystery creatures' keys start with a character agent names do not use.
+  const WILD = '✦';
+  const isWild = (key) => key.startsWith(WILD);
+  const wildOf = (key) => wild().find((w) => `${WILD}${w.id}` === key);
   const tokensOf = (key) => {
     if (isWild(key)) return wildTokens(play(), wildOf(key)?.born ?? 0);
     return demo() ? DEMO_TOKENS[key] ?? 0 : lifetimeTokens(prefs.ledger, key);
@@ -165,7 +183,7 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
     const e = entryOf(key);
     return e ? STAGE_NAMES[e.species][e.stage - 1] : 'Mystery egg';
   };
-  const residents = () => [...agents(), ...wild().map((w) => `wild:${w.id}`)];
+  const residents = () => [...agents(), ...wild().map((w) => `${WILD}${w.id}`)];
 
   // The index: note every form on the island.
   function noteAll() {
@@ -653,15 +671,29 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
     return `<button type="button" class="chip" data-pick="${esc(key)}" aria-pressed="${key === selected}">${esc(nameOf(key))}${tag}</button>`;
   }
 
+  // Redrawing the sidebar keeps the keyboard where it was, and an open
+  // "Rarity and looks" open, as long as the same creature is shown.
+  let drawnFor;
   function renderPanel() {
     const el = $('meadow-body');
+    const active = el.contains(document.activeElement) ? document.activeElement : null;
+    const again = active && [...active.attributes].filter((a) => a.name.startsWith('data-'))
+      .map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+    const keepOpen = drawnFor === `${view}|${selected}` && el.querySelector('details')?.open;
+    drawPanel(el);
+    drawnFor = `${view}|${selected}`;
+    if (keepOpen) el.querySelector('details')?.setAttribute('open', '');
+    if (again) el.querySelector(again)?.focus();
+  }
+
+  function drawPanel(el) {
     noteAll();
     if (view === 'index') {
       el.innerHTML = indexPanel();
       return;
     }
     const names = agents();
-    const finds = wild().map((w) => `wild:${w.id}`);
+    const finds = wild().map((w) => `${WILD}${w.id}`);
     // The creatures never stand still, so they can also be picked by name.
     const picker = (names.length ? `<div class="options critter-pick" role="group" aria-label="Agents">${names.map(chip).join('')}</div>` : '')
       + (finds.length ? `<div class="options critter-pick" role="group" aria-label="Mystery creatures">${finds.map(chip).join('')}</div>` : '');
@@ -742,7 +774,7 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
       wild().push({ id, born: p.minutes });
       saveNest();
       $('meadow-live').textContent = 'A mystery egg is on the island.';
-      select(`wild:${id}`);
+      select(`${WILD}${id}`);
       refocus('[data-pick][aria-pressed="true"]');
       return;
     }
