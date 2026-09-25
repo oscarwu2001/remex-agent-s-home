@@ -1,6 +1,7 @@
 import {
   buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, setHeights, workSpot, routeBetween, floorOutline, roomFrame, configureRooms, cellOutline,
-  decorSpots, gardenTile, gardenOutline, gardenFrame, gardenPlot, plantPreview, plantThumb, decorThumb, floorThumb, decorPreview,
+  gardenTile, gardenOutline, gardenFrame, gardenPlot, plantPreview, plantThumb, floorThumb,
+  roomItems, itemSize, roomTile, itemPreview, itemThumb, doorwayTiles,
 } from './scene.js';
 import { P } from './iso.js';
 import { BLOSSOMING } from './decor.js';
@@ -30,7 +31,10 @@ let plantTool = 'tulips'; // what a click on a garden tile plants, or 'remove'
 let benchTurn = false;
 let decorError = '';
 let decorNote = ''; // what the last change did, read out to screen readers
-let decorSpot = 0; // the room spot being decorated
+let roomTool = 'move'; // an item kind to place, 'move' or 'remove'
+let roomTurn = false;
+let picked; // index of the item being moved, once clicked
+let moreOpen = false; // the 'More items' list stays open once opened
 
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
@@ -301,6 +305,7 @@ function drawGeometry() {
   const cat = config.decorCatalogue;
   const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase), {
     detail: prefs.detail, decor: config.decor, defaultGardens: cat?.defaultGardens, plants: cat?.plants,
+    roomItems: cat?.roomItems, defaultRoomItems: cat?.defaultRoomItems,
   });
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
@@ -436,17 +441,21 @@ function gardenTargets() {
   }).join('');
 }
 
-// Numbered markers on a room's decoration spots while it is being decorated.
+// While a room is being decorated, each floor tile is its own target, and
+// the item picked up to move is outlined.
 function decorMarkers() {
   if (!decorating || !focusedRoom) return '';
-  return decorSpots(focusedRoom).map(([x, y, z], i) => {
-    // A ring on the floor and a numbered pin above whatever stands there.
-    const [sx, sy] = P(x, y, z);
-    const top = P(x, y, z + 2.3)[1] - sy;
-    return `<g class="spot-mark${i === decorSpot ? ' chosen' : ''}" transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)})" aria-hidden="true">
-      <ellipse rx="24" ry="12"/><line x1="0" y1="0" x2="0" y2="${(top + 12).toFixed(1)}"/>
-      <circle cy="${top.toFixed(1)}" r="12"/><text text-anchor="middle" y="${(top + 5).toFixed(1)}">${i + 1}</text></g>`;
-  }).join('');
+  const n = config.decorCatalogue.roomSize;
+  let out = '';
+  const moving = picked !== undefined ? roomItems(focusedRoom)[picked] : undefined;
+  const lifted = new Set(moving ? tilesOf(moving).map((t) => t.join(',')) : []);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      out += `<polygon class="plot-tile${lifted.has(`${i},${j}`) ? ' lifted' : ''}" data-room-tile="${i},${j}" role="button" tabindex="0"
+        aria-label="Tile ${i + 1}, ${j + 1}" points="${pointsOf(roomTile(focusedRoom, i, j))}"><title>Tile ${i + 1}, ${j + 1}</title></polygon>`;
+    }
+  }
+  return out;
 }
 
 // ---- camera: zoom, pan, visit a room, turn the tower ------------------------
@@ -720,6 +729,12 @@ $('labels').addEventListener('keydown', (e) => {
     plantAt(tile.dataset.garden, tile.dataset.tile.split(',').map(Number));
     return;
   }
+  const floorTile = e.target.closest('[data-room-tile]');
+  if (floorTile && focusedRoom && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    placeInRoom(focusedRoom, floorTile.dataset.roomTile.split(',').map(Number));
+    return;
+  }
   const label = e.target.closest('.room-label');
   if (label && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
@@ -793,6 +808,11 @@ svg.addEventListener('click', (e) => {
   const tile = e.target.closest('[data-tile]');
   if (tile) {
     plantAt(tile.dataset.garden, tile.dataset.tile.split(',').map(Number));
+    return;
+  }
+  const floorTile = e.target.closest('[data-room-tile]');
+  if (floorTile && focusedRoom) {
+    placeInRoom(focusedRoom, floorTile.dataset.roomTile.split(',').map(Number));
     return;
   }
   const garden = e.target.closest('[data-garden]');
@@ -1696,6 +1716,10 @@ function planFor(gardenId, [i, j]) {
 // The see-through preview under the pointer (or keyboard focus).
 let hoverTile; // { garden, tile: [i, j] }
 function showGhost() {
+  if (decorating && focusedRoom && hoverTile?.room === focusedRoom) {
+    $('ghost').innerHTML = itemPreview(focusedRoom, planRoom(focusedRoom, hoverTile.tile).preview);
+    return;
+  }
   if (!decorating || !focusedGarden || !hoverTile || hoverTile.garden !== focusedGarden) {
     $('ghost').innerHTML = '';
     return;
@@ -1706,12 +1730,104 @@ function showGhost() {
     : { kind: plan.item.kind, at: plan.item.at, turn: plan.item.turn, tiles: plan.tiles });
 }
 function hoverOn(el) {
-  hoverTile = el ? { garden: el.dataset.garden, tile: el.dataset.tile.split(',').map(Number) } : undefined;
+  if (el?.dataset.roomTile) hoverTile = { room: focusedRoom, tile: el.dataset.roomTile.split(',').map(Number) };
+  else hoverTile = el ? { garden: el.dataset.garden, tile: el.dataset.tile.split(',').map(Number) } : undefined;
   showGhost();
 }
-$('labels').addEventListener('pointerover', (e) => hoverOn(e.target.closest('[data-tile]')));
+$('labels').addEventListener('pointerover', (e) => hoverOn(e.target.closest('[data-tile], [data-room-tile]')));
 $('labels').addEventListener('pointerleave', () => hoverOn(undefined));
-$('labels').addEventListener('focusin', (e) => hoverOn(e.target.closest('[data-tile]')));
+$('labels').addEventListener('focusin', (e) => hoverOn(e.target.closest('[data-tile], [data-room-tile]')));
+
+// ---- rooms: place, move and remove items on the floor grid ------------------------
+
+const itemOf = (kind) => config.decorCatalogue.roomItems.find((i) => i.id === kind);
+function tilesOf(item) {
+  const [w, d] = itemSize(item);
+  const out = [];
+  for (let a = 0; a < w; a++) for (let b = 0; b < d; b++) out.push([item.at[0] + a, item.at[1] + b]);
+  return out;
+}
+const coversTile = (item, [i, j]) => tilesOf(item).some(([a, b]) => a === i && b === j);
+
+// What a click on a room tile would do, and how to preview it.
+function planRoom(roomId, [i, j]) {
+  const n = config.decorCatalogue.roomSize;
+  const list = roomItems(roomId).map((it) => ({ ...it, at: [...it.at] }));
+  const doors = new Set(doorwayTiles(roomId).map((t) => t.join(',')));
+  const hit = list.findIndex((it) => coversTile(it, [i, j]));
+  if (roomTool === 'remove') {
+    return { kind: 'remove', index: hit, list, preview: { remove: true, tiles: hit === -1 ? [] : tilesOf(list[hit]) } };
+  }
+  let item;
+  let others = list;
+  if (roomTool === 'move') {
+    if (picked === undefined) {
+      // Nothing in hand yet: point at an item to pick it up.
+      return { kind: 'pick', index: hit, list, preview: { remove: false, tiles: hit === -1 ? [] : tilesOf(list[hit]) } };
+    }
+    const moving = list[picked];
+    item = { kind: moving.kind, at: [0, 0], ...(moving.turn || (roomTurn && itemOf(moving.kind)?.turns) ? { turn: true } : {}) };
+    if (roomTurn && itemOf(moving.kind)?.turns) item.turn = !moving.turn;
+    else if (moving.turn) item.turn = true;
+    others = list.filter((_, k) => k !== picked);
+  } else {
+    item = { kind: roomTool, at: [0, 0] };
+    if (roomTurn && itemOf(roomTool)?.turns) item.turn = true;
+  }
+  const [w, d] = itemSize(item);
+  item.at = [Math.min(i, n - w), Math.min(j, n - d)];
+  const tiles = tilesOf(item);
+  const blocked = tiles.some((t) => doors.has(t.join(',')));
+  const clash = others.filter((it) => tiles.some((t) => coversTile(it, t)));
+  return {
+    kind: roomTool === 'move' ? 'move' : 'place', item, list, others, clash, blocked,
+    preview: { kind: item.kind, at: item.at, turn: item.turn, tiles, blocked: blocked || (roomTool === 'move' && clash.length > 0) },
+  };
+}
+
+function placeInRoom(roomId, tile) {
+  const plan = planRoom(roomId, tile);
+  const name = (k) => (itemOf(k)?.name ?? k).toLowerCase();
+  if (plan.kind === 'remove') {
+    if (plan.index === -1) {
+      decorNote = 'Nothing stands on that tile.';
+      renderDecorPanel();
+      return;
+    }
+    const gone = plan.list[plan.index];
+    setRoomEntry(roomId, { ...roomEntry(roomId), items: plan.list.filter((_, k) => k !== plan.index) }, `Removed the ${name(gone.kind)}.`);
+    return;
+  }
+  if (plan.kind === 'pick') {
+    if (plan.index === -1) {
+      decorNote = 'Click an item to pick it up, then click where it should go.';
+    } else {
+      picked = plan.index;
+      decorNote = `Picked up the ${name(plan.list[plan.index].kind)}. Click where it should go.`;
+    }
+    redrawDecorLayer();
+    return;
+  }
+  if (plan.blocked) {
+    decorNote = 'That would block a doorway. Choose another tile.';
+    renderDecorPanel();
+    return;
+  }
+  if (plan.kind === 'move') {
+    if (plan.clash.length) {
+      decorNote = 'Something is already there. Move or remove it first.';
+      renderDecorPanel();
+      return;
+    }
+    picked = undefined;
+    setRoomEntry(roomId, { ...roomEntry(roomId), items: [...plan.others, plan.item] }, `Moved the ${name(plan.item.kind)}.`);
+    return;
+  }
+  // Placing a new item takes the place of whatever was on those tiles.
+  const kept = plan.list.filter((it) => !plan.clash.includes(it));
+  const replaced = plan.clash.length ? ` in place of the ${plan.clash.map((it) => name(it.kind)).join(' and ')}` : '';
+  setRoomEntry(roomId, { ...roomEntry(roomId), items: [...kept, plan.item] }, `Placed the ${name(plan.item.kind)}${replaced}.`);
+}
 
 // Plants the chosen piece with its corner on the tile, nudged back inside
 // the plot if it would hang over the edge; whatever it lands on is dug up.
@@ -1742,17 +1858,19 @@ function setRoomEntry(id, entry, note) {
   const rooms = { ...config.decor.rooms };
   const clean = {};
   if (entry.floor && entry.floor !== config.decorCatalogue.defaultFloor) clean.floor = entry.floor;
-  if (entry.spots?.some(Boolean)) clean.spots = entry.spots.map((x) => x || null);
+  if (Array.isArray(entry.items)) clean.items = entry.items;
   if (Object.keys(clean).length) rooms[id] = clean;
   else delete rooms[id];
   saveDecor({ ...config.decor, rooms }, note);
 }
 
-// Decorations that make sense in this room; the same rule as src/core/decor.js.
-function decorationsFor(id) {
-  const room = ROOM_NAMES[id];
-  const tag = room?.custom ? 'department' : id;
-  return config.decorCatalogue.decorations.filter((d) => d.rooms === 'any' || d.rooms.includes(tag));
+// Items that belong in this room first, then the rest (the rule of itemsFor
+// in src/core/decor.js).
+function itemsForRoom(id) {
+  const tag = ROOM_NAMES[id]?.custom ? 'department' : id;
+  const all = config.decorCatalogue.roomItems;
+  const fits = all.filter((i) => i.suits.length === 0 || i.suits.includes(tag));
+  return { fits, rest: all.filter((i) => !fits.includes(i)) };
 }
 
 function renderDecorPanel() {
@@ -1784,23 +1902,28 @@ function renderDecorPanel() {
   const id = focusedRoom;
   const entry = roomEntry(id);
   const floor = entry.floor ?? cat.defaultFloor;
-  const fits = decorationsFor(id);
-  $('decorate-h').textContent = `Decorate the ${ROOM_NAMES[id]?.name ?? 'room'}`;
-  if (decorSpot >= cat.spotsPerRoom) decorSpot = 0;
-  const nameOf = (d) => fits.find((x) => x.id === d)?.name ?? 'Nothing';
-  const spotChips = Array.from({ length: cat.spotsPerRoom }, (_, i) => `<label class="chip"><input type="radio" name="decor-spot" value="${i}" ${i === decorSpot ? 'checked' : ''}>
-      ${i + 1} · ${escapeXml(nameOf(entry.spots?.[i]))}</label>`).join('');
-  const chosen = entry.spots?.[decorSpot] ?? '';
-  const piece = (pid, name, thumb) => `<button type="button" class="piece" data-piece="${pid}" aria-pressed="${chosen === pid}">${thumb}<span>${escapeXml(name)}</span></button>`;
+  const { fits, rest } = itemsForRoom(id);
+  const tool = (t, label) => `<button type="button" class="piece tool" data-room-tool="${t}" aria-pressed="${roomTool === t}"><span>${label}</span></button>`;
+  const piece = (it) => `<button type="button" class="piece" data-room-tool="${it.id}" aria-pressed="${roomTool === it.id}">${itemThumb(it.id, id)}<span>${escapeXml(it.name)}${it.w * it.d > 1 ? ` <span class="size">${it.w}×${it.d}</span>` : ''}</span></button>`;
+  const turnable = roomTool === 'move' ? picked !== undefined && itemOf(roomItems(id)[picked]?.kind)?.turns : itemOf(roomTool)?.turns;
+  const hint = roomTool === 'move'
+    ? (picked === undefined ? 'Click an item in the room to pick it up, then click where it should go.' : 'Now click where it should go.')
+    : roomTool === 'remove' ? 'Click an item to take it out of the room.'
+      : 'Point at the floor to see it there, then click to place it. Whatever it lands on is replaced; doorways stay clear.';
   $('decorate-body').innerHTML = `
     <fieldset class="chips"><legend>Floor</legend>
       <div class="options">${cat.floors.map((f) => `<label class="chip floor-chip"><input type="radio" name="floor" value="${f.id}" ${floor === f.id ? 'checked' : ''}>${floorThumb(f.id, id)}${escapeXml(f.name)}</label>`).join('')}</div>
     </fieldset>
-    <fieldset class="chips"><legend>Spot</legend><div class="options">${spotChips}</div></fieldset>
-    <p class="hint">Point at a piece to see it on spot ${decorSpot + 1}, then click to place it. Only pieces that belong in this room are offered.</p>
-    <div class="pieces" id="pieces">${piece('', 'Nothing', '<svg class="thumb" viewBox="0 0 10 10" aria-hidden="true"></svg>')}${fits.map((d) => piece(d.id, d.name, decorThumb(d.id))).join('')}</div>
+    <div class="pieces tools">${tool('move', 'Move')}${tool('remove', 'Remove')}</div>
+    ${turnable ? `<label class="switch"><input type="checkbox" id="room-turn" ${roomTurn ? 'checked' : ''}> <span>Turn it the other way</span></label>` : ''}
+    <p class="hint">${hint}</p>
+    <h4 class="pieces-h">For this room</h4>
+    <div class="pieces">${fits.map(piece).join('')}</div>
+    <details class="more-pieces" ${moreOpen || rest.some((it) => it.id === roomTool) ? 'open' : ''}><summary>More items (${rest.length})</summary><div class="pieces">${rest.map(piece).join('')}</div></details>
     ${status}${error}
-    <div class="form-actions"><button type="button" class="link-btn" id="room-reset">Back to the plain room</button></div>`;
+    <div class="form-actions">
+      <button type="button" class="link-btn" id="room-clear">Empty the room</button>
+      <button type="button" class="link-btn" id="room-reset">Back to how it was</button></div>`;
 }
 
 $('decorate-body').addEventListener('change', (e) => {
@@ -1817,31 +1940,25 @@ $('decorate-body').addEventListener('change', (e) => {
   } else if (t.name === 'floor') {
     const name = config.decorCatalogue.floors.find((f) => f.id === t.value)?.name ?? t.value;
     setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), floor: t.value }, `Floor changed to ${name.toLowerCase()}.`);
-  } else if (t.name === 'decor-spot') {
-    decorSpot = Number(t.value);
-    renderDecorPanel();
-    drawLabels();
-    placeLabels();
-    $('decorate-body').querySelector(`input[name="decor-spot"][value="${decorSpot}"]`)?.focus();
+  } else if (t.id === 'room-turn') {
+    roomTurn = t.checked;
+    showGhost();
   }
 });
 
-// Pointing at a piece previews it on the chosen spot; clicking places it.
-function previewPiece(el) {
-  $('ghost').innerHTML = el && decorating && focusedRoom ? decorPreview(focusedRoom, decorSpot, el.dataset.piece) : '';
-}
-$('decorate-body').addEventListener('pointerover', (e) => previewPiece(e.target.closest('[data-piece]')));
-$('decorate-body').addEventListener('pointerleave', () => previewPiece(undefined));
-$('decorate-body').addEventListener('focusin', (e) => previewPiece(e.target.closest('[data-piece]')));
-$('decorate-body').addEventListener('focusout', () => previewPiece(undefined));
+$('decorate-body').addEventListener('toggle', (e) => {
+  if (e.target.classList?.contains('more-pieces')) moreOpen = e.target.open;
+}, true);
+
+// Choosing what the next click on the floor does.
 $('decorate-body').addEventListener('click', (e) => {
-  const el = e.target.closest('[data-piece]');
+  const el = e.target.closest('[data-room-tool]');
   if (!el || !focusedRoom) return;
-  const spots = Array.from({ length: config.decorCatalogue.spotsPerRoom }, (_, i) => roomEntry(focusedRoom).spots?.[i] ?? null);
-  spots[decorSpot] = el.dataset.piece || null;
-  const name = el.textContent.trim();
-  $('ghost').innerHTML = '';
-  setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), spots }, el.dataset.piece ? `${name} placed on spot ${decorSpot + 1}.` : `Spot ${decorSpot + 1} cleared.`);
+  roomTool = el.dataset.roomTool;
+  picked = undefined;
+  decorNote = '';
+  redrawDecorLayer();
+  $('decorate-body').querySelector(`[data-room-tool="${CSS.escape(roomTool)}"]`)?.focus();
 });
 
 $('decorate-body').addEventListener('click', (e) => {
@@ -1853,7 +1970,11 @@ $('decorate-body').addEventListener('click', (e) => {
     delete gardens[focusedGarden];
     saveDecor({ ...config.decor, gardens }, 'The garden is back to how it was.');
   } else if (id === 'room-reset') {
-    setRoomEntry(focusedRoom, {}, 'The room is back to its plain floor, with no decorations.');
+    picked = undefined;
+    setRoomEntry(focusedRoom, {}, 'The room is back to how it was.');
+  } else if (id === 'room-clear') {
+    picked = undefined;
+    setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), items: [] }, 'The room is empty.');
   }
 });
 

@@ -245,8 +245,9 @@ app.whenReady().then(() => {
     decorCatalogue: {
       floors: decorCatalogue.FLOORS,
       defaultFloor: decorCatalogue.DEFAULT_FLOOR,
-      spotsPerRoom: decorCatalogue.SPOTS_PER_ROOM,
-      decorations: decorCatalogue.DECORATIONS,
+      roomSize: decorCatalogue.ROOM_SIZE,
+      roomItems: decorCatalogue.ROOM_ITEMS,
+      defaultRoomItems: decorCatalogue.DEFAULT_ROOM_ITEMS,
       gardenSize: decorCatalogue.GARDEN_SIZE,
       plants: decorCatalogue.PLANTS,
       defaultGardens: decorCatalogue.DEFAULT_GARDENS,

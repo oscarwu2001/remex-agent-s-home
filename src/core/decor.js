@@ -3,9 +3,10 @@
 const { SCENERY } = require('./rooms');
 
 // What people can choose when they make the hospital their own: a floor for
-// each room, a decoration on each of a room's spots, and what grows in the
-// two gardens. This module owns the catalogue and checks a saved choice; the
-// renderer owns how each piece is drawn and where the spots are.
+// each room, every item in it (furniture and decorations, placed on the
+// room's tile grid), and what grows in the gardens. This module owns the
+// catalogue and the starting layouts and checks a saved choice; the renderer
+// owns how each piece is drawn.
 
 // Floors any room can have.
 const FLOORS = [
@@ -18,9 +19,8 @@ const FLOORS = [
 ];
 const DEFAULT_FLOOR = 'checker';
 
-// Every room has this many decoration spots, clear of its furniture, its
-// doorways and where people stand.
-const SPOTS_PER_ROOM = 3;
+// A room's floor is ROOM_SIZE x ROOM_SIZE tiles; items stand on it.
+const ROOM_SIZE = 6;
 
 // Decorations, and the rooms they make sense in. 'any' fits every room;
 // 'department' fits every department the user adds.
@@ -52,6 +52,89 @@ const DECORATIONS = [
   { id: 'iv-pole', name: 'IV pole', rooms: ['general-ward', 'operating-room'] },
   { id: 'spine-model', name: 'Spine model', rooms: ['department', 'radiology'] },
 ];
+
+// Everything that can stand in a room: its furniture, the decorations above
+// and a few pieces just for fun. Any item may go in any room; `suits` only
+// puts it first in the list for the rooms it belongs in. Each covers w x d
+// tiles (d x w when turned).
+const R = (...ids) => ids;
+const FURNITURE = [
+  { id: 'station-counter', name: "Nurses' counter", w: 4, d: 1, turns: true, suits: R('nurses-station') },
+  { id: 'office-chair', name: 'Office chair', w: 1, d: 1, suits: R('nurses-station', 'research-office') },
+  { id: 'operating-table', name: 'Operating table and lights', w: 2, d: 3, turns: true, suits: R('operating-room') },
+  { id: 'anaesthesia-machine', name: 'Anaesthesia machine', w: 2, d: 1, turns: true, suits: R('operating-room', 'department') },
+  { id: 'vitals-monitor', name: 'Vital signs monitor', w: 1, d: 1, suits: R('operating-room', 'general-ward', 'department') },
+  { id: 'bookshelf', name: 'Bookshelf', w: 1, d: 3, turns: true, suits: R('research-office') },
+  { id: 'desk', name: 'Desk with laptop', w: 2, d: 1, turns: true, suits: R('research-office', 'nurses-station') },
+  { id: 'lab-bench', name: 'Lab bench', w: 1, d: 4, turns: true, suits: R('laboratory') },
+  { id: 'fume-hood', name: 'Fume hood', w: 2, d: 1, turns: true, suits: R('laboratory') },
+  { id: 'centrifuge', name: 'Centrifuge', w: 1, d: 1, suits: R('laboratory') },
+  { id: 'mri-scanner', name: 'MRI scanner', w: 2, d: 4, turns: true, suits: R('radiology') },
+  { id: 'scanner-console', name: 'Scanner console', w: 1, d: 1, suits: R('radiology') },
+  { id: 'eye-chart', name: 'Eye chart', w: 2, d: 1, turns: true, suits: R('vision-clinic') },
+  { id: 'exam-chair', name: 'Exam chair', w: 1, d: 1, suits: R('vision-clinic') },
+  { id: 'slit-lamp', name: 'Slit lamp', w: 1, d: 1, suits: R('vision-clinic') },
+  { id: 'hospital-bed', name: 'Hospital bed', w: 3, d: 1, turns: true, suits: R('general-ward') },
+  { id: 'nav-table', name: 'Navigation table', w: 2, d: 3, turns: true, suits: R('department') },
+  { id: 'tracking-camera', name: 'Tracking camera', w: 1, d: 1, suits: R('department') },
+  { id: 'planning-cart', name: 'Planning cart', w: 1, d: 1, suits: R('department') },
+  // just for fun
+  { id: 'sofa', name: 'Sofa', w: 2, d: 1, turns: true, suits: R('nurses-station') },
+  { id: 'rug', name: 'Round rug', w: 2, d: 2, suits: R() },
+  { id: 'coffee-table', name: 'Coffee table', w: 1, d: 1, suits: R() },
+  { id: 'fish-tank', name: 'Fish tank', w: 1, d: 1, suits: R('nurses-station', 'general-ward') },
+  { id: 'vending-machine', name: 'Vending machine', w: 1, d: 1, suits: R('nurses-station') },
+  { id: 'floor-lamp', name: 'Floor lamp', w: 1, d: 1, suits: R('research-office') },
+  { id: 'filing-cabinet', name: 'Filing cabinet', w: 1, d: 1, suits: R('research-office', 'nurses-station') },
+  { id: 'printer', name: 'Printer', w: 1, d: 1, suits: R('research-office', 'nurses-station') },
+];
+const ROOM_ITEMS = [
+  ...FURNITURE,
+  ...DECORATIONS.map((d) => ({ id: d.id, name: d.name, w: 1, d: 1, suits: d.rooms === 'any' ? R() : d.rooms })),
+];
+const ITEM_BY_ID = Object.fromEntries(ROOM_ITEMS.map((i) => [i.id, i]));
+
+// How each room starts: its furniture as it always stood. Departments share
+// one layout, around their navigation table.
+const DEFAULT_ROOM_ITEMS = {
+  'nurses-station': [
+    { kind: 'station-counter', at: [1, 1] }, { kind: 'office-chair', at: [1, 0] }, { kind: 'office-chair', at: [4, 0] },
+    { kind: 'plant', at: [0, 5] }, { kind: 'plant', at: [5, 5] },
+  ],
+  'operating-room': [
+    { kind: 'operating-table', at: [2, 2] }, { kind: 'anaesthesia-machine', at: [2, 0] },
+    { kind: 'vitals-monitor', at: [5, 0] }, { kind: 'instrument-tray', at: [4, 3] },
+  ],
+  'research-office': [
+    { kind: 'bookshelf', at: [0, 2] }, { kind: 'desk', at: [1, 1] }, { kind: 'desk', at: [3, 1] },
+    { kind: 'office-chair', at: [1, 2] }, { kind: 'office-chair', at: [4, 2] },
+    { kind: 'whiteboard', at: [5, 3] }, { kind: 'plant', at: [5, 5] },
+  ],
+  laboratory: [{ kind: 'lab-bench', at: [0, 1] }, { kind: 'fume-hood', at: [4, 0] }, { kind: 'centrifuge', at: [4, 4] }],
+  radiology: [{ kind: 'mri-scanner', at: [2, 1] }, { kind: 'scanner-console', at: [4, 4] }],
+  'vision-clinic': [{ kind: 'eye-chart', at: [0, 0] }, { kind: 'exam-chair', at: [2, 3] }, { kind: 'slit-lamp', at: [4, 1] }],
+  'general-ward': [{ kind: 'hospital-bed', at: [0, 0] }, { kind: 'hospital-bed', at: [0, 2] }, { kind: 'hospital-bed', at: [0, 4] }],
+  department: [{ kind: 'nav-table', at: [2, 2] }, { kind: 'tracking-camera', at: [5, 0] }, { kind: 'planning-cart', at: [0, 0] }],
+};
+
+// Where the three decoration spots of earlier versions were, as tiles, so a
+// decor.json saved then keeps its decorations.
+const LEGACY_SPOTS = {
+  'nurses-station': [[0, 0], [0, 4], [5, 4]], 'operating-room': [[0, 0], [0, 5], [5, 5]],
+  'research-office': [[0, 0], [5, 0], [1, 5]], laboratory: [[0, 5], [5, 2], [3, 5]], radiology: [[0, 0], [5, 0], [5, 5]],
+  'vision-clinic': [[0, 4], [5, 0], [5, 5]], 'general-ward': [[5, 0], [5, 4], [1, 5]], department: [[0, 5], [5, 5], [0, 1]],
+};
+
+function defaultItemsFor(room) {
+  return (DEFAULT_ROOM_ITEMS[room.custom ? 'department' : room.id] ?? []).map((i) => ({ ...i, at: [...i.at] }));
+}
+
+// Items that belong in a room first, then everything else.
+function itemsFor(room) {
+  const tag = room.custom ? 'department' : room.id;
+  const fits = ROOM_ITEMS.filter((i) => i.suits.length === 0 || i.suits.includes(tag));
+  return [...fits, ...ROOM_ITEMS.filter((i) => !fits.includes(i))];
+}
 
 // Gardens (the built-in two in rooms.js SCENERY, and any the user adds in
 // the layout) are square plots of GARDEN_SIZE x GARDEN_SIZE tiles. A plant
@@ -89,9 +172,9 @@ const DEFAULT_GARDENS = {
   ],
 };
 
-// The tiles a planted item covers.
+// The tiles a planted (or placed) item covers.
 function footprint(item) {
-  const p = PLANT_BY_ID[item.kind];
+  const p = PLANT_BY_ID[item.kind] ?? ITEM_BY_ID[item.kind];
   const [w, d] = item.turn ? [p.d, p.w] : [p.w, p.d];
   const out = [];
   for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) out.push([item.at[0] + i, item.at[1] + j]);
@@ -104,7 +187,7 @@ function decorationsFor(room) {
   return DECORATIONS.filter((d) => d.rooms === 'any' || d.rooms.includes(tag));
 }
 
-function checkGarden(list, where, problems) {
+function checkGarden(list, where, problems, catalogue = PLANT_BY_ID, size = GARDEN_SIZE, noun = 'plot') {
   if (!Array.isArray(list)) {
     problems.push(`${where} is not a list`);
     return undefined;
@@ -114,16 +197,16 @@ function checkGarden(list, where, problems) {
   list.forEach((item, n) => {
     const at = `${where}, item ${n + 1}`;
     if (!item || typeof item !== 'object') return problems.push(`${at} is not an object`);
-    if (!PLANT_BY_ID[item.kind]) return problems.push(`${at} has unknown kind "${item.kind}"`);
+    if (!catalogue[item.kind]) return problems.push(`${at} has unknown kind "${item.kind}"`);
     const cell = item.at;
     if (!Array.isArray(cell) || cell.length !== 2 || !cell.every(Number.isInteger)) {
       return problems.push(`${at} needs a tile like [col, row]`);
     }
     const clean = { kind: item.kind, at: [cell[0], cell[1]] };
-    if (item.turn === true && PLANT_BY_ID[item.kind].turns) clean.turn = true;
+    if (item.turn === true && catalogue[item.kind].turns) clean.turn = true;
     const tiles = footprint(clean);
-    if (tiles.some(([i, j]) => i < 0 || j < 0 || i >= GARDEN_SIZE || j >= GARDEN_SIZE)) {
-      return problems.push(`${at} does not fit inside the ${GARDEN_SIZE} x ${GARDEN_SIZE} plot`);
+    if (tiles.some(([i, j]) => i < 0 || j < 0 || i >= size || j >= size)) {
+      return problems.push(`${at} does not fit inside the ${size} x ${size} ${noun}`);
     }
     if (tiles.some((t) => taken.has(t.join(',')))) return problems.push(`${at} overlaps something planted before it`);
     for (const t of tiles) taken.add(t.join(','));
@@ -163,17 +246,26 @@ function checkDecor(input, rooms, gardens = SCENERY) {
         if (FLOORS.some((f) => f.id === entry.floor)) clean.floor = entry.floor;
         else problems.push(`room "${id}" has unknown floor "${entry.floor}"`);
       }
-      if (entry.spots !== undefined) {
-        if (!Array.isArray(entry.spots) || entry.spots.length > SPOTS_PER_ROOM) {
-          problems.push(`room "${id}" needs at most ${SPOTS_PER_ROOM} spots in a list`);
-        } else {
-          const fits = new Set(decorationsFor(room).map((d) => d.id));
-          clean.spots = entry.spots.map((s, i) => {
-            if (s === null || s === undefined) return null;
-            if (fits.has(s)) return s;
-            problems.push(`room "${id}", spot ${i + 1}: "${s}" is not a decoration for this room`);
-            return null;
+      if (entry.items !== undefined) {
+        const items = checkGarden(entry.items, `room "${id}"`, problems, ITEM_BY_ID, ROOM_SIZE, 'room');
+        if (items) clean.items = items;
+      }
+      // Earlier versions kept three decoration spots; they become items on
+      // the grid, placed among the room's starting furniture.
+      if (entry.spots !== undefined && clean.items === undefined) {
+        if (!Array.isArray(entry.spots)) problems.push(`room "${id}" has spots that are not a list`);
+        else {
+          const tiles = LEGACY_SPOTS[room.custom ? 'department' : id] ?? [];
+          const items = defaultItemsFor(room);
+          const taken = new Set(items.flatMap((it) => footprint(it)).map((t) => t.join(',')));
+          entry.spots.forEach((kind, i) => {
+            if (!kind) return;
+            if (!ITEM_BY_ID[kind] || !tiles[i]) return problems.push(`room "${id}", spot ${i + 1}: "${kind}" is not a known decoration`);
+            if (taken.has(tiles[i].join(','))) return problems.push(`room "${id}", spot ${i + 1}: no free tile left for "${kind}"`);
+            taken.add(tiles[i].join(','));
+            return items.push({ kind, at: [...tiles[i]] });
           });
+          clean.items = items;
         }
       }
       decor.rooms[id] = clean;
@@ -195,6 +287,6 @@ function checkDecor(input, rooms, gardens = SCENERY) {
 }
 
 module.exports = {
-  FLOORS, DEFAULT_FLOOR, SPOTS_PER_ROOM, DECORATIONS, GARDEN_SIZE, PLANTS, DEFAULT_GARDENS,
-  footprint, decorationsFor, checkDecor,
+  FLOORS, DEFAULT_FLOOR, DECORATIONS, ROOM_SIZE, ROOM_ITEMS, DEFAULT_ROOM_ITEMS, GARDEN_SIZE, PLANTS, DEFAULT_GARDENS,
+  footprint, decorationsFor, itemsFor, defaultItemsFor, checkDecor,
 };

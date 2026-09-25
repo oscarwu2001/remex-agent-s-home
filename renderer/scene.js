@@ -7,8 +7,8 @@ import {
   viewDepth, faceVisible, cellDepth,
 } from './iso.js';
 import { floorTones } from './themes.js';
-import { detailedFurniture, navSuiteDetailed } from './detailed.js';
-import { drawFloor, drawDecoration, drawPlant } from './decor.js';
+import { drawItem } from './furniture.js';
+import { drawFloor, drawPlant } from './decor.js';
 
 const BASE_Z = -4; // columns hang down to here and dissolve into mist
 
@@ -90,25 +90,15 @@ function ends(c) {
 const SCENERY = {}; // gardenId -> { cell, at, z }
 const PLOT = 4;
 
-// Decoration spots, in room-local tiles: clear of the furniture in both room
-// styles, of every doorway (the middle of each side) and of where people
-// stand. Three per room (SPOTS_PER_ROOM in src/core/decor.js).
-const DECOR_SPOTS = {
-  'nurses-station': [[0.6, 0.6], [0.6, 4.3], [5.4, 4.3]],
-  'operating-room': [[0.6, 0.6], [0.6, 5.4], [5.4, 5.4]],
-  'research-office': [[0.6, 0.55], [5.45, 0.55], [1.5, 5.45]],
-  laboratory: [[0.7, 5.5], [5.4, 2.7], [3.2, 5.5]],
-  radiology: [[0.6, 0.6], [5.4, 0.6], [5.4, 5.45]],
-  'vision-clinic': [[0.55, 4.4], [5.45, 0.55], [5.5, 5.5]],
-  'general-ward': [[5.45, 0.55], [5.5, 4.6], [1.7, 5.55]],
-  department: [[0.6, 5.45], [5.5, 5.55], [0.5, 1.75]],
-};
-
 // What the user chose (decor.json, through the config): floors, spot
 // decorations and gardens. Missing entries mean the default look.
 let decorState = { rooms: {}, gardens: {} };
 let defaultGardens = {};
 let plantSize = {}; // kind -> [w, d], from the catalogue
+let itemSizes = {}; // room item kind -> [w, d]
+// The room style: 'simple' (storybook) or 'detailed' (realistic equipment).
+let detail = 'simple';
+let defaultRoomItems = {}; // room id (or 'department') -> starting items
 
 // Lays out the rooms the config lists and joins each department to the room
 // it was placed next to.
@@ -277,27 +267,6 @@ function floor(id, r) {
   return drawFloor(kind, r.x, r.y, r.z + 0.001, SIZE, SIZE, { a, b, body, seed: r.x * 31 + r.y * 7 + 1 });
 }
 
-// Where a room's decoration spots are, in world tiles.
-export function decorSpots(id) {
-  const r = LAYOUT[id];
-  if (!r) return [];
-  return (DECOR_SPOTS[id] ?? DECOR_SPOTS.department).map(([u, v]) => [r.x + u, r.y + v, r.z]);
-}
-
-// A room's chosen decorations, split into those behind its furniture and
-// those in front of it in the current view.
-function decorations(id, r) {
-  const chosen = decorState.rooms[id]?.spots ?? [];
-  const centre = viewDepth(r.x + SIZE / 2, r.y + SIZE / 2);
-  const back = [];
-  const front = [];
-  decorSpots(id).forEach(([x, y, z], i) => {
-    if (!chosen[i]) return;
-    (viewDepth(x, y) < centre ? back : front).push({ d: viewDepth(x, y), s: drawDecoration(chosen[i], x, y, z) });
-  });
-  const join = (list) => list.sort((p, q) => p.d - q.d).map((p) => p.s).join('');
-  return { back: join(back), front: join(front) };
-}
 
 // Sides with a doorway (a bridge or stairs lands there) never get a wall.
 function doorways(id) {
@@ -375,194 +344,70 @@ function bridge(c) {
   return s;
 }
 
-function plant(x, y, z) {
-  return cylinder(x, y, z, 0.28, 0.4, M.coral) + ball(x, y, z + 0.75, 0.38, M.leaf);
+// A room's items: what the user placed, or the room's starting furniture.
+export function roomItems(id) {
+  const r = LAYOUT[id];
+  return decorState.rooms[id]?.items ?? defaultRoomItems[r?.kind ? 'department' : id] ?? [];
 }
 
-// The room style: 'simple' (storybook) or 'detailed' (realistic equipment).
-let detail = 'simple';
+// The size of an item on the floor, turned or not: [w, d] in tiles.
+export function itemSize(item) {
+  const size = itemSizes[item.kind] ?? [1, 1];
+  return item.turn ? [size[1], size[0]] : size;
+}
 
+// Every item in a room, back to front in the current view.
 function furniture(id, r) {
-  if (detail === 'detailed') {
-    const real = detailedFurniture(id, r, { plant, books, desk, eyeChart, ecg });
-    if (real !== undefined) return real;
-  }
-  const { x, y, z } = r;
-  switch (id) {
-    case 'nurses-station':
-      return (
-        box(x + 1, y + 0.8, z, 4.4, 0.9, 1.05, M.white) +
-        box(x + 1, y + 0.8, z + 1.05, 4.4, 0.9, 0.12, M.teal) +
-        box(x + 1.5, y + 0.95, z + 1.17, 0.7, 0.45, 0.45, M.ink) +
-        box(x + 3.8, y + 0.95, z + 1.17, 0.7, 0.45, 0.45, M.ink) +
-        plant(x + 5.4, y + 5.4, z) +
-        plant(x + 0.6, y + 5.4, z)
-      );
-    case 'operating-room': {
-      const [lx, ly] = P(x + 3, y + 3, z + 2.9);
-      const [ta, tb] = [P(x + 2, y + 2, z + 0.95), P(x + 4, y + 4, z + 0.95)];
-      return (
-        box(x + 2.6, y + 2.3, z, 0.8, 1.4, 0.7, M.steel) +
-        box(x + 2.1, y + 1.8, z + 0.7, 1.8, 2.4, 0.22, M.white) +
-        box(x + 2.3, y + 1.9, z + 0.92, 1.4, 0.6, 0.15, M.mint) +
-        box(x + 4.9, y + 0.9, z, 0.3, 0.3, 1.5, M.steel) +
-        box(x + 4.6, y + 0.7, z + 1.5, 0.9, 0.5, 0.7, M.ink) +
-        (faceVisible(0, 1)
-          ? `<polyline class="ecg" points="${ecg(x + 4.62, y + 1.21, z + 1.62)}" fill="none" stroke="#8ef0c8" stroke-width="1.6" stroke-linejoin="round"/>`
-          : '') +
-        `<polygon points="${lx - 26},${ly} ${lx + 26},${ly} ${tb[0]},${tb[1]} ${ta[0]},${ta[1]}" fill="#fffbe6" opacity="0.35"/>` +
-        `<ellipse cx="${lx}" cy="${ly}" rx="30" ry="12" fill="#e9eef3"/>` +
-        `<ellipse cx="${lx}" cy="${ly + 2}" rx="20" ry="7" fill="#fff8d6"/>` +
-        box(x + 2.95, y + 2.95, z + 2.95, 0.1, 0.1, 1.2, M.steel)
-      );
-    }
-    case 'research-office':
-      return (
-        box(x + 0.35, y + 2.6, z, 0.6, 3, 2, M.sand) +
-        (faceVisible(1, 0) ? books(x + 0.95, y + 2.75, z) : '') +
-        desk(x + 1, y + 1, z) +
-        desk(x + 3.6, y + 1, z) +
-        plant(x + 5.3, y + 5.3, z)
-      );
-    case 'laboratory':
-      return (
-        box(x + 0.35, y + 0.9, z, 0.9, 4.2, 0.95, M.white) +
-        box(x + 0.35, y + 0.9, z + 0.95, 0.9, 4.2, 0.1, M.sky) +
-        cylinder(x + 0.8, y + 1.5, z + 1.05, 0.14, 0.45, M.coral) +
-        cylinder(x + 0.8, y + 2.3, z + 1.05, 0.12, 0.6, M.mint) +
-        cylinder(x + 0.8, y + 3.1, z + 1.05, 0.16, 0.35, M.lilac) +
-        cylinder(x + 0.8, y + 3.9, z + 1.05, 0.12, 0.55, M.sand) +
-        cylinder(x + 4.6, y + 1.5, z, 0.55, 0.9, M.steel) +
-        cylinder(x + 4.6, y + 1.5, z + 0.9, 0.3, 0.12, M.ink)
-      );
-    case 'radiology':
-      return (
-        box(x + 2.45, y + 1.1, z, 1.1, 3.9, 0.55, M.white) +
-        box(x + 2.55, y + 3.6, z + 0.55, 0.9, 0.5, 0.15, M.lilac) +
-        uprightRing(x + 3, y + 2.4, z + 1.3, 1.45, 0.8, 1.1, M.cream)
-      );
-    case 'vision-clinic':
-      return (
-        eyeChart(x, y, z) +
-        box(x + 2.6, y + 3.1, z, 0.9, 0.9, 0.5, M.ink) +
-        box(x + 2.6, y + 3.1, z + 0.5, 0.9, 0.25, 0.9, M.ink) +
-        box(x + 4.4, y + 1.6, z, 1.1, 0.9, 0.8, M.white) +
-        cylinder(x + 4.95, y + 2.05, z + 0.8, 0.2, 0.5, M.steel)
-      );
-    case 'general-ward': {
-      let s = '';
-      [M.sky, M.mint, M.lilac].forEach((blanket, i) => {
-        const by = y + 0.5 + i * 1.85;
-        s += box(x + 0.45, by, z, 1.9, 1.05, 0.45, M.white) +
-          box(x + 1.05, by + 0.02, z + 0.45, 1.3, 1.01, 0.12, blanket) +
-          box(x + 0.5, by + 0.15, z + 0.45, 0.45, 0.75, 0.18, M.cream);
-      });
-      return s;
-    }
-    default:
-      return r.kind ? navSuite(r) : '';
-  }
-}
-
-// Every navigated department shares the kit of surgical navigation: a table,
-// an optical tracking camera on its stand, and a planning monitor. One piece
-// on top says which specialty it is.
-function navSuite(r) {
-  const { x, y, z } = r;
-  const base =
-    box(x + 2.55, y + 2.2, z, 0.9, 1.6, 0.65, M.steel) +
-    box(x + 2.1, y + 1.7, z + 0.65, 1.8, 2.6, 0.2, M.white) +
-    // tracking camera: a pole and a bar with two lenses, looking at the table
-    box(x + 5.05, y + 0.85, z, 0.16, 0.16, 2.3, M.steel) +
-    box(x + 4.5, y + 0.8, z + 2.3, 1.2, 0.26, 0.3, M.ink) +
-    cylinder(x + 4.65, y + 1.07, z + 2.37, 0.08, 0.02, M.sky) +
-    cylinder(x + 5.55, y + 1.07, z + 2.37, 0.08, 0.02, M.sky) +
-    // planning monitor on a cart
-    box(x + 0.6, y + 0.8, z, 0.7, 0.5, 0.8, M.white) +
-    box(x + 0.55, y + 0.95, z + 0.8, 0.8, 0.12, 0.6, M.ink);
-  let s = ''; // the specialty piece
-  const top = z + 0.85;
-  switch (r.kind) {
-    case 'spine': // a column of vertebrae on a stand
-      for (let i = 0; i < 5; i++) s += box(x + 2.8, y + 2.1 + i * 0.4, top, 0.4, 0.3, 0.18, M.cream);
-      break;
-    case 'neuro': // a head clamp ring at the head of the table
-    case 'ent':
-      s += uprightRing(x + 3, y + 1.9, top + 0.45, 0.45, 0.3, 0.2, M.steel);
-      break;
-    case 'dental': // a reclining dental chair and its lamp
-      s += box(x + 2.3, y + 3.2, top, 1.4, 0.7, 0.25, M.mint) + box(x + 2.3, y + 1.9, top, 1.4, 0.35, 0.8, M.mint) +
-        box(x + 1.4, y + 2.4, z + 1.9, 0.5, 0.5, 0.12, M.sand);
-      break;
-    case 'cmf': // a skull model
-      s += ball(x + 3, y + 2.5, top + 0.4, 0.4, M.cream) + box(x + 2.75, y + 2.6, top, 0.5, 0.35, 0.2, M.cream);
-      break;
-    case 'ortho':
-    case 'sports':
-    case 'trauma':
-    case 'ir': // a C-arm over the table
-      s += uprightRing(x + 3, y + 3, top + 0.6, 1.2, 0.95, 0.35, M.lilac);
-      break;
-    case 'pulmonology': // a bronchoscope tower
-      s += box(x + 4.6, y + 4.4, z, 0.7, 0.7, 1.6, M.white) + box(x + 4.62, y + 5.05, z + 1.1, 0.6, 0.06, 0.4, M.ink);
-      break;
-    case 'cardio': // an ECG monitor
-      s += box(x + 4.5, y + 4.3, z, 0.9, 0.5, 1.3, M.ink) +
-        (faceVisible(0, 1) ? `<polyline class="ecg" points="${ecg(x + 4.55, y + 4.81, z + 0.8)}" fill="none" stroke="#8ef0c8" stroke-width="1.6"/>` : '');
-      break;
-    case 'oncology': // a tray of instruments
-      s += box(x + 4.3, y + 4.4, z, 1, 0.6, 0.9, M.steel) + box(x + 4.35, y + 4.45, z + 0.9, 0.9, 0.5, 0.05, M.white);
-      break;
-    default: // your own department: a plant to make it homely
-      s += plant(x + 5.2, y + 5.2, z);
-      break;
-  }
-  return detail === 'detailed' ? navSuiteDetailed(r, s) : base + s;
-}
-
-function desk(x, y, z) {
-  return (
-    box(x, y, z, 1.6, 1, 0.75, M.sand) +
-    box(x + 0.4, y + 0.25, z + 0.75, 0.7, 0.5, 0.05, M.ink) +
-    box(x + 0.4, y + 0.22, z + 0.8, 0.7, 0.06, 0.4, M.ink)
-  );
-}
-
-function books(x, y, z) {
-  const colors = ['#e3877a', '#6fb5ae', '#f0c27a', '#a88fc6', '#86a9d6'];
-  let s = '';
-  for (let shelf = 0; shelf < 3; shelf++) {
-    for (let i = 0; i < 5; i++) {
-      const yy = y + 0.1 + i * 0.52;
-      const zz = z + 0.2 + shelf * 0.62;
-      s += poly([[x, yy, zz], [x, yy + 0.4, zz], [x, yy + 0.4, zz + 0.45], [x, yy, zz + 0.45]],
-        colors[(i + shelf * 2) % colors.length]);
-    }
-  }
-  return s;
-}
-
-// A chart board on a thin stand, lettered on whichever face is showing.
-function eyeChart(x, y, z) {
-  let s = box(x + 0.7, y + 0.25, z + 0.8, 1.1, 0.12, 1.3, M.white) + box(x + 1.2, y + 0.27, z, 0.1, 0.08, 0.8, M.steel);
-  const yy = faceVisible(0, 1) ? y + 0.371 : y + 0.249;
-  const rows = [0.8, 0.62, 0.46, 0.34, 0.24];
-  rows.forEach((w, i) => {
-    const zz = z + 1.9 - i * 0.24;
-    const x0 = x + 1.25 - w / 2;
-    s += poly([[x0, yy, zz], [x0 + w, yy, zz], [x0 + w, yy, zz - 0.1], [x0, yy, zz - 0.1]], M.ink.left);
-  });
-  return s;
-}
-
-function ecg(x, y, z) {
-  const pattern = [0, 0, 0.05, -0.1, 0.25, -0.15, 0, 0, 0.05, 0];
-  return pattern
-    .map((dz, i) => {
-      const [sx, sy] = P(x + i * 0.07, y, z + 0.25 + dz);
-      return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+  return roomItems(id)
+    .map((it, n) => {
+      const [w, d] = itemSize(it);
+      return { depth: viewDepth(r.x + it.at[0] + w / 2, r.y + it.at[1] + d / 2), s: drawItem(it, itemSizes[it.kind] ?? [1, 1], { ox: r.x, oy: r.y, z: r.z, detail, room: r, seed: n }) };
     })
-    .join(' ');
+    .sort((p, q) => p.depth - q.depth)
+    .map((p) => p.s)
+    .join('');
+}
+
+// Tiles a doorway lands on (the middle two of a side with a bridge or
+// stairs): kept clear so nobody walks into a wardrobe.
+export function doorwayTiles(id) {
+  const out = [];
+  for (const side of doorways(id)) {
+    for (const k of [2, 3]) {
+      if (side === 'north') out.push([k, 0]);
+      if (side === 'south') out.push([k, SIZE - 1]);
+      if (side === 'west') out.push([0, k]);
+      if (side === 'east') out.push([SIZE - 1, k]);
+    }
+  }
+  return out;
+}
+
+// Screen outline of one floor tile of a room, for placing items.
+export function roomTile(id, i, j) {
+  const r = LAYOUT[id];
+  const [x, y] = [r.x + i, r.y + j];
+  return [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(([a, b]) => P(a, b, r.z));
+}
+
+// A see-through preview of an item about to be placed, and the tiles it
+// covers; `remove` outlines what would be taken away instead.
+export function itemPreview(id, { kind, at, turn, tiles, remove, blocked }) {
+  const r = LAYOUT[id];
+  if (!r) return '';
+  const cls = remove ? 'ghost-foot remove' : blocked ? 'ghost-foot remove' : 'ghost-foot';
+  let s = tiles.map(([i, j]) => `<polygon class="${cls}" points="${roomTile(id, i, j).map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>`).join('');
+  if (!remove && kind) s += `<g class="ghost-plant">${drawItem({ kind, at, turn }, itemSizes[kind] ?? [1, 1], { ox: r.x, oy: r.y, z: r.z, detail, room: r })}</g>`;
+  return s;
+}
+
+// A small picture of an item, for the decorating panel.
+export function itemThumb(kind, roomId) {
+  const [w, d] = itemSizes[kind] ?? [1, 1];
+  const [cx, cy] = P(w / 2, d / 2, 0.8);
+  const span = 70 + Math.max(w, d) * 45;
+  const room = roomId ? LAYOUT[roomId] : undefined;
+  return `<svg class="thumb" viewBox="${(cx - span / 2).toFixed(1)} ${(cy - span / 2).toFixed(1)} ${span.toFixed(0)} ${span.toFixed(0)}" aria-hidden="true">${drawItem({ kind, at: [0, 0] }, [w, d], { ox: 0, oy: 0, z: 0, detail, room })}</svg>`;
 }
 
 // Scenery: two garden islands, one to the lower left and a lower one to
@@ -632,28 +477,12 @@ export function plantThumb(kind, big) {
   return `<svg class="thumb" viewBox="${(cx - w / 2).toFixed(1)} ${(cy - w / 2).toFixed(1)} ${w} ${w}" aria-hidden="true">${drawPlant(kind, 0, 0, 0, 3, false)}</svg>`;
 }
 
-// A small picture of a room decoration, for the decorating panel.
-export function decorThumb(id) {
-  const [cx, cy] = P(0, 0, 0.75);
-  return `<svg class="thumb" viewBox="${(cx - 45).toFixed(1)} ${(cy - 45).toFixed(1)} 90 90" aria-hidden="true">${drawDecoration(id, 0, 0, 0)}</svg>`;
-}
-
 // A swatch of a floor in a room's own colours.
 export function floorThumb(kind, roomId) {
   const body = bodyOf(roomId);
   const [a, b] = floorTones(body.base ?? body.left, activeTheme);
   const [cx, cy] = P(1.5, 1.5, 0);
   return `<svg class="thumb" viewBox="${(cx - 100).toFixed(1)} ${(cy - 50).toFixed(1)} 200 100" aria-hidden="true">${drawFloor(kind, 0, 0, 0, 3, 3, { a, b, body, seed: 7 })}</svg>`;
-}
-
-// A see-through preview of a decoration on one of a room's spots; with no
-// decoration, the spot is outlined to show it would be cleared.
-export function decorPreview(roomId, index, id) {
-  const spot = decorSpots(roomId)[index];
-  if (!spot) return '';
-  const [x, y, z] = spot;
-  const ring = [[x - 0.45, y - 0.45], [x + 0.45, y - 0.45], [x + 0.45, y + 0.45], [x - 0.45, y + 0.45]].map(([a, b]) => P(a, b, z).map((v) => v.toFixed(1)).join(',')).join(' ');
-  return `<polygon class="ghost-foot${id ? '' : ' remove'}" points="${ring}"/>${id ? `<g class="ghost-plant">${drawDecoration(id, x, y, z)}</g>` : ''}`;
 }
 
 // Screen box around a garden, for zooming in.
@@ -693,12 +522,13 @@ export function buildScene(theme, options = {}) {
   decorState = options.decor ?? { rooms: {}, gardens: {} };
   defaultGardens = options.defaultGardens ?? {};
   plantSize = Object.fromEntries((options.plants ?? []).map((p) => [p.id, [p.w, p.d]]));
+  itemSizes = Object.fromEntries((options.roomItems ?? []).map((p) => [p.id, [p.w, p.d]]));
+  defaultRoomItems = options.defaultRoomItems ?? {};
   applyTheme(theme);
   const items = [];
   for (const [id, r] of Object.entries(LAYOUT)) {
     const depth = viewDepth(r.x + SIZE / 2, r.y + SIZE / 2);
-    const extra = decorations(id, r);
-    items.push({ depth, s: column(id, r) + floor(id, r) + walls(id, r) + extra.back + furniture(id, r) + extra.front });
+    items.push({ depth, s: column(id, r) + floor(id, r) + walls(id, r) + furniture(id, r) });
   }
   for (const c of CONNECTORS) {
     const ra = LAYOUT[c.a];

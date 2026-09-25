@@ -10,7 +10,7 @@
 | **Grid / cell** | Rooms sit on a grid of cells `[col, row]`. The core 3 × 3 is cells 0..2; departments go in the ring around it (-1..3), up to 5 × 5. |
 | **Department** | A room the user adds from a list of surgical-navigation specialties (or a custom name), saved in `layout.json`. It joins the room beside it (`via`) by a bridge or stairs. |
 | **Decor** | What the user chose to make the hospital their own, saved in `decor.json` next to `layout.json`: a **floor** per room, a **decoration** on each of a room's three **spots**, and what grows in each **garden**. |
-| **Spot** | A place on a room's floor, clear of furniture, doorways and people, that takes one decoration. Only decorations that belong in that room are offered (a specimen fridge in the Laboratory, a crash cart in the Operating Room). |
+| **Room item** | Anything standing in a room, placed on its 6 × 6 tile grid: the furniture every room starts with, decorations and fun extras. Any item may go in any room (`suits` only orders the list); doorways stay clear. Decoration spots of earlier versions become items on the grid. |
 | **Garden** / **plot** | A green island people plant: the built-in Garden and Grove (`SCENERY` in `rooms.js`) and any the user adds in the ring (`layout.gardens`, ids `plot-N`). Each is a plot of 4 × 4 tiles. Plants cover 1 tile, a bench 2, and a big tree, blossom tree, cherry blossom or fountain 2 × 2. A garden is never a room and never a way in to a department. |
 | **Gust** | A burst of wind every minute or two: garden plants sway and petals (or leaves) blow across the stage. Off under reduced motion. |
 | **Stream** | The entries of one actor in one file: a file's own turns, or its sidechain entries grouped by `agentId`. |

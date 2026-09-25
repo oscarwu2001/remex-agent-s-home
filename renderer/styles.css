@@ -718,3 +718,12 @@ details > summary h2 { margin: 0; }
 .piece[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
 .spot-mark.chosen circle { fill: var(--ink); }
 .spot-mark.chosen ellipse { stroke: var(--ink); stroke-dasharray: none; stroke-width: 3; }
+
+/* ---- room editor --------------------------------------------------------------- */
+
+.plot-tile.lifted { fill-opacity: 0.35; stroke-dasharray: none; stroke-width: 2.5; }
+.pieces.tools { grid-template-columns: repeat(2, 1fr); }
+.piece.tool { min-height: 40px; font-weight: 600; align-content: center; }
+.piece .size { font-size: 10px; color: var(--ink-muted); font-weight: 600; }
+.pieces-h { margin: var(--s-2) 0 var(--s-1); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); }
+.more-pieces summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent); margin: var(--s-1) 0 var(--s-2); }

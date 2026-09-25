@@ -22,7 +22,7 @@ const config = () => ({
   gardens: gardensWith(layout),
   decor,
   decorCatalogue: {
-    floors: D.FLOORS, defaultFloor: D.DEFAULT_FLOOR, spotsPerRoom: D.SPOTS_PER_ROOM, decorations: D.DECORATIONS,
+    floors: D.FLOORS, defaultFloor: D.DEFAULT_FLOOR, roomSize: D.ROOM_SIZE, roomItems: D.ROOM_ITEMS, defaultRoomItems: D.DEFAULT_ROOM_ITEMS,
     gardenSize: D.GARDEN_SIZE, plants: D.PLANTS, defaultGardens: D.DEFAULT_GARDENS,
   },
   platform: 'browser', version: 'preview',
