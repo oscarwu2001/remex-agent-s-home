@@ -311,7 +311,7 @@ app.whenReady().then(() => {
     child.stdout.on('data', () => {}); // nothing printed in stats-only mode
     child.on('message', (result) => {
       answered = true;
-      const reply = result && result.ok ? { ok: true, days: result.days, agents: result.agents, seen: result.seen ?? [] }
+      const reply = result && result.ok ? { ok: true, days: result.days, agents: result.agents, seen: result.seen ?? [], tokensByDay: result.tokensByDay ?? {} }
         : { ok: false, error: (result && result.error) || 'The numbers could not be worked out.' };
       if (reply.ok) agentStats = { at: Date.now(), result: reply };
       resolve(reply);

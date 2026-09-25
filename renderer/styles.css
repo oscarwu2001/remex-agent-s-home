@@ -751,3 +751,13 @@ body.in-meadow .camera.meadow-only { display: flex; }
 .spark { display: flex; align-items: flex-end; gap: 3px; height: 36px; margin: var(--s-2) 0; }
 .spark span { flex: 1; min-height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.8; }
 .meadow-panel .title-row h2 { margin: 0; }
+/* The Meadow: growing up */
+.grow-bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; margin: var(--s-2) 0 2px; }
+.grow-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.grow-bar + .hint { margin-top: 0; }
+.grow-note { margin: var(--s-2) 0; font-weight: 700; color: var(--ink); }
+.rarity { margin: 2px 0 0; font-size: 13px; font-weight: 700; color: var(--ink-muted); }
+.rarity-sr, .rarity-ssr { color: var(--ink); }
+.button.evolve { margin: var(--s-2) 0; width: 100%; }
+.starters .piece small { color: var(--ink-muted); font-weight: 400; }
+.starters .thumb { width: 64px; height: 64px; }

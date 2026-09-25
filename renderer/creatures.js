@@ -135,7 +135,7 @@ const BUILD = {
     snoutOn(head, 2.2, 1.2, 0.3, 'belly', 'pink');
     face(head, { snout: 1 });
     for (const s of [-1, 1]) {
-      const ear = top(head, s * 1.4, 2.4, 1.2, 0.8, 1.2, 'body');
+      const ear = top(head, s * 1.4, 2.4, 1.2, 0.8, 1.2, 'body', { tag: 'ear' });
       on(ear, 'front', ear.a, ear.z + 0.15, 0.6, 0.7, 'pink', 0.08);
     }
     const tail = blk(0, -3.2, 2.8, 0.8, 0.8, 3.2, 'body', { wag: 1 });
@@ -165,7 +165,7 @@ const BUILD = {
     snoutOn(head, 1.6, 0.8, 0.2, 'belly', 'pink');
     face(head, { snout: 1 });
     for (const s of [-1, 1]) {
-      const ear = top(head, s * 1.0, 1.9, 1.0, 0.7, 3.2, 'body');
+      const ear = top(head, s * 1.0, 1.9, 1.0, 0.7, 3.2, 'body', { tag: 'ear' });
       on(ear, 'front', ear.a, ear.z + 0.4, 0.5, 2.2, 'accent', 0.08);
     }
     parts.push(body, head, blk(0, -2.7, 1.8, 1.4, 1.2, 1.4, 'belly', { wag: 1 }));
@@ -180,7 +180,7 @@ const BUILD = {
     snoutOn(head, 1.8, 1.2, 1.0);
     face(head, { snout: 1 });
     for (const s of [-1, 1]) {
-      const ear = top(head, s * 1.35, 2.6, 1.2, 0.6, 1.6, 'body');
+      const ear = top(head, s * 1.35, 2.6, 1.2, 0.6, 1.6, 'body', { tag: 'ear' });
       top(ear, ear.a, ear.b, 0.8, 0.6, 0.5, 'accent');
     }
     parts.push(body, head,
@@ -193,12 +193,12 @@ const BUILD = {
     legs(parts, 1.5, 1.6, -1.9, 1.3, 1.3, 1.4);
     const body = blk(0, -0.3, 1.4, 4.2, 5.2, 3.0, 'body');
     on(body, 'front', 0, 1.6, 2.6, 2.2, 'belly');
-    for (const b of [-2, -0.6, 0.8]) top(body, 0, b, 0.8, 0.8, 0.7, 'accent');
+    for (const b of [-2, -0.6, 0.8]) top(body, 0, b, 0.8, 0.8, 0.7, 'accent', { tag: 'spike' });
     const head = blk(0, 3.0, 3.4, 3.8, 3.6, 3.2, 'body');
     const snout = on(head, 'front', 0, head.z + 0.3, 2.6, 1.4, 'body', 1.0);
     for (const s of [-1, 1]) on(snout, 'front', s * 0.6, snout.z + 0.8, 0.35, 0.35, 'ink', 0.1);
     face(head, { snout: 1 });
-    for (const s of [-1, 1]) top(head, s * 1.2, 2.0, 0.6, 0.6, 1.2, 'belly');
+    for (const s of [-1, 1]) top(head, s * 1.2, 2.0, 0.6, 0.6, 1.2, 'belly', { tag: 'horn' });
     for (const s of [-1, 1]) parts.push(blk(s * 2.5, -0.6, 3.4, 0.4, 3.0, 2.4, 'accent', { flap: 1 }));
     parts.push(body, head,
       blk(0, -3.7, 1.8, 1.6, 2.6, 1.4, 'body', { wag: 1 }),
@@ -211,7 +211,7 @@ const BUILD = {
     const body = blk(0, -0.4, 2.0, 4.2, 5.0, 3.6, 'body');
     on(body, 'front', 0, 2.3, 2.6, 2.6, 'belly');
     for (const s of [-1, 1]) on(body, 'front', s * 1.3, 4.0, 0.6, 0.6, 'body', 1.0);
-    for (const b of [-1.8, -0.2, 1.4]) top(body, 0, b, 0.6, 1.0, 1.0, 'accent');
+    for (const b of [-1.8, -0.2, 1.4]) top(body, 0, b, 0.6, 1.0, 1.0, 'accent', { tag: 'spike' });
     const head = blk(0, 2.6, 5.0, 4.0, 4.4, 3.2, 'body');
     on(head, 'front', 0, 5.3, 3.0, 0.8, 'belly', 0.2);
     face(head, { snout: 1 });
@@ -223,8 +223,8 @@ const BUILD = {
   fish(L) {
     const body = blk(0, 0, 0.6, 2.4, 4.4, 3.2, 'body');
     wrap(body, 1.2, 1.2, 'belly', 0.05, 1.0, 0.6);
-    top(body, 0, -0.4, 0.4, 1.8, 0.9, 'accent');
-    for (const side of ['left', 'right']) on(body, side, 0.4, 1.4, 1.0, 0.7, 'accent', 0.3);
+    top(body, 0, -0.4, 0.4, 1.8, 0.9, 'accent', { tag: 'fin' });
+    for (const side of ['left', 'right']) on(body, side, 0.4, 1.4, 1.0, 0.7, 'accent', 0.3, { tag: 'fin' });
     face(body, { eye: 0.9 });
     return { parts: [body, blk(0, -2.9, 0.8, 0.4, 1.6, 2.8, 'accent', { wag: 2 })], body, head: body };
   },
@@ -236,7 +236,7 @@ const BUILD = {
     const head = blk(0, 0.6, 4.4, 3.2, 3.0, 2.6, 'body');
     on(head, 'front', 0, head.z + 0.6, 1.0, 0.6, 'accent', 1.0);
     face(head, { snout: 1 });
-    top(head, 0, 0.4, 0.4, 0.8, 0.9, 'accent');
+    top(head, 0, 0.4, 0.4, 0.8, 0.9, 'accent', { tag: 'crest' });
     for (const s of [-1, 1]) parts.push(blk(s * 2.0, -0.4, 2.2, 0.4, 2.4, 1.8, 'body', { flap: 1 }));
     parts.push(body, head, blk(0, -2.4, 3.0, 1.6, 1.2, 0.8, 'body', { wag: 0.5 }));
     return { parts, body, head };
@@ -246,7 +246,7 @@ const BUILD = {
     legs(parts, 1.6, 1.4, -1.6, 1.2, 1.2, 0.9, 'belly');
     const body = blk(0, -0.2, 0.7, 4.6, 4.6, 2.0, 'body');
     wrap(body, 0.7, 0.4, 'belly', 0.1);
-    const cap = top(body, 0, -0.2, 3.2, 3.2, 0.7, 'body');
+    const cap = top(body, 0, -0.2, 3.2, 3.2, 0.7, 'body', { tag: 'cap' });
     for (const [a, b] of [[-0.8, -1], [0.8, -1], [-0.8, 0.6], [0.8, 0.6]]) top(cap, a, b, 1.0, 1.0, 0.12, 'accent');
     const head = blk(0, 3.0, 1.2, 2.4, 2.2, 2.0, 'belly');
     face(head, { eye: 0.9 });
@@ -260,7 +260,7 @@ const BUILD = {
     const head = blk(0, 3.0, 0.8, 4.6, 3.0, 2.4, 'body');
     face(head);
     for (const side of ['left', 'right']) {
-      for (const [b, dz] of [[2.2, 0.6], [3.0, 1.3], [3.8, 0.6]]) on(head, side, b, head.z + dz + 0.6, 0.4, 0.4, 'accent', 0.9);
+      for (const [b, dz] of [[2.2, 0.6], [3.0, 1.3], [3.8, 0.6]]) on(head, side, b, head.z + dz + 0.6, 0.4, 0.4, 'accent', 0.9, { tag: 'gill' });
     }
     const tail = blk(0, -4.6, 1.0, 0.6, 3.4, 1.8, 'body', { wag: 1.5 });
     top(tail, 0, -4.8, 0.6, 2.6, 0.4, 'accent');
@@ -346,23 +346,263 @@ function accessory(L, H) {
   }
 }
 
+// ---- growing up: three stages each ---------------------------------------------------
+
+export const STAGE_NAMES = {
+  cat: ['Mewkit', 'Prowlcat', 'Leonmane'], dog: ['Puplet', 'Barkley', 'Wardhound'],
+  bunny: ['Bunbun', 'Hopscotch', 'Moonhare'], fox: ['Foxling', 'Twintail', 'Kitsune'],
+  dragon: ['Drakelet', 'Drake', 'Skywyrm'], dinosaur: ['Dinoling', 'Stompasaur', 'Tricerex'],
+  fish: ['Guppip', 'Finnick', 'Leviafin'], bird: ['Chirplet', 'Songwing', 'Skyroc'],
+  turtle: ['Shellet', 'Mossback', 'Grovetoise'], axolotl: ['Axolit', 'Gillbert', 'Axoloking'],
+};
+
+const walk = (p, f) => {
+  f(p);
+  for (const k of p.kids ?? []) walk(k, f);
+};
+const tagged = (m, tag) => {
+  const out = [];
+  for (const p of m.parts) walk(p, (q) => { if (q.tag === tag) out.push(q); });
+  return out;
+};
+const shiftTree = (p, dz) => walk(p, (q) => { q.z += dz; });
+function scaleTree(p, s, ca, cb, cz) {
+  walk(p, (q) => {
+    q.a = ca + (q.a - ca) * s;
+    q.b = cb + (q.b - cb) * s;
+    q.z = cz + (q.z - cz) * s;
+    q.w *= s;
+    q.d *= s;
+    q.h *= s;
+  });
+}
+// Make a block taller, carrying what sits on top of it.
+function taller(p, dh) {
+  p.h += dh;
+  for (const k of p.kids ?? []) if (k.face === 'top') shiftTree(k, dh);
+}
+const clone = (p) => JSON.parse(JSON.stringify(p));
+
+// A baby: short legs and a big head.
+function babyfy(m) {
+  const legs = m.parts.filter((p) => p.leg !== undefined);
+  const cut = legs.length ? Math.min(...legs.map((l) => l.h)) * 0.4 : 0;
+  for (const p of m.parts) {
+    if (p.leg !== undefined) p.h -= cut;
+    else shiftTree(p, -cut);
+  }
+  if (m.head !== m.body) scaleTree(m.head, 1.15, m.head.a, m.head.b, m.head.z);
+  for (const w of m.parts.filter((p) => p.flap)) scaleTree(w, 0.6, w.a, w.b, w.z);
+}
+
+// A ruff or mane standing behind the head.
+const ruff = (m, c, grow = 1.2) => {
+  const H = m.head;
+  m.parts.push(blk(H.a, H.b - H.d * 0.25, H.z - grow * 0.4, H.w + grow, H.d * 0.5, H.h + grow, c));
+};
+const collar = (m, c, tag = 'gold') => {
+  const H = m.head;
+  wrap(H, H.z, 0.5, c, 0.15);
+  on(H, 'front', 0, H.z - 0.45, 0.7, 0.7, tag, 0.45);
+};
+const tails = (m) => m.parts.filter((p) => p.wag);
+
+// What each evolution adds, [second stage, third stage]; the third stage
+// gets both.
+const EVOLVE = {
+  cat: [
+    (m) => {
+      collar(m, 'accent');
+      for (const ear of tagged(m, 'ear')) top(ear, ear.a, ear.b, 0.5, 0.4, 0.6, 'accent');
+    },
+    (m) => {
+      ruff(m, 'accent', 2.0);
+      for (const t of tails(m)) taller(t, 1);
+    },
+  ],
+  dog: [
+    (m) => collar(m, 'band'),
+    (m) => {
+      ruff(m, 'accent', 1.4);
+      for (const b of [-1.4, 0, 1.4]) top(m.body, 0, m.body.b + b, m.body.w * 0.7, 1.0, 0.3, 'gold');
+    },
+  ],
+  bunny: [
+    (m) => { for (const ear of tagged(m, 'ear')) taller(ear, 1.0); },
+    (m) => {
+      for (const ear of tagged(m, 'ear')) taller(ear, 0.8);
+      const H = m.head;
+      on(H, 'front', -0.3, H.z + H.h * 0.8, 0.5, 0.5, 'gold', 0.2);
+      on(H, 'front', 0.2, H.z + H.h * 0.85, 0.5, 0.35, 'gold', 0.2);
+      ruff(m, 'belly', 0.9);
+    },
+  ],
+  fox: [
+    (m) => {
+      const more = tails(m).map(clone);
+      for (const t of tails(m)) t.a -= 0.9;
+      for (const t of more) t.a += 0.9;
+      m.parts.push(...more);
+    },
+    (m) => {
+      const [t1, t2] = tails(m).filter((t) => t.c === 'body');
+      const tips = tails(m).filter((t) => t.c !== 'body');
+      const mid = [clone(t1), clone(tips[0])];
+      for (const t of mid) { t.a = 0; t.z += 1.0; }
+      for (const t of [t1, tips[0]]) t.a = -1.5;
+      for (const t of [t2, tips[1]]) t.a = 1.5;
+      m.parts.push(...mid);
+      for (const tip of tails(m).filter((t) => t.c !== 'body')) top(tip, tip.a, tip.b, 0.8, 0.6, 0.6, 'gold');
+    },
+  ],
+  dragon: [
+    (m) => {
+      for (const h of tagged(m, 'horn')) taller(h, 0.8);
+      for (const w of m.parts.filter((p) => p.flap)) Object.assign(w, { d: 3.6, h: 2.8 });
+    },
+    (m) => {
+      for (const w of m.parts.filter((p) => p.flap)) Object.assign(w, { d: 4.8, h: 3.6, a: Math.sign(w.a) * 2.8, z: w.z + 0.4 });
+      for (const sp of tagged(m, 'spike')) taller(sp, 0.6);
+      for (const h of tagged(m, 'horn')) taller(h, 0.6);
+      m.parts.push(blk(0, -6.6, 1.9, 0.8, 1.2, 0.8, 'accent', { wag: 2 }));
+    },
+  ],
+  dinosaur: [
+    (m) => { for (const sp of tagged(m, 'spike')) taller(sp, 0.6); },
+    (m) => {
+      const H = m.head;
+      for (const s of [-1, 1]) on(H, 'front', s * 1.0, H.z + H.h * 0.72, 0.5, 0.5, 'belly', 1.4);
+      on(H, 'front', 0, H.z + H.h * 0.35, 0.5, 0.6, 'belly', 0.9);
+      m.parts.push(blk(H.a, H.b - H.d / 2 - 0.3, H.z + 0.4, H.w + 1.6, 0.6, H.h + 1.2, 'accent'));
+    },
+  ],
+  fish: [
+    (m) => { for (const f of tagged(m, 'fin')) f.face === 'top' ? taller(f, 0.6) : (f.h += 0.4); },
+    (m) => {
+      top(m.body, 0, m.body.b + 1.2, 0.5, 0.5, 0.7, 'gold');
+      for (const t of tails(m)) Object.assign(t, { h: t.h + 1, d: t.d + 0.6 });
+      for (const s of [-1, 1]) on(m.body, 'front', s * 0.8, m.body.z + 0.4, 0.25, 0.9, 'accent', 0.5);
+    },
+  ],
+  bird: [
+    (m) => {
+      for (const c of tagged(m, 'crest')) taller(c, 0.6);
+      top(m.head, -0.35, 0.1, 0.3, 0.6, 0.9, 'accent');
+      top(m.head, 0.35, 0.1, 0.3, 0.6, 0.9, 'accent');
+      for (const t of tails(m)) t.d += 0.8;
+    },
+    (m) => {
+      for (const w of m.parts.filter((p) => p.flap)) Object.assign(w, { d: 3.2, h: 2.6, a: Math.sign(w.a) * 2.1 });
+      for (const c of tagged(m, 'crest')) c.c = 'gold';
+    },
+  ],
+  turtle: [
+    (m) => {
+      const [cap] = tagged(m, 'cap');
+      top(cap, -0.6, cap.b + 0.8, 1.2, 0.9, 0.25, 'green');
+      top(cap, 0.7, cap.b - 0.7, 0.9, 1.1, 0.25, 'green');
+    },
+    (m) => {
+      const [cap] = tagged(m, 'cap');
+      const trunk = top(cap, 0, cap.b, 0.5, 0.5, 1.4, 'straw');
+      const crown = top(trunk, 0, cap.b, 2.2, 2.2, 1.4, 'petal');
+      top(crown, 0, cap.b, 1.2, 1.2, 0.7, 'petal');
+    },
+  ],
+  axolotl: [
+    (m) => {
+      for (const g of tagged(m, 'gill')) {
+        g.w += 0.6;
+        g.a += Math.sign(g.a - m.head.a) * 0.3;
+      }
+    },
+    (m) => {
+      for (const g of tagged(m, 'gill')) on(g, g.a > m.head.a ? 'right' : 'left', g.b, g.z, 0.4, 0.4, 'gold', 0.4);
+      top(m.body, 0, m.body.b, 0.4, m.body.d * 0.8, 0.6, 'accent');
+    },
+  ],
+};
+
 const models = new Map();
-function modelOf(species, variant) {
-  const key = `${species}:${variant}`;
+function modelOf(species, variant, stage = 2) {
+  const key = `${species}:${variant}:${stage}`;
   if (!models.has(key)) {
-    const L = lookOf(species, variant);
+    const L = { ...lookOf(species, variant), straw: '#d9a86c' };
     const m = BUILD[species](L);
+    if (stage >= 2) EVOLVE[species][0](m, L);
+    if (stage >= 3) EVOLVE[species][1](m, L);
+    if (stage <= 1) babyfy(m);
     markings(L, m.body);
     accessory(L, m.head);
-    let height = 0;
-    const reach = (p) => {
-      height = Math.max(height, p.z + p.h);
-      for (const k of p.kids ?? []) reach(k);
-    };
-    m.parts.forEach(reach);
-    models.set(key, { ...m, L, height, length: Math.max(...m.parts.map((p) => p.b + p.d / 2)) - Math.min(...m.parts.map((p) => p.b - p.d / 2)) });
+    models.set(key, finish({ ...m, L }));
   }
   return models.get(key);
+}
+
+function finish(m) {
+  let height = 0;
+  for (const p of m.parts) walk(p, (q) => { height = Math.max(height, q.z + q.h); });
+  const length = Math.max(...m.parts.map((p) => p.b + p.d / 2)) - Math.min(...m.parts.map((p) => p.b - p.d / 2));
+  return { ...m, height, length };
+}
+
+// ---- eggs -----------------------------------------------------------------------------
+
+// Every agent starts as an egg in a straw nest. The shell's colours come
+// from the agent's name; cracks show as it nears hatching.
+const EGG_COLOURS = [
+  ['#fff4e0', '#f3a6c0'], ['#e9f4ff', '#8fb4f0'], ['#effbf3', '#7fd3a6'], ['#fdf0ff', '#c3a8ef'], ['#fff9d9', '#f6c26b'],
+  ['#fff0ea', '#f09a7a'], ['#eefcff', '#6fcfc0'], ['#f6f1ff', '#9d8fe0'], ['#fffaf0', '#e0b36b'], ['#fbeff5', '#e27fa3'],
+];
+const EGG_LAYERS = [[2.6, 0.6], [3.4, 0.8], [3.8, 1.0], [3.8, 1.0], [3.4, 0.8], [2.8, 0.7], [1.8, 0.6]];
+
+function eggModel(seed, crack) {
+  const [shell, spot] = EGG_COLOURS[seed % EGG_COLOURS.length];
+  const L = { shell, spot, straw: '#e3b77a', straw2: '#c99a5c' };
+  const parts = [];
+  for (const [a, b, w, d, c] of [[0, 2.5, 5.6, 0.8, 'straw'], [0, -2.5, 5.6, 0.8, 'straw2'], [2.5, 0, 0.8, 4.2, 'straw2'], [-2.5, 0, 0.8, 4.2, 'straw']]) {
+    parts.push(blk(a, b, 0, w, d, 0.7, c, { nest: 1 }));
+  }
+  let z = 0.3;
+  const layers = EGG_LAYERS.map(([w, h]) => {
+    const p = blk(0, 0, z, w, w, h, 'shell', { egg: 1 });
+    z += h;
+    return p;
+  });
+  // Spots in a pattern that depends on the name.
+  const pick = (i) => (seed >>> (i * 3)) % 3;
+  on(layers[2], 'front', [-1, 0, 1][pick(1)] * 0.9, layers[2].z + 0.3, 0.8, 0.6, 'spot', 0.1);
+  on(layers[3], 'right', [-1, 0, 1][pick(2)] * 0.9, layers[3].z + 0.2, 0.8, 0.6, 'spot', 0.1);
+  on(layers[4], 'front', [-1, 0, 1][pick(3)] * 0.7, layers[4].z + 0.2, 0.6, 0.5, 'spot', 0.1);
+  on(layers[1], 'left', [-1, 0, 1][pick(4)] * 0.8, layers[1].z + 0.2, 0.7, 0.5, 'spot', 0.1);
+  top(layers[6], 0.3, 0.2, 0.6, 0.6, 0.05, 'spot');
+  if (crack >= 1) {
+    for (const [a, dz] of [[-0.9, 0.5], [-0.5, 0.2], [-0.1, 0.5], [0.3, 0.2]]) on(layers[3], 'front', a, layers[3].z + dz, 0.35, 0.3, 'ink', 0.12);
+  }
+  if (crack >= 2) {
+    for (const [a, dz] of [[0.7, 0.4], [1.1, 0.1]]) on(layers[3], 'front', a, layers[3].z + dz, 0.35, 0.3, 'ink', 0.12);
+    for (const [a, dz] of [[-0.6, 0.3], [-0.2, 0.0], [0.2, 0.3]]) on(layers[4], 'right', a, layers[4].z + dz, 0.35, 0.3, 'ink', 0.12);
+  }
+  parts.push(...layers);
+  return finish({ parts, body: layers[3], head: layers[3], L });
+}
+
+const eggs = new Map();
+export function drawEgg(seed, pose) {
+  const crack = pose.progress >= 0.9 ? 2 : pose.progress >= 0.5 ? 1 : 0;
+  const key = `${seed}:${crack}`;
+  if (!eggs.has(key)) eggs.set(key, eggModel(seed, crack));
+  const m = eggs.get(key);
+  // A ready egg rocks in its nest now and then.
+  const t = pose.time ?? 0;
+  const rock = pose.ready && Math.sin(t * 1.3) > 0.55 ? Math.sin(t * 14) * 0.35 : 0;
+  return drawModel(m, { ...pose, step: null, rock, sparkle: pose.ready ? 'ready' : pose.rarity });
+}
+
+export function eggSeed(name) {
+  let h = 2166136261;
+  for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return h;
 }
 
 // ---- drawing ------------------------------------------------------------------------
@@ -380,10 +620,13 @@ export function setCreatureLight(theme, phase) {
   mats.clear();
 }
 
-function material(L, c) {
+// `glow` (0..1) washes a colour toward white: the flash of an evolution.
+function material(L, c, glow = 0) {
   const hex = L[c] ?? FIXED[c] ?? c;
-  if (!mats.has(hex)) mats.set(hex, shade(TONE(hex), THEME));
-  return mats.get(hex);
+  const g = Math.round(glow * 10) / 10;
+  const key = `${hex}${g}`;
+  if (!mats.has(key)) mats.set(key, shade(TONE(g ? mix(hex, '#ffffff', g) : hex), THEME));
+  return mats.get(key);
 }
 
 // The four ways a creature can face, as its forward step in world axes.
@@ -405,17 +648,25 @@ export function facingViewer() {
   return best;
 }
 
-// Place a creature. `pose` = { x, y, z, scale, facing, step } where step is
-// the walk cycle in radians (legs lift in turn, wings flap, tails wag), or
-// null when standing still. Returns SVG, the height in world units, and
-// the screen points it covers (for thumbnails).
+const SPARKS = { SR: ['#f6cf4f', '#f6cf4f'], SSR: ['#ff9ec4', '#ffe07a', '#9fe3cf', '#a9c4f5'], ready: ['#ffe07a', '#ffffff', '#ffe07a'] };
+
+// Place a creature. `pose` = { x, y, z, ground, scale, facing, step, stage,
+// rarity, time, glow } where step is the walk cycle in radians (legs lift
+// in turn, wings flap, tails wag), or null when standing still; `ground` is
+// the height of the ground under it (for the shadow, when it flies).
+// Returns SVG, the height in world units, and the screen points it covers.
 export function drawCreature(species, variant, pose) {
-  const { x, y, z = 0, scale = 1, facing = 0, step = null } = pose;
-  const m = modelOf(species, variant);
+  const m = modelOf(species, variant, pose.stage ?? 2);
+  return drawModel(m, { ...pose, sparkle: pose.rarity });
+}
+
+function drawModel(m, pose) {
+  const { x, y, z = 0, scale = 1, facing = 0, step = null, time = 0, glow = 0, rock = 0 } = pose;
+  const ground = pose.ground ?? z;
   const k = scale * 0.13;
   const [fx, fy] = FACINGS[facing];
   const [rx, ry] = [fy, -fx]; // the creature's right hand
-  const hop = step === null ? 0 : Math.abs(Math.sin(step)) * 0.9;
+  const hop = step === null || pose.flying ? 0 : Math.abs(Math.sin(step)) * 0.9;
   const pts = [];
 
   const world = (a, b) => [x + (a * rx + b * fx) * k, y + (a * ry + b * fy) * k];
@@ -432,7 +683,7 @@ export function drawCreature(species, variant, pose) {
 
   function emit(p, da, dz) {
     const b = place(p, da, dz);
-    let s = box(...b, material(m.L, p.c));
+    let s = box(...b, material(m.L, p.c, glow));
     pts.push(P(b[0], b[1], b[2]), P(b[0] + b[3], b[1] + b[4], b[2]), P(b[0] + b[3], b[1], b[2] + b[5]), P(b[0], b[1] + b[4], b[2] + b[5]));
     for (const kid of p.kids ?? []) {
       if (normal[kid.face] && !faceVisible(...normal[kid.face])) continue;
@@ -443,10 +694,10 @@ export function drawCreature(species, variant, pose) {
 
   const moving = step !== null;
   const offset = (p) => {
-    let dz = p.leg === undefined ? hop : 0;
-    let da = 0;
-    if (moving && p.leg !== undefined) dz = Math.max(0, Math.sin(step + p.leg * Math.PI)) * 0.8;
-    if (p.flap) dz += Math.sin(step ?? 0) * (moving ? 0.6 : 0);
+    let dz = p.leg === undefined && !p.nest ? hop : 0;
+    let da = p.egg ? rock * (p.z / 3) : 0;
+    if (moving && p.leg !== undefined) dz = pose.flying ? 0 : Math.max(0, Math.sin(step + p.leg * Math.PI)) * 0.8;
+    if (p.flap) dz += Math.sin((step ?? 0) * (pose.flying ? 1.6 : 1)) * (moving ? (pose.flying ? 1.4 : 0.6) : 0);
     if (p.wag) da = Math.sin((step ?? 0) * 1.5) * p.wag * (moving ? 0.5 : 0);
     return [da, dz];
   };
@@ -454,24 +705,53 @@ export function drawCreature(species, variant, pose) {
   const order = m.parts
     .map((p) => {
       const [cx, cy] = world(p.a, p.b);
-      return { p, key: (p.leg !== undefined ? -100 : 0) + viewDepth(cx, cy) };
+      return { p, key: (p.leg !== undefined || p.nest ? -100 : 0) + viewDepth(cx, cy) };
     })
     .sort((u, v) => u.key - v.key);
 
-  // A soft shadow on the ground under the body.
-  const [s0x, s0y] = world(-m.body.w * 0.6, m.body.b - m.length * 0.45);
-  const [s1x, s1y] = world(m.body.w * 0.6, m.body.b + m.length * 0.45);
+  // A soft shadow on the ground under the body (smaller the higher it flies).
+  const lift = Math.max(0, z - ground);
+  const spread = 0.45 / (1 + lift * 0.6);
+  const [s0x, s0y] = world(-m.body.w * spread * 1.3, m.body.b - m.length * spread);
+  const [s1x, s1y] = world(m.body.w * spread * 1.3, m.body.b + m.length * spread);
   const [gx, gy] = [Math.min(s0x, s1x), Math.min(s0y, s1y)];
   const [gw, gd] = [Math.abs(s1x - s0x), Math.abs(s1y - s0y)];
-  const sh = `<polygon class="critter-shadow" fill="#2a2350" opacity="0.14" points="${[[gx, gy], [gx + gw, gy], [gx + gw, gy + gd], [gx, gy + gd]]
-    .map(([a, b]) => P(a, b, z > 0.05 ? 0 : z).map((v) => v.toFixed(1)).join(',')).join(' ')}"/>`;
-  const svg = sh + order.map(({ p }) => emit(p, ...offset(p))).join('');
+  const quad = (list, zz) => list.map(([a, b]) => P(a, b, zz).map((v) => v.toFixed(1)).join(',')).join(' ');
+  let under = `<polygon class="critter-shadow" fill="#2a2350" opacity="${(0.14 / (1 + lift)).toFixed(3)}" points="${quad([[gx, gy], [gx + gw, gy], [gx + gw, gy + gd], [gx, gy + gd]], ground)}"/>`;
+
+  // Rarity: sparkles circling the creature (gold for SR, every colour for
+  // SSR, with a glow on the ground); a ready egg glitters the same way.
+  let behind = '';
+  let front = '';
+  const colours = SPARKS[pose.sparkle];
+  if (colours) {
+    const r = (m.length / 2 + 1.6) * k;
+    const [cx, cy] = world(0, m.body.b);
+    if (pose.sparkle === 'SSR' && !pose.flying) {
+      const g = r * 0.75;
+      under = `<polygon fill="#fff3b0" opacity="0.3" points="${quad([[cx - g, cy - g], [cx + g, cy - g], [cx + g, cy + g], [cx - g, cy + g]], ground)}"/>` + under;
+    }
+    colours.forEach((c, i) => {
+      const t = time * 1.4 + (i * 2 * Math.PI) / colours.length;
+      const sx = cx + Math.cos(t) * r;
+      const sy = cy + Math.sin(t) * r;
+      const sz = z + (m.height * (0.55 + 0.25 * Math.sin(time * 2 + i))) * k;
+      const q = 0.07 * Math.max(0.8, scale);
+      const cube = box(sx - q / 2, sy - q / 2, sz, q, q, q, material({}, c));
+      if (viewDepth(sx, sy) < viewDepth(cx, cy)) behind += cube;
+      else front += cube;
+    });
+  }
+  const svg = under + behind + order.map(({ p }) => emit(p, ...offset(p))).join('') + front;
   return { svg, height: z + (m.height + hop) * k, pts };
 }
 
-// A small picture of a look, for the chooser: facing the viewer.
-export function creatureThumb(species, variant) {
-  const { svg, pts } = drawCreature(species, variant, { x: 0, y: 0, facing: facingViewer() });
+// A small picture of an egg, for the sidebar.
+export function eggThumb(seed, progress = 0) {
+  return thumbOf(drawEgg(seed, { x: 0, y: 0, facing: facingViewer(), progress }));
+}
+
+function thumbOf({ svg, pts }) {
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
   const x0 = Math.min(...xs);
@@ -480,6 +760,11 @@ export function creatureThumb(species, variant) {
   const h = Math.max(...ys) - y0;
   const side = Math.max(w, h) + 6;
   return `<svg class="thumb" viewBox="${(x0 + w / 2 - side / 2).toFixed(1)} ${(y0 + h / 2 - side / 2).toFixed(1)} ${side.toFixed(1)} ${side.toFixed(1)}" aria-hidden="true">${svg}</svg>`;
+}
+
+// A small picture of a look, for the chooser: facing the viewer.
+export function creatureThumb(species, variant, stage = 2) {
+  return thumbOf(drawCreature(species, variant, { x: 0, y: 0, facing: facingViewer(), stage }));
 }
 
 // The same agent always gets the same creature until someone picks another.

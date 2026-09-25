@@ -502,7 +502,16 @@ function run(argv) {
     // Every agent called in the two windows read (twice --days), so the
     // Meadow keeps agents that were busy before but quiet lately.
     const seen = [...new Set(data.runs.map((r) => r.type).filter(Boolean))].sort();
-    const result = { ok: true, days: opt.days, agents, seen, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
+    // Tokens per agent per day over the same span, so the Meadow can keep a
+    // running total that outlives the window (it merges days it already has).
+    const tokensByDay = {};
+    for (const r of data.runs) {
+      if (!r.type || r.start === undefined) continue;
+      const day = dayKey(r.start);
+      const byDay = (tokensByDay[r.type] ??= {});
+      byDay[day] = (byDay[day] ?? 0) + totalTokens(r.tokens);
+    }
+    const result = { ok: true, days: opt.days, agents, seen, tokensByDay, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
     if (opt.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

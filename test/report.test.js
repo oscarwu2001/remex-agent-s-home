@@ -29,4 +29,6 @@ test('the stats for the Meadow name every agent called in both windows read', ()
   assert.equal(res.ok, true);
   assert.deepEqual(res.agents.map((a) => a.name), ['writer'], 'numbers cover only the last 7 days');
   assert.deepEqual(res.seen, ['planner', 'writer'], 'the agent quiet this week still has a home');
+  assert.deepEqual(Object.keys(res.tokensByDay).sort(), ['planner', 'writer'], 'tokens per day for both, for the Meadow\'s running total');
+  for (const byDay of Object.values(res.tokensByDay)) assert.equal(Object.keys(byDay).length, 1);
 });

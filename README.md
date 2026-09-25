@@ -67,25 +67,39 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 ## The Meadow
 
 Press **Meadow** at the top of the map for a second screen, away from the
-hospital: a floating block island drawn in the same Monument Valley
-isometric 3D as the hospital. Every agent lives there as a blocky creature:
-a cat, dog, bunny, fox, dragon, dinosaur, fish (in the pond), bird, turtle or
-axolotl, each with ten looks. That means the agents in your `.claude/agents`,
-plus every agent Claude has ever called (built-in ones like Explore
-included). Once an agent has been seen it keeps its spot, even after months
-of quiet. The creatures wander about like mobs in a block game: each walks to
-a spot along the tiles, turning to face where it's going, rests a moment and
-sets off again, while the fish swim round the pond. They stand still if your
-system asks for reduced motion. The more tokens an agent used in the last 28
-days, the bigger it is.
+hospital: a floating island of nine grass terraces at different heights,
+drawn in the same Monument Valley isometric 3D as the hospital. Every agent
+lives there: the agents in your `.claude/agents`, plus every agent Claude
+has ever called (built-in ones like Explore included). Once an agent has
+been seen it keeps its spot, even after months of quiet.
 
-Click a creature, or its name in the sidebar, to see its performance:
-score, runs, finished rate, re-runs, median time, tokens, tool errors,
-verdicts and runs per day. These are the same numbers as the performance
-report, worked out in the background. The chosen creature stops while you
-look at it. You can change the animal and its look, or give its creature to
-another agent. Q and E (or dragging) turn the island like the hospital. The
-sidebar keeps the board, and **Back to the hospital** returns you to the map.
+Every agent grows up like a Pokémon:
+
+- **Egg.** Each agent starts as an egg in a straw nest. It cracks as the
+  agent works, and once the agent has used 100k tokens it is ready to hatch.
+- **Hatching.** Pick one of three starters (always the same three for that
+  agent) from ten kinds: cat, dog, bunny, fox, dragon, dinosaur, fish, bird,
+  turtle and axolotl. It hatches as a baby.
+- **Growing and evolving.** It grows as the agent uses more tokens. At 1M
+  tokens it can evolve, and again at 5M. Each evolution starts small again,
+  and each kind has three stages (for example Drakelet, Drake, Skywyrm).
+  Fully grown dragons and birds fly.
+- **Rarity.** Every creature starts R. Good work earns it SR (a score of 80
+  over 5 or more runs) or SSR (90 over 10 or more), shown with gold or
+  rainbow sparkles and stars by its name. Once earned, rarity is kept.
+- **Looks.** Each kind has ten looks to choose from.
+
+Tokens are counted per agent per day and kept, so growth never goes
+backwards. The creatures wander about like mobs in a block game: they walk
+tile by tile, hop up and down the terraces, rest, and set off again. The
+fish swim in the pond. They stand still if your system asks for reduced
+motion.
+
+Click a creature, or its name in the sidebar, to see how it is growing and
+its performance: score, runs, finished rate, re-runs, median time, tokens,
+tool errors, verdicts and runs per day (the performance report's numbers
+for the last 28 days). Q and E (or dragging) turn the island. The demo shows
+every stage without saving anything.
 
 ## The office team for Claude
 
