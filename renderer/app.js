@@ -1,6 +1,8 @@
 import {
   buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, setHeights, workSpot, routeBetween, floorOutline, roomFrame, configureRooms, cellOutline,
+  decorSpots, gardenTile, gardenOutline, gardenFrame,
 } from './scene.js';
+import { P } from './iso.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -20,6 +22,13 @@ useConfig(config);
 let buildMode = false;
 let draft; // { cell, kind, name, agents: Set }
 let layoutError = '';
+
+// Decorating state (see "decorating" below).
+let decorating = false; // the panel is open for the room or garden being visited
+let plantTool = 'tulips'; // what a click on a garden tile plants, or 'remove'
+let benchTurn = false;
+let decorError = '';
+let decorNote = ''; // what the last change did, read out to screen readers
 
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
@@ -115,7 +124,10 @@ setInterval(() => {
 // every frame while towers rise and sink after a turn.
 function drawGeometry() {
   shownPhase = phase();
-  const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase), { detail: prefs.detail });
+  const cat = config.decorCatalogue;
+  const { defs, geometry } = buildScene(themeFor(prefs.theme, shownPhase), {
+    detail: prefs.detail, decor: config.decor, defaultGardens: cat?.defaultGardens, plants: cat?.plants,
+  });
   $('defs').innerHTML = `${defs}
     <linearGradient id="mist-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--mist)" stop-opacity="0"/>
@@ -191,7 +203,7 @@ function drawLabels() {
         <path d="M${cx - 12},${cy} H${cx + 12} M${cx},${cy - 12} V${cy + 12}"/></g>`;
     }).join('')
     : '';
-  $('labels').innerHTML = build + config.rooms
+  $('labels').innerHTML = build + gardenTargets() + config.rooms
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const floorPts = floorOutline(r.id).map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ');
@@ -208,13 +220,49 @@ function drawLabels() {
         <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
         <text class="purpose" text-anchor="middle" y="22">${escapeXml(r.purpose)}</text></g>`;
     })
-    .join('');
+    .join('') + decorMarkers();
+}
+
+const pointsOf = (list) => list.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ');
+
+// The gardens open like rooms. While one is being planted, each of its tiles
+// is its own target.
+function gardenTargets() {
+  const gardens = config.decorCatalogue?.gardens ?? [];
+  return gardens.map((g) => {
+    if (decorating && focusedGarden === g.id) {
+      const n = config.decorCatalogue.gardenSize;
+      let tiles = '';
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          tiles += `<polygon class="plot-tile" data-garden="${g.id}" data-tile="${i},${j}" role="button" tabindex="0"
+            aria-label="Tile ${i + 1}, ${j + 1}" points="${pointsOf(gardenTile(g.id, i, j))}"><title>Tile ${i + 1}, ${j + 1}</title></polygon>`;
+        }
+      }
+      return tiles;
+    }
+    return `<polygon class="garden-hit" data-garden="${g.id}" points="${pointsOf(gardenOutline(g.id))}"><title>Visit the ${escapeXml(g.name.toLowerCase())}</title></polygon>`;
+  }).join('');
+}
+
+// Numbered markers on a room's decoration spots while it is being decorated.
+function decorMarkers() {
+  if (!decorating || !focusedRoom) return '';
+  return decorSpots(focusedRoom).map(([x, y, z], i) => {
+    // A ring on the floor and a numbered pin above whatever stands there.
+    const [sx, sy] = P(x, y, z);
+    const top = P(x, y, z + 2.3)[1] - sy;
+    return `<g class="spot-mark" transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)})" aria-hidden="true">
+      <ellipse rx="24" ry="12"/><line x1="0" y1="0" x2="0" y2="${(top + 12).toFixed(1)}"/>
+      <circle cy="${top.toFixed(1)}" r="12"/><text text-anchor="middle" y="${(top + 5).toFixed(1)}">${i + 1}</text></g>`;
+  }).join('');
 }
 
 // ---- camera: zoom, pan, visit a room, turn the tower ------------------------
 
 let overview;
 let focusedRoom;
+let focusedGarden; // a garden being visited, like a room
 const cam = { x: 0, y: 0, w: 1, h: 1 };
 let tween;
 
@@ -230,7 +278,7 @@ function placeLabels() {
   const k = cam.w > 1 ? Math.min(1, cam.w / overview.w) : 1;
   for (const g of document.querySelectorAll('.room-label')) {
     g.setAttribute('transform', `translate(${g.dataset.x} ${g.dataset.y}) scale(${k.toFixed(3)})`);
-    g.classList.toggle('hidden', Boolean(focusedRoom) && g.dataset.room !== focusedRoom);
+    g.classList.toggle('hidden', Boolean(focusedGarden) || (Boolean(focusedRoom) && g.dataset.room !== focusedRoom));
   }
 }
 
@@ -248,21 +296,64 @@ function flyTo(target, ms = 450) {
       w: from.w + (target.w - from.w) * k, h: from.h + (target.h - from.h) * k,
     });
     if (t < 1) tween = requestAnimationFrame(stepTo);
+    else updateCameraUi();
   };
   tween = requestAnimationFrame(stepTo);
 }
 
 function visitRoom(id) {
+  const moved = focusedRoom !== id;
   focusedRoom = id;
+  focusedGarden = undefined;
+  if (moved) redrawDecorLayer();
   placeLabels();
   const f = roomFrame(id);
   const pad = 0.4;
-  flyTo({ x: f.x - f.w * pad, y: f.y - f.h * pad, w: f.w * (1 + 2 * pad), h: f.h * (1 + 2 * pad) });
+  flyTo(clearOfPanel({ x: f.x - f.w * pad, y: f.y - f.h * pad, w: f.w * (1 + 2 * pad), h: f.h * (1 + 2 * pad) }));
   updateCameraUi();
 }
 
-function showOverview() {
+function visitGarden(id) {
+  const moved = focusedGarden !== id;
+  focusedGarden = id;
   focusedRoom = undefined;
+  if (moved) redrawDecorLayer();
+  placeLabels();
+  const f = gardenFrame(id);
+  const pad = 0.2;
+  flyTo(clearOfPanel({ x: f.x - f.w * pad, y: f.y - f.h * pad, w: f.w * (1 + 2 * pad), h: f.h * (1 + 2 * pad) }));
+  updateCameraUi();
+}
+
+// While the decorating panel is open it covers the left of the stage, so
+// the camera widens the frame to the left and the place sits in the clear
+// part on the right.
+function clearOfPanel(b) {
+  if (!decorating) return b;
+  const stage = svg.getBoundingClientRect();
+  const panel = $('decorate').getBoundingClientRect();
+  const covered = panel.right - stage.left + 16;
+  if (!(covered > 0 && covered < stage.width * 0.7)) return b;
+  // The svg letterboxes the frame into the stage, so fit it first.
+  const scale = Math.max(b.w / stage.width, b.h / stage.height);
+  const w = stage.width * scale;
+  const h = stage.height * scale;
+  const fitted = { x: b.x - (w - b.w) / 2, y: b.y - (h - b.h) / 2, w, h };
+  const k = stage.width / (stage.width - covered);
+  return { x: fitted.x - fitted.w * (k - 1), y: fitted.y - (fitted.h * (k - 1)) / 2, w: fitted.w * k, h: fitted.h * k };
+}
+
+// Leaving a place (for the overview, or by zooming or moving away) closes
+// the decorating panel with it.
+function leavePlace() {
+  const was = focusedRoom || focusedGarden;
+  focusedRoom = undefined;
+  focusedGarden = undefined;
+  if (was) redrawDecorLayer();
+}
+
+function showOverview() {
+  leavePlace();
   placeLabels();
   flyTo(overview);
   updateCameraUi();
@@ -298,7 +389,7 @@ function settleWalkers() {
 // Turned part-way, the building is wider than when square on, so the
 // camera steps back a little for the swing and comes in again after.
 function swingRoom() {
-  if (focusedRoom || cam.w < overview.w * 0.95) return;
+  if (focusedRoom || focusedGarden || cam.w < overview.w * 0.95) return;
   const k = 1.22;
   flyTo({ x: overview.x - (overview.w * (k - 1)) / 2, y: overview.y - (overview.h * (k - 1)) / 2, w: overview.w * k, h: overview.h * k }, 250);
 }
@@ -324,6 +415,7 @@ function turnTo(target, ms = 900) {
     savePrefs();
     drawScene();
     if (focusedRoom) visitRoom(focusedRoom);
+    else if (focusedGarden) visitGarden(focusedGarden);
     else flyTo(overview, 350);
     updateCameraUi();
   };
@@ -336,15 +428,21 @@ function turnView(step) {
 
 function frameCamera() {
   if (focusedRoom) visitRoom(focusedRoom);
+  else if (focusedGarden) visitGarden(focusedGarden);
   else setViewBox(overview);
   updateCameraUi();
 }
 
 function updateCameraUi() {
-  const zoomed = focusedRoom || cam.w < overview.w * 0.95;
+  const zoomed = focusedRoom || focusedGarden || cam.w < overview.w * 0.95;
   $('cam-overview').disabled = !zoomed;
-  $('cam-where').textContent = focusedRoom ? `In the ${ROOM_NAMES[focusedRoom]?.name ?? ''}` : zoomed ? 'Zoomed in' : '';
+  $('cam-where').textContent = focusedRoom ? `In the ${ROOM_NAMES[focusedRoom]?.name ?? ''}`
+    : focusedGarden ? `In the ${gardenName(focusedGarden).toLowerCase()}` : zoomed ? 'Zoomed in' : '';
   $('cam-where').hidden = !zoomed;
+  const place = focusedRoom || focusedGarden;
+  $('cam-decorate').hidden = !place || !bridge.saveDecor;
+  $('cam-decorate').setAttribute('aria-expanded', String(decorating));
+  $('cam-decorate').textContent = focusedGarden ? 'Plant' : 'Decorate';
 }
 
 // Wheel zooms about the pointer; drag pans. A drag never counts as a click.
@@ -364,7 +462,7 @@ svg.addEventListener('wheel', (e) => {
   const w = Math.min(overview.w * 1.4, Math.max(overview.w * 0.12, cam.w * k));
   const f = w / cam.w;
   setViewBox({ x: px - (px - cam.x) * f, y: py - (py - cam.y) * f, w, h: cam.h * f });
-  focusedRoom = undefined;
+  if (!decorating) leavePlace();
   updateCameraUi();
 }, { passive: false });
 
@@ -408,7 +506,7 @@ window.addEventListener('pointermove', (e) => {
   const [, , scale] = toSvgPoint(0, 0);
   cancelAnimationFrame(tween);
   setViewBox({ ...drag.cam, x: drag.cam.x - dx * scale, y: drag.cam.y - dy * scale });
-  focusedRoom = undefined;
+  if (!decorating) leavePlace();
   updateCameraUi();
 });
 window.addEventListener('pointerup', () => {
@@ -425,6 +523,12 @@ $('labels').addEventListener('keydown', (e) => {
     chooseCell(cell.dataset.cell.split(',').map(Number));
     return;
   }
+  const tile = e.target.closest('[data-tile]');
+  if (tile && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    plantAt(tile.dataset.garden, tile.dataset.tile.split(',').map(Number));
+    return;
+  }
   const label = e.target.closest('.room-label');
   if (label && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
@@ -437,7 +541,10 @@ window.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea, summary, [contenteditable]')) return;
   if (e.key === 'q' || e.key === 'Q') turnView(-1);
   else if (e.key === 'e' || e.key === 'E') turnView(1);
-  else if (e.key === 'Escape') showOverview();
+  else if (e.key === 'Escape') {
+    if (decorating) setDecorating(false);
+    else showOverview();
+  }
 });
 
 angle = prefs.view ?? 0;
@@ -490,6 +597,16 @@ svg.addEventListener('click', (e) => {
   const cell = e.target.closest('[data-cell]');
   if (cell) {
     chooseCell(cell.dataset.cell.split(',').map(Number));
+    return;
+  }
+  const tile = e.target.closest('[data-tile]');
+  if (tile) {
+    plantAt(tile.dataset.garden, tile.dataset.tile.split(',').map(Number));
+    return;
+  }
+  const garden = e.target.closest('[data-garden]');
+  if (garden && !e.target.closest('.person')) {
+    visitGarden(garden.dataset.garden);
     return;
   }
   const room = e.target.closest('[data-room]');
@@ -1021,7 +1138,7 @@ async function saveLayout(departments) {
   }
   useConfig(result.config);
   drawScene();
-  focusedRoom = undefined;
+  leavePlace();
   setViewBox(overview);
   updateCameraUi();
   return true;
@@ -1151,6 +1268,206 @@ $('layout-body').addEventListener('submit', async (e) => {
 });
 
 renderLayoutEditor();
+
+// ---- decorating: floors, room decorations and gardens ------------------------------
+
+function gardenName(id) {
+  return config.decorCatalogue?.gardens.find((g) => g.id === id)?.name ?? 'Garden';
+}
+
+function redrawDecorLayer() {
+  if (!focusedRoom && !focusedGarden) decorating = false;
+  drawLabels();
+  placeLabels();
+  renderDecorPanel();
+  updateCameraUi();
+}
+
+function setDecorating(on) {
+  decorating = on && Boolean(focusedRoom || focusedGarden);
+  decorError = '';
+  decorNote = '';
+  redrawDecorLayer();
+  if (focusedRoom) visitRoom(focusedRoom);
+  else if (focusedGarden) visitGarden(focusedGarden);
+  if (decorating) $('decorate-body').querySelector('input, select, button')?.focus();
+  else $('cam-decorate').focus();
+}
+$('cam-decorate').addEventListener('click', () => setDecorating(!decorating));
+$('decorate-close').addEventListener('click', () => setDecorating(false));
+$('decorate').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    setDecorating(false);
+  }
+});
+
+async function saveDecor(next, note) {
+  const result = await bridge.saveDecor(next);
+  if (!result.ok) {
+    decorError = result.error;
+    decorNote = '';
+    renderDecorPanel();
+    return;
+  }
+  config.decor = result.decor;
+  decorError = '';
+  decorNote = note;
+  drawGeometry();
+  drawLabels();
+  placeLabels();
+  renderDecorPanel();
+}
+
+const plantOf = (kind) => config.decorCatalogue.plants.find((p) => p.id === kind);
+function plantSize(item) {
+  const p = plantOf(item.kind);
+  return item.turn ? [p.d, p.w] : [p.w, p.d];
+}
+function plantTiles(item) {
+  const [w, d] = plantSize(item);
+  const out = [];
+  for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) out.push([item.at[0] + i, item.at[1] + j]);
+  return out;
+}
+const covers = (item, [i, j]) => plantTiles(item).some(([a, b]) => a === i && b === j);
+
+function gardenList(id) {
+  const cat = config.decorCatalogue;
+  return (config.decor.gardens[id] ?? cat.defaultGardens[id] ?? []).map((it) => ({ ...it, at: [...it.at] }));
+}
+
+// Plants the chosen piece with its corner on the tile, nudged back inside
+// the plot if it would hang over the edge; whatever it lands on is dug up.
+function plantAt(gardenId, [i, j]) {
+  const n = config.decorCatalogue.gardenSize;
+  const list = gardenList(gardenId);
+  let next;
+  let note;
+  if (plantTool === 'remove') {
+    next = list.filter((it) => !covers(it, [i, j]));
+    if (next.length === list.length) {
+      decorNote = `Nothing grows on tile ${i + 1}, ${j + 1}.`;
+      renderDecorPanel();
+      return;
+    }
+    note = `Dug up tile ${i + 1}, ${j + 1}.`;
+  } else {
+    const p = plantOf(plantTool);
+    const item = { kind: plantTool, at: [0, 0] };
+    if (benchTurn && p.turns) item.turn = true;
+    const [w, d] = plantSize(item);
+    item.at = [Math.min(i, n - w), Math.min(j, n - d)];
+    const tiles = plantTiles(item);
+    next = list.filter((it) => !tiles.some((t) => covers(it, t)));
+    next.push(item);
+    note = `Planted ${p.name.toLowerCase()} on tile ${item.at[0] + 1}, ${item.at[1] + 1}.`;
+  }
+  saveDecor({ ...config.decor, gardens: { ...config.decor.gardens, [gardenId]: next } }, note);
+}
+
+function roomEntry(id) {
+  return config.decor.rooms[id] ?? {};
+}
+
+function setRoomEntry(id, entry, note) {
+  const rooms = { ...config.decor.rooms };
+  const clean = {};
+  if (entry.floor && entry.floor !== config.decorCatalogue.defaultFloor) clean.floor = entry.floor;
+  if (entry.spots?.some(Boolean)) clean.spots = entry.spots.map((x) => x || null);
+  if (Object.keys(clean).length) rooms[id] = clean;
+  else delete rooms[id];
+  saveDecor({ ...config.decor, rooms }, note);
+}
+
+// Decorations that make sense in this room; the same rule as src/core/decor.js.
+function decorationsFor(id) {
+  const room = ROOM_NAMES[id];
+  const tag = room?.custom ? 'department' : id;
+  return config.decorCatalogue.decorations.filter((d) => d.rooms === 'any' || d.rooms.includes(tag));
+}
+
+function renderDecorPanel() {
+  const panel = $('decorate');
+  panel.hidden = !decorating;
+  if (!decorating) return;
+  const cat = config.decorCatalogue;
+  const error = decorError ? `<p class="form-error" role="alert">${escapeXml(decorError)}</p>` : '';
+  const status = `<p class="hint decor-status" aria-live="polite">${escapeXml(decorNote)}</p>`;
+  if (focusedGarden) {
+    $('decorate-h').textContent = `Plant the ${gardenName(focusedGarden).toLowerCase()}`;
+    const chip = (id, name, extra = '') => `<label class="chip"><input type="radio" name="plant-tool" value="${id}" ${plantTool === id ? 'checked' : ''}>${escapeXml(name)}${extra}</label>`;
+    const size = (p) => (p.w * p.d > 1 ? ` <span class="size">${p.w}×${p.d}</span>` : '');
+    const bench = plantOf(plantTool)?.turns
+      ? `<label class="switch"><input type="checkbox" id="bench-turn" ${benchTurn ? 'checked' : ''}> <span>Turn it the other way</span></label>` : '';
+    $('decorate-body').innerHTML = `
+      <fieldset class="chips"><legend>What to plant</legend>
+        <div class="options">${cat.plants.map((p) => chip(p.id, p.name, size(p))).join('')}${chip('remove', 'Dig up')}</div>
+      </fieldset>
+      ${bench}
+      <p class="hint">Click a tile on the plot. Pieces marked 2×2 take four tiles; whatever they land on is dug up.</p>
+      ${status}${error}
+      <div class="form-actions">
+        <button type="button" class="link-btn" id="garden-clear">Clear the plot</button>
+        <button type="button" class="link-btn" id="garden-default">Back to how it was</button>
+      </div>`;
+    return;
+  }
+  const id = focusedRoom;
+  const entry = roomEntry(id);
+  const floor = entry.floor ?? cat.defaultFloor;
+  const fits = decorationsFor(id);
+  $('decorate-h').textContent = `Decorate the ${ROOM_NAMES[id]?.name ?? 'room'}`;
+  const spots = Array.from({ length: cat.spotsPerRoom }, (_, i) => {
+    const chosen = entry.spots?.[i] ?? '';
+    return `<label class="field">Spot ${i + 1}
+      <select data-spot="${i}">
+        <option value="" ${chosen ? '' : 'selected'}>Nothing</option>
+        ${fits.map((d) => `<option value="${d.id}" ${chosen === d.id ? 'selected' : ''}>${escapeXml(d.name)}</option>`).join('')}
+      </select></label>`;
+  }).join('');
+  $('decorate-body').innerHTML = `
+    <fieldset class="chips"><legend>Floor</legend>
+      <div class="options">${cat.floors.map((f) => `<label class="chip"><input type="radio" name="floor" value="${f.id}" ${floor === f.id ? 'checked' : ''}>${escapeXml(f.name)}</label>`).join('')}</div>
+    </fieldset>
+    <p class="hint">The numbered spots on the floor take a decoration each. Only pieces that belong in this room are offered.</p>
+    <div class="spot-fields">${spots}</div>
+    ${status}${error}
+    <div class="form-actions"><button type="button" class="link-btn" id="room-reset">Back to the plain room</button></div>`;
+}
+
+$('decorate-body').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.name === 'plant-tool') {
+    plantTool = t.value;
+    decorNote = '';
+    renderDecorPanel();
+    $('decorate-body').querySelector(`input[name="plant-tool"][value="${plantTool}"]`)?.focus();
+  } else if (t.id === 'bench-turn') {
+    benchTurn = t.checked;
+  } else if (t.name === 'floor') {
+    const name = config.decorCatalogue.floors.find((f) => f.id === t.value)?.name ?? t.value;
+    setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), floor: t.value }, `Floor changed to ${name.toLowerCase()}.`);
+  } else if (t.dataset.spot !== undefined) {
+    const spots = Array.from({ length: config.decorCatalogue.spotsPerRoom }, (_, i) => roomEntry(focusedRoom).spots?.[i] ?? null);
+    spots[Number(t.dataset.spot)] = t.value || null;
+    const name = t.selectedOptions[0]?.textContent ?? '';
+    setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), spots }, t.value ? `${name} placed on spot ${Number(t.dataset.spot) + 1}.` : `Spot ${Number(t.dataset.spot) + 1} cleared.`);
+  }
+});
+
+$('decorate-body').addEventListener('click', (e) => {
+  const id = e.target.id;
+  if (id === 'garden-clear') {
+    saveDecor({ ...config.decor, gardens: { ...config.decor.gardens, [focusedGarden]: [] } }, 'The plot is bare.');
+  } else if (id === 'garden-default') {
+    const gardens = { ...config.decor.gardens };
+    delete gardens[focusedGarden];
+    saveDecor({ ...config.decor, gardens }, 'The garden is back to how it was.');
+  } else if (id === 'room-reset') {
+    setRoomEntry(focusedRoom, {}, 'The room is back to its plain floor, with no decorations.');
+  }
+});
 
 // ---- performance report --------------------------------------------------------
 

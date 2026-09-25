@@ -25,8 +25,18 @@
     <div class="camera" role="toolbar" aria-label="View">
       <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
       <span class="cam-where" id="cam-where" aria-live="polite"></span>
+      <button type="button" class="cam-btn wide accent" id="cam-decorate" aria-expanded="false" aria-controls="decorate" hidden>Decorate</button>
     </div>
-    <p class="cam-hint">Drag to turn · right-drag to move · scroll to zoom · click a room to visit</p>
+    <p class="cam-hint">Drag to turn · right-drag to move · scroll to zoom · click a room or garden to visit</p>
+    <section class="decorate" id="decorate" hidden aria-labelledby="decorate-h">
+      <header class="settings-head">
+        <h2 id="decorate-h">Decorate</h2>
+        <button type="button" class="icon-btn" id="decorate-close" aria-label="Close" title="Close (Esc)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div id="decorate-body"></div>
+    </section>
     <p class="source" id="source"></p>
   </main>
 

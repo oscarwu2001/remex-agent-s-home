@@ -557,3 +557,39 @@ details > summary h2 { margin: 0; }
 .settings .hint { margin: var(--s-1) 0 var(--s-2); }
 .colourway.style-simple, .colourway.style-detailed { padding: 0 var(--s-4); }
 #room-style { margin-top: var(--s-2); }
+
+/* ---- decorating -------------------------------------------------------------- */
+
+[hidden].cam-btn { display: none; }
+.cam-btn.accent { background: var(--accent); color: var(--on-accent, #fff); }
+.cam-btn.accent:hover:not(:disabled), .cam-btn.accent[aria-expanded="true"] { background: var(--accent); box-shadow: inset 0 0 0 2px var(--label-bg); }
+.decorate {
+  position: absolute; z-index: 3; top: calc(var(--s-4) + 96px); left: var(--s-4);
+  width: min(340px, calc(100% - 2 * var(--s-4))); max-height: calc(100% - 160px); overflow-y: auto;
+  padding: var(--s-3) var(--s-4) var(--s-4); border-radius: var(--r-lg);
+  background: var(--panel); color: var(--ink); box-shadow: 0 8px 30px rgba(40, 30, 80, 0.2);
+}
+.decorate .settings-head h2 { font-size: 16px; }
+.chips { border: 0; margin: 0 0 var(--s-2); padding: 0; }
+.chips legend { padding: 0; margin-bottom: var(--s-1); font-size: 13px; color: var(--ink-muted); }
+.chips .options { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+.chip {
+  position: relative; display: inline-flex; align-items: center; gap: var(--s-1); min-height: 36px;
+  padding: 0 var(--s-3); border: 1px solid var(--line); border-radius: 999px; background: var(--panel-raised);
+  font-size: 13px; cursor: pointer;
+}
+.chip input { position: absolute; opacity: 0; pointer-events: none; }
+.chip:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.chip:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chip .size { font-size: 11px; color: var(--ink-muted); font-weight: 600; }
+.spot-fields { display: grid; gap: var(--s-2); margin-bottom: var(--s-2); }
+.decorate .field select { width: 100%; }
+.decor-status:empty { display: none; }
+.garden-hit { fill: transparent; cursor: zoom-in; }
+.plot-tile { fill: var(--accent); fill-opacity: 0; stroke: var(--accent); stroke-opacity: 0.55; stroke-width: 1.5; stroke-dasharray: 5 4; cursor: pointer; outline: none; }
+.plot-tile:hover { fill-opacity: 0.3; stroke-opacity: 1; stroke-dasharray: none; }
+.plot-tile:focus-visible { fill-opacity: 0.3; stroke: var(--ink); stroke-opacity: 1; stroke-width: 3; stroke-dasharray: none; }
+.spot-mark ellipse { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
+.spot-mark line { stroke: var(--accent); stroke-width: 2; }
+.spot-mark circle { fill: var(--accent); }
+.spot-mark text { font: 700 14px var(--font); fill: var(--on-accent, #fff); }

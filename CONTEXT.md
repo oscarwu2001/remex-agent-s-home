@@ -9,6 +9,9 @@
 | **Room** | One of the seven core places in `src/core/rooms.js`, or a department the user added. |
 | **Grid / cell** | Rooms sit on a grid of cells `[col, row]`. The core 3 × 3 is cells 0..2; departments go in the ring around it (-1..3), up to 5 × 5. |
 | **Department** | A room the user adds from a list of surgical-navigation specialties (or a custom name), saved in `layout.json`. It joins the room beside it (`via`) by a bridge or stairs. |
+| **Decor** | What the user chose to make the hospital their own, saved in `decor.json` next to `layout.json`: a **floor** per room, a **decoration** on each of a room's three **spots**, and what grows in each **garden**. |
+| **Spot** | A place on a room's floor, clear of furniture, doorways and people, that takes one decoration. Only decorations that belong in that room are offered (a specimen fridge in the Laboratory, a crash cart in the Operating Room). |
+| **Garden** / **plot** | The two green islands (Garden and Grove). Each is a plot of 4 × 4 tiles. Plants cover 1 tile, a bench 2, and a big tree, blossom tree or fountain 2 × 2. |
 | **Stream** | The entries of one actor in one file: a file's own turns, or its sidechain entries grouped by `agentId`. |
 | **Linking** | Matching a sidechain stream to the `Task` call that started it, by exact prompt text, never by guessing. A stream that never links is counted as *unlinked*. |
 | **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper and is not a new prompt. |

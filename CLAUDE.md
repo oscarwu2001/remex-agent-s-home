@@ -24,13 +24,13 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 4. **No real transcript content in the repo.** Tests build entries with `test/helpers.js`. Never paste lines from a real session into a test, fixture, issue or commit. A transcript may hold patient identifiers, dataset names or case paths.
 5. **Nothing fails silently.** Malformed lines, unreadable folders, invalid `rooms.json` and unmatched sub-agent transcripts are counted and shown under "Needs attention". A catch block either surfaces the problem or has a comment saying why ignoring it is safe.
 6. **Status is never colour alone.** Every status has its own glyph shape in the scene and a text label on the board.
-7. **One source for rooms.** Room ids, names and agent assignment live in `src/core/rooms.js`. Room geometry lives in `renderer/scene.js`, keyed by those ids. Do not add a second list.
+7. **One source for rooms.** Room ids, names and agent assignment live in `src/core/rooms.js`. Room geometry lives in `renderer/scene.js`, keyed by those ids. Do not add a second list. The same split holds for decor: which floors, decorations and plants exist (and which room takes which) is `src/core/decor.js`; how they look is `renderer/decor.js`, and where a room's spots are is `renderer/scene.js`.
 
 ## Layout
 
-- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `roster.js`, `activity.js`, `metrics.js` for the report).
+- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
-- `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital (simple furniture), `detailed.js` (detailed room style), `people.js` figures, `app.js` glue and board, `demo.js`.
+- `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital (simple furniture), `detailed.js` (detailed room style), `decor.js` (floors, decorations, garden plants), `people.js` figures, `app.js` glue and board, `demo.js`.
 - `src/report/`: the performance report (HTML + CSV), run by the app or `scripts/agent-report.js`.
 - `test/`: `node:test`, one file per core module.
 

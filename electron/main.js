@@ -11,6 +11,7 @@ const { wslRoots, rootKey } = require('../src/core/wsl');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
+const decorCatalogue = require('../src/core/decor');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -63,6 +64,39 @@ function loadLayout() {
     startupProblems.push({ label: `layout.json ignored: ${reason}; showing the core hospital`, detail: file, count: 1 });
     return { file, layout: { departments: [] } };
   }
+}
+
+// Floors, room decorations and gardens, from decor.json. It is kept apart
+// from layout.json so a bad decoration can never cost the user their
+// departments. Entries that do not check out are left out and each one is
+// reported; the file itself is only rewritten when the user changes decor.
+function loadDecor(rooms) {
+  const file = path.join(app.getPath('userData'), 'decor.json');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    // No decor.json is the normal case: the default look.
+    if (err.code !== 'ENOENT') {
+      startupProblems.push({ label: `decor.json could not be read (${err.code}); showing the default look`, detail: file, count: 1 });
+    }
+    return { file, decor: decorCatalogue.checkDecor(undefined, rooms).decor };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    startupProblems.push({ label: 'decor.json ignored: it is not valid JSON; showing the default look', detail: file, count: 1 });
+    return { file, decor: decorCatalogue.checkDecor(undefined, rooms).decor };
+  }
+  const { decor, problems: found } = decorCatalogue.checkDecor(parsed, rooms);
+  for (const p of found) startupProblems.push({ label: `decor.json: ${p}; left out`, detail: file, count: 1 });
+  return { file, decor };
+}
+
+function writeDecor(file, decor) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(decor, null, 2)}\n`);
 }
 
 function loadOverrides(roomIds) {
@@ -135,6 +169,8 @@ app.whenReady().then(() => {
   const { file: overridesFile, overrides: fileOverrides } = loadOverrides(ids());
   // rooms.json, written by hand, wins over assignments made in the app.
   let overrides = { ...overridesFrom(layout), ...fileOverrides };
+  const { file: decorFile, decor: loadedDecor } = loadDecor(roomsWith(layout));
+  let decor = loadedDecor;
   tracker = new Tracker({ overrides });
   const sink = {
     onEntry: (file, entry, now) => tracker.ingest(file, entry, now),
@@ -182,6 +218,17 @@ app.whenReady().then(() => {
     layout,
     departmentKinds: DEPARTMENT_KINDS,
     openCells: openCells(layout),
+    decor,
+    decorCatalogue: {
+      floors: decorCatalogue.FLOORS,
+      defaultFloor: decorCatalogue.DEFAULT_FLOOR,
+      spotsPerRoom: decorCatalogue.SPOTS_PER_ROOM,
+      decorations: decorCatalogue.DECORATIONS,
+      gardenSize: decorCatalogue.GARDEN_SIZE,
+      gardens: decorCatalogue.GARDENS,
+      plants: decorCatalogue.PLANTS,
+      defaultGardens: decorCatalogue.DEFAULT_GARDENS,
+    },
     overridesFile,
     layoutFile,
     platform: process.platform,
@@ -271,10 +318,34 @@ app.whenReady().then(() => {
       return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
     }
     layout = next;
+    // A removed department takes its floor and decorations with it, so
+    // decor.json never names a room that is gone.
+    const gone = Object.keys(decor.rooms).filter((id) => !roomsWith(layout).some((r) => r.id === id));
+    if (gone.length) {
+      decor = { ...decor, rooms: Object.fromEntries(Object.entries(decor.rooms).filter(([id]) => !gone.includes(id))) };
+      try {
+        writeDecor(decorFile, decor);
+      } catch (err) {
+        problem(`decor.json could not be updated (${err.code || err.message}); it still names a removed department`, decorFile);
+      }
+    }
     overrides = { ...overridesFrom(layout), ...fileOverrides };
     tracker.overrides = overrides;
     rosterAt = 0; // re-read on the next WSL check, which is at most 5 s away
     return { ok: true, config: config() };
+  });
+
+  // Saving decor: every entry must check out, or nothing is written.
+  ipcMain.handle('home:save-decor', (_event, proposed) => {
+    const { decor: next, problems: found } = decorCatalogue.checkDecor(proposed, roomsWith(layout));
+    if (found.length) return { ok: false, error: `That could not be saved: ${found[0]}` };
+    try {
+      writeDecor(decorFile, next);
+    } catch (err) {
+      return { ok: false, error: `Your changes could not be saved (${err.code || err.message})` };
+    }
+    decor = next;
+    return { ok: true, decor };
   });
 
   createWindow();

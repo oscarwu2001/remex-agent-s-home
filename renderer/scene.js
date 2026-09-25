@@ -8,6 +8,7 @@ import {
 } from './iso.js';
 import { floorTones } from './themes.js';
 import { detailedFurniture, navSuiteDetailed } from './detailed.js';
+import { drawFloor, drawDecoration, drawPlant } from './decor.js';
 
 const BASE_Z = -4; // columns hang down to here and dissolve into mist
 
@@ -82,8 +83,30 @@ function ends(c) {
   return [[...c.fromXY, LAYOUT[c.a].z], [...c.toXY, LAYOUT[c.b].z]];
 }
 
-// Scenery islands also rise and sink with the view.
-const SCENERY = { garden: { cell: [0, 2], z: 1 }, grove: { cell: [2, 0], z: 1 } };
+// Scenery islands also rise and sink with the view. Each is a garden plot
+// of 4 x 4 tiles (GARDEN_SIZE in src/core/decor.js) starting at `at`.
+const SCENERY = { garden: { cell: [0, 2], at: [1, 17], z: 1 }, grove: { cell: [2, 0], at: [17, 1], z: 1 } };
+const PLOT = 4;
+
+// Decoration spots, in room-local tiles: clear of the furniture in both room
+// styles, of every doorway (the middle of each side) and of where people
+// stand. Three per room (SPOTS_PER_ROOM in src/core/decor.js).
+const DECOR_SPOTS = {
+  'nurses-station': [[0.6, 0.6], [0.6, 4.3], [5.4, 4.3]],
+  'operating-room': [[0.6, 0.6], [0.6, 5.4], [5.4, 5.4]],
+  'research-office': [[0.6, 0.55], [5.45, 0.55], [1.5, 5.45]],
+  laboratory: [[0.7, 5.5], [5.4, 2.7], [3.2, 5.5]],
+  radiology: [[0.6, 0.6], [5.4, 0.6], [5.4, 5.45]],
+  'vision-clinic': [[0.55, 4.4], [5.45, 0.55], [5.5, 5.5]],
+  'general-ward': [[5.45, 0.55], [5.5, 4.6], [1.7, 5.55]],
+  department: [[0.6, 5.45], [5.5, 5.55], [0.5, 1.75]],
+};
+
+// What the user chose (decor.json, through the config): floors, spot
+// decorations and gardens. Missing entries mean the default look.
+let decorState = { rooms: {}, gardens: {} };
+let defaultGardens = {};
+let plantSize = {}; // kind -> [w, d], from the catalogue
 
 // Lays out the rooms the config lists and joins each department to the room
 // it was placed next to.
@@ -243,7 +266,30 @@ let activeTheme;
 function floor(id, r) {
   const body = bodyOf(id);
   const [a, b] = floorTones(body.base ?? body.left, activeTheme);
-  return tiledTop(r.x, r.y, r.z + 0.001, SIZE, SIZE, a, b);
+  const kind = decorState.rooms[id]?.floor ?? 'checker';
+  return drawFloor(kind, r.x, r.y, r.z + 0.001, SIZE, SIZE, { a, b, body, seed: r.x * 31 + r.y * 7 + 1 });
+}
+
+// Where a room's decoration spots are, in world tiles.
+export function decorSpots(id) {
+  const r = LAYOUT[id];
+  if (!r) return [];
+  return (DECOR_SPOTS[id] ?? DECOR_SPOTS.department).map(([u, v]) => [r.x + u, r.y + v, r.z]);
+}
+
+// A room's chosen decorations, split into those behind its furniture and
+// those in front of it in the current view.
+function decorations(id, r) {
+  const chosen = decorState.rooms[id]?.spots ?? [];
+  const centre = viewDepth(r.x + SIZE / 2, r.y + SIZE / 2);
+  const back = [];
+  const front = [];
+  decorSpots(id).forEach(([x, y, z], i) => {
+    if (!chosen[i]) return;
+    (viewDepth(x, y) < centre ? back : front).push({ d: viewDepth(x, y), s: drawDecoration(chosen[i], x, y, z) });
+  });
+  const join = (list) => list.sort((p, q) => p.d - q.d).map((p) => p.s).join('');
+  return { back: join(back), front: join(front) };
 }
 
 // Sides with a doorway (a bridge or stairs lands there) never get a wall.
@@ -320,13 +366,6 @@ function bridge(c) {
     for (const py of [ay + 0.4, by - 0.6]) s += box(ax + 0.85, py, z, 0.2, 0.2, 0.55, M.cream);
   }
   return s;
-}
-
-function tree(x, y, z, scale = 1) {
-  return (
-    box(x - 0.06, y - 0.06, z, 0.12, 0.12, 0.9 * scale, M.sand) +
-    ball(x, y, z + 1.25 * scale, 0.55 * scale, M.leaf)
-  );
 }
 
 function plant(x, y, z) {
@@ -519,27 +558,55 @@ function ecg(x, y, z) {
     .join(' ');
 }
 
-// Scenery: a garden island to the lower left and a low grove island to the
-// upper right.
-function garden() {
-  const z = SCENERY.garden.z;
-  let s = '';
-  s += box(1.5, 17.5, BASE_Z + 1, 4, 4, z - 0.4 - BASE_Z - 1, M.leaf);
-  s += box(1.2, 17.2, z - 0.4, 4.6, 4.6, 0.4, M.stone);
-  s += tiledTop(1.2, 17.2, z + 0.001, 4.6, 4.6, M.mint.top, M.mint.left);
-  s += tree(2.4, 18.4, z, 1.1) + tree(4.4, 19.2, z, 0.9) + tree(2.8, 20.6, z, 0.8);
-  s += box(3.6, 20.4, z, 1.2, 0.4, 0.3, M.sand);
-  return s;
+// Scenery: two garden islands, one to the lower left and a lower one to
+// the upper right. Each is a plot of tiles people can plant.
+function gardenItems(id) {
+  return decorState.gardens[id] ?? defaultGardens[id] ?? [];
 }
 
-function grove() {
-  const z = SCENERY.grove.z;
+function gardenIsland(id) {
+  const g = SCENERY[id];
+  const [x, y] = g.at;
+  const z = g.z;
   let s = '';
-  s += box(17.8, 1.8, BASE_Z + 1, 2.8, 2.8, z - 0.35 - BASE_Z - 1, M.leaf);
-  s += box(17.5, 1.5, z - 0.35, 3.4, 3.4, 0.35, M.stone);
-  s += tiledTop(17.5, 1.5, z + 0.001, 3.4, 3.4, M.mint.top, M.mint.left);
-  s += tree(18.6, 2.5, z, 1) + tree(19.9, 3.6, z, 0.8);
-  return s;
+  s += box(x + 0.3, y + 0.3, BASE_Z + 1, PLOT - 0.6, PLOT - 0.6, z - 0.4 - BASE_Z - 1, M.leaf);
+  s += box(x - 0.2, y - 0.2, z - 0.4, PLOT + 0.4, PLOT + 0.4, 0.4, M.stone);
+  s += tiledTop(x, y, z + 0.001, PLOT, PLOT, M.mint.top, M.mint.left);
+  const items = gardenItems(id)
+    .map((it, n) => {
+      const size = plantSize[it.kind] ?? [1, 1];
+      const [w, d] = it.turn ? [size[1], size[0]] : size;
+      const cx = x + it.at[0] + w / 2;
+      const cy = y + it.at[1] + d / 2;
+      return { d: viewDepth(cx, cy), s: drawPlant(it.kind, x + it.at[0], y + it.at[1], z, n + 1 + it.at[0] * 5 + it.at[1] * 11, it.turn) };
+    })
+    .sort((p, q) => p.d - q.d);
+  return s + items.map((p) => p.s).join('');
+}
+
+// Screen outline of one garden tile, for planting.
+export function gardenTile(id, i, j) {
+  const g = SCENERY[id];
+  const [x, y] = [g.at[0] + i, g.at[1] + j];
+  return [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(([a, b]) => P(a, b, g.z));
+}
+
+// The garden plot's outline, for clicking it.
+export function gardenOutline(id) {
+  const g = SCENERY[id];
+  const [x, y] = g.at;
+  return [[x, y], [x + PLOT, y], [x + PLOT, y + PLOT], [x, y + PLOT]].map(([a, b]) => P(a, b, g.z));
+}
+
+// Screen box around a garden, for zooming in.
+export function gardenFrame(id) {
+  const g = SCENERY[id];
+  const [x, y] = g.at;
+  const pts = [];
+  for (const [a, b] of [[x, y], [x + PLOT, y], [x, y + PLOT], [x + PLOT, y + PLOT]]) pts.push(P(a, b, g.z - 0.6), P(a, b, g.z + 3.2));
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
 }
 
 // Floating cubes in empty ring cells; a department built there moves them on.
@@ -565,11 +632,15 @@ export function cellOutline([c, r]) {
 export function buildScene(theme, options = {}) {
   activeTheme = theme;
   detail = options.detail === 'detailed' ? 'detailed' : 'simple';
+  decorState = options.decor ?? { rooms: {}, gardens: {} };
+  defaultGardens = options.defaultGardens ?? {};
+  plantSize = Object.fromEntries((options.plants ?? []).map((p) => [p.id, [p.w, p.d]]));
   applyTheme(theme);
   const items = [];
   for (const [id, r] of Object.entries(LAYOUT)) {
     const depth = viewDepth(r.x + SIZE / 2, r.y + SIZE / 2);
-    items.push({ depth, s: column(id, r) + floor(id, r) + walls(id, r) + furniture(id, r) });
+    const extra = decorations(id, r);
+    items.push({ depth, s: column(id, r) + floor(id, r) + walls(id, r) + extra.back + furniture(id, r) + extra.front });
   }
   for (const c of CONNECTORS) {
     const ra = LAYOUT[c.a];
@@ -578,7 +649,10 @@ export function buildScene(theme, options = {}) {
     const [f, t] = ends(c);
     items.push({ depth, s: Math.abs(f[2] - t[2]) < 0.01 ? bridge(c) : stairs(c) });
   }
-  items.push({ depth: viewDepth(3.5, 19.5), s: garden() }, { depth: viewDepth(19.2, 3.2), s: grove() });
+  for (const id of Object.keys(SCENERY)) {
+    const [x, y] = SCENERY[id].at;
+    items.push({ depth: viewDepth(x + PLOT / 2, y + PLOT / 2), s: gardenIsland(id) });
+  }
   items.sort((p, q) => p.depth - q.depth);
   const geometry = floaters() + items.map((i) => i.s).join('');
   return {
