@@ -1,8 +1,9 @@
 import {
   buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, setHeights, workSpot, routeBetween, floorOutline, roomFrame, configureRooms, cellOutline,
-  decorSpots, gardenTile, gardenOutline, gardenFrame,
+  decorSpots, gardenTile, gardenOutline, gardenFrame, gardenPlot, plantPreview, plantThumb,
 } from './scene.js';
 import { P } from './iso.js';
+import { BLOSSOMING } from './decor.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -14,7 +15,7 @@ let ROOM_NAMES = {};
 function useConfig(next) {
   config = next;
   ROOM_NAMES = Object.fromEntries(config.rooms.map((r) => [r.id, r]));
-  configureRooms(config.rooms);
+  configureRooms(config.rooms, config.gardens);
 }
 useConfig(config);
 
@@ -385,7 +386,7 @@ function drawLabels() {
       const [cx, cy] = pts.reduce(([a, b], [x, y]) => [a + x / 4, b + y / 4], [0, 0]);
       const chosen = draft && draft.cell[0] === cell[0] && draft.cell[1] === cell[1];
       return `<g class="build-cell${chosen ? ' chosen' : ''}" data-cell="${cell.join(',')}" role="button" tabindex="0"
-          aria-label="Build a department ${escapeXml(spotName(cell))}">
+          aria-label="Build here: ${escapeXml(spotName(cell))}">
         <title>${escapeXml(spotName(cell))}</title>
         <polygon points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>
         <path d="M${cx - 12},${cy} H${cx + 12} M${cx},${cy - 12} V${cy + 12}"/></g>`;
@@ -416,7 +417,7 @@ const pointsOf = (list) => list.map((p) => p.map((v) => v.toFixed(1)).join(','))
 // The gardens open like rooms. While one is being planted, each of its tiles
 // is its own target.
 function gardenTargets() {
-  const gardens = config.decorCatalogue?.gardens ?? [];
+  const gardens = config.gardens ?? [];
   return gardens.map((g) => {
     if (decorating && focusedGarden === g.id) {
       const n = config.decorCatalogue.gardenSize;
@@ -429,7 +430,7 @@ function gardenTargets() {
       }
       return tiles;
     }
-    return `<polygon class="garden-hit" data-garden="${g.id}" points="${pointsOf(gardenOutline(g.id))}"><title>Visit the ${escapeXml(g.name.toLowerCase())}</title></polygon>`;
+    return `<polygon class="garden-hit" data-garden="${g.id}" points="${pointsOf(gardenOutline(g.id))}"><title>Visit the ${escapeXml(gardenName(g.id))}</title></polygon>`;
   }).join('');
 }
 
@@ -625,7 +626,7 @@ function updateCameraUi() {
   const zoomed = focusedRoom || focusedGarden || cam.w < overview.w * 0.95;
   $('cam-overview').disabled = !zoomed;
   $('cam-where').textContent = focusedRoom ? `In the ${ROOM_NAMES[focusedRoom]?.name ?? ''}`
-    : focusedGarden ? `In the ${gardenName(focusedGarden).toLowerCase()}` : zoomed ? 'Zoomed in' : '';
+    : focusedGarden ? `In the ${gardenName(focusedGarden)}` : zoomed ? 'Zoomed in' : '';
   $('cam-where').hidden = !zoomed;
   const place = focusedRoom || focusedGarden;
   $('cam-decorate').hidden = !place || !bridge.saveDecor;
@@ -1316,7 +1317,7 @@ function knownAgentNames() {
 }
 
 function chooseCell(cell) {
-  draft = { cell, kind: config.departmentKinds[0].kind, name: '', agents: new Set() };
+  draft = { cell, what: 'department', kind: config.departmentKinds[0].kind, name: '', gardenName: '', agents: new Set() };
   layoutError = '';
   nameError = '';
   drawLabels();
@@ -1335,9 +1336,10 @@ function setBuildMode(on) {
   if (on && !focusedRoom) showOverview();
 }
 
-async function saveLayout(departments) {
+// Departments carry their agents as a Set while being edited.
+async function saveLayout(departments, gardens = config.layout.gardens ?? []) {
   const plain = departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents: [...agents] }));
-  const result = await bridge.saveLayout({ departments: plain });
+  const result = await bridge.saveLayout({ departments: plain, gardens });
   if (!result.ok) {
     layoutError = result.error;
     renderLayoutEditor();
@@ -1353,7 +1355,8 @@ async function saveLayout(departments) {
 
 function renderLayoutEditor() {
   const depts = config.layout.departments;
-  $('layout-count').textContent = depts.length ? `(${depts.length})` : '';
+  const plots = config.layout.gardens ?? [];
+  $('layout-count').textContent = depts.length + plots.length ? `(${depts.length + plots.length})` : '';
   const reachedThrough = (id) => depts.find((x) => x.via === id);
   const list = depts.length
     ? `<ul class="dept-list">${depts.map((d) => {
@@ -1371,15 +1374,38 @@ function renderLayoutEditor() {
         <span class="actions">${action}</span>
       </li>`;
     }).join('')}</ul>`
-    : '<p class="empty">Only the core hospital so far. Add a department for each specialty your agents serve.</p>';
+    : plots.length ? '' : '<p class="empty">Only the core hospital so far. Add a department for each specialty your agents serve, or a garden to plant.</p>';
+  const gardenList = plots.length
+    ? `<ul class="dept-list">${plots.map((g) => {
+      const action = confirmRemove === g.id
+        ? `<span class="confirm">Remove ${escapeXml(g.name)} and all that grows there?
+            <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(g.id)}">Remove</button>
+            <button type="button" class="link-btn" data-remove-no>Keep</button></span>`
+        : `<button type="button" class="link-btn" data-remove="${escapeXml(g.id)}">Remove</button>`;
+      return `<li><span class="agent">${escapeXml(g.name)}</span>
+        <span class="summary">A garden ${escapeXml(spotName(g.cell))}</span>
+        <span class="actions">${action}</span></li>`;
+    }).join('')}</ul>`
+    : '';
 
   let form = '';
   if (buildMode && !draft) {
     form = `<p class="hint">Choose a “+” spot next to the hospital. ${config.openCells.length} ${config.openCells.length === 1 ? 'spot is' : 'spots are'} free.</p>`;
+  } else if (draft && draft.what === 'garden') {
+    form = `<form class="dept-form" id="dept-form">
+      ${buildChoice()}
+      <label class="field">Name <input id="garden-name" maxlength="30" placeholder="Garden ${(config.layout.gardens ?? []).length + 1}" value="${escapeXml(draft.gardenName)}"></label>
+      <p class="hint">A floating garden of 4 × 4 tiles. Once it is built, click it and press Plant.</p>
+      <div class="form-actions">
+        <button type="submit" class="button">Build garden</button>
+        <button type="button" class="link-btn" id="dept-cancel">Cancel</button>
+      </div>
+    </form>`;
   } else if (draft) {
     const kinds = config.departmentKinds.map((k) => `<option value="${k.kind}" ${k.kind === draft.kind ? 'selected' : ''}>${escapeXml(k.name)}</option>`).join('');
     const agents = knownAgentNames().map((a) => `<label class="check"><input type="checkbox" value="${escapeXml(a)}" ${draft.agents.has(a) ? 'checked' : ''}> ${escapeXml(a)}</label>`).join('');
     form = `<form class="dept-form" id="dept-form">
+      ${buildChoice()}
       <label class="field">Department
         <select id="dept-kind">${kinds}</select></label>
       <label class="field" ${draft.kind === 'custom' ? '' : 'hidden'}>Name
@@ -1400,11 +1426,17 @@ function renderLayoutEditor() {
       </div>
     </form>`;
   }
-  $('layout-body').innerHTML = `${list}
+  $('layout-body').innerHTML = `${list}${gardenList}
     ${layoutError ? `<p class="form-error" role="alert">${escapeXml(layoutError)}</p>` : ''}
     ${form}
-    ${buildMode ? '' : `<button type="button" class="button" id="build-start" ${config.openCells.length ? '' : 'disabled'}>Add a department</button>`}
+    ${buildMode ? '' : `<button type="button" class="button" id="build-start" ${config.openCells.length ? '' : 'disabled'}>Add a department or garden</button>`}
     ${buildMode && !draft ? '<button type="button" class="link-btn" id="build-stop">Done</button>' : ''}`;
+}
+
+// What to build on the chosen spot.
+function buildChoice() {
+  const opt = (v, label) => `<label class="chip"><input type="radio" name="build-what" value="${v}" ${draft.what === v ? 'checked' : ''}>${label}</label>`;
+  return `<fieldset class="chips"><legend>Build here</legend><div class="options">${opt('department', 'A department')}${opt('garden', 'A garden')}</div></fieldset>`;
 }
 
 function addTypedAgent() {
@@ -1430,14 +1462,22 @@ $('layout-body').addEventListener('click', async (e) => {
     renderLayoutEditor();
   } else if (t.dataset.removeYes) {
     confirmRemove = undefined;
-    const keep = config.layout.departments.filter((d) => d.id !== t.dataset.removeYes);
-    if (await saveLayout(keep.map((d) => ({ ...d, agents: new Set(d.agents) })))) renderLayoutEditor();
+    const id = t.dataset.removeYes;
+    const keep = config.layout.departments.filter((d) => d.id !== id);
+    const plots = (config.layout.gardens ?? []).filter((g) => g.id !== id);
+    if (await saveLayout(keep.map((d) => ({ ...d, agents: new Set(d.agents) })), plots)) renderLayoutEditor();
   }
 });
 
 $('layout-body').addEventListener('change', (e) => {
   if (!draft) return;
-  if (e.target.id === 'dept-kind') {
+  if (e.target.name === 'build-what') {
+    draft.what = e.target.value;
+    renderLayoutEditor();
+    document.querySelector(`input[name="build-what"][value="${draft.what}"]`)?.focus();
+  } else if (e.target.id === 'garden-name') {
+    draft.gardenName = e.target.value;
+  } else if (e.target.id === 'dept-kind') {
     draft.kind = e.target.value;
     renderLayoutEditor();
     if (draft.kind === 'custom') $('dept-name')?.focus();
@@ -1459,6 +1499,13 @@ $('layout-body').addEventListener('keydown', (e) => {
 $('layout-body').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!draft) return;
+  if (draft.what === 'garden') {
+    const name = ($('garden-name')?.value ?? draft.gardenName).trim();
+    const existing = config.layout.departments.map((d) => ({ ...d, agents: new Set(d.agents) }));
+    const plots = [...(config.layout.gardens ?? []), { cell: draft.cell, ...(name ? { name } : {}) }];
+    if (await saveLayout(existing, plots)) setBuildMode(false);
+    return;
+  }
   draft.name = $('dept-name')?.value ?? draft.name;
   const extra = $('dept-agent-new')?.value.trim();
   if (extra) draft.agents.add(extra);
@@ -1478,12 +1525,16 @@ renderLayoutEditor();
 
 // ---- decorating: floors, room decorations and gardens ------------------------------
 
+// "the garden", "the grove", but "Rose court" as the user wrote it.
 function gardenName(id) {
-  return config.decorCatalogue?.gardens.find((g) => g.id === id)?.name ?? 'Garden';
+  const name = config.gardens?.find((g) => g.id === id)?.name ?? 'Garden';
+  return id === 'garden' || id === 'grove' ? name.toLowerCase() : name;
 }
 
 function redrawDecorLayer() {
   if (!focusedRoom && !focusedGarden) decorating = false;
+  if (!decorating) hoverTile = undefined;
+  showGhost();
   drawLabels();
   placeLabels();
   renderDecorPanel();
@@ -1524,6 +1575,7 @@ async function saveDecor(next, note) {
   drawLabels();
   placeLabels();
   renderDecorPanel();
+  showGhost();
 }
 
 const plantOf = (kind) => config.decorCatalogue.plants.find((p) => p.id === kind);
@@ -1544,31 +1596,60 @@ function gardenList(id) {
   return (config.decor.gardens[id] ?? cat.defaultGardens[id] ?? []).map((it) => ({ ...it, at: [...it.at] }));
 }
 
+// What a click on a tile would do: the piece and where it lands, or for
+// "Dig up", what it would remove. Shared by the preview and the click.
+function planFor(gardenId, [i, j]) {
+  const n = config.decorCatalogue.gardenSize;
+  const list = gardenList(gardenId);
+  if (plantTool === 'remove') {
+    const hit = list.filter((it) => covers(it, [i, j]));
+    return { remove: true, tiles: hit.flatMap(plantTiles), list, keep: list.filter((it) => !covers(it, [i, j])) };
+  }
+  const item = { kind: plantTool, at: [0, 0] };
+  if (benchTurn && plantOf(plantTool).turns) item.turn = true;
+  const [w, d] = plantSize(item);
+  item.at = [Math.min(i, n - w), Math.min(j, n - d)];
+  const tiles = plantTiles(item);
+  return { item, tiles, list, keep: list.filter((it) => !tiles.some((t) => covers(it, t))) };
+}
+
+// The see-through preview under the pointer (or keyboard focus).
+let hoverTile; // { garden, tile: [i, j] }
+function showGhost() {
+  if (!decorating || !focusedGarden || !hoverTile || hoverTile.garden !== focusedGarden) {
+    $('ghost').innerHTML = '';
+    return;
+  }
+  const plan = planFor(hoverTile.garden, hoverTile.tile);
+  $('ghost').innerHTML = plantPreview(hoverTile.garden, plan.remove
+    ? { remove: true, tiles: plan.tiles }
+    : { kind: plan.item.kind, at: plan.item.at, turn: plan.item.turn, tiles: plan.tiles });
+}
+function hoverOn(el) {
+  hoverTile = el ? { garden: el.dataset.garden, tile: el.dataset.tile.split(',').map(Number) } : undefined;
+  showGhost();
+}
+$('labels').addEventListener('pointerover', (e) => hoverOn(e.target.closest('[data-tile]')));
+$('labels').addEventListener('pointerleave', () => hoverOn(undefined));
+$('labels').addEventListener('focusin', (e) => hoverOn(e.target.closest('[data-tile]')));
+
 // Plants the chosen piece with its corner on the tile, nudged back inside
 // the plot if it would hang over the edge; whatever it lands on is dug up.
 function plantAt(gardenId, [i, j]) {
-  const n = config.decorCatalogue.gardenSize;
-  const list = gardenList(gardenId);
+  const plan = planFor(gardenId, [i, j]);
   let next;
   let note;
-  if (plantTool === 'remove') {
-    next = list.filter((it) => !covers(it, [i, j]));
-    if (next.length === list.length) {
+  if (plan.remove) {
+    if (!plan.tiles.length) {
       decorNote = `Nothing grows on tile ${i + 1}, ${j + 1}.`;
       renderDecorPanel();
       return;
     }
+    next = plan.keep;
     note = `Dug up tile ${i + 1}, ${j + 1}.`;
   } else {
-    const p = plantOf(plantTool);
-    const item = { kind: plantTool, at: [0, 0] };
-    if (benchTurn && p.turns) item.turn = true;
-    const [w, d] = plantSize(item);
-    item.at = [Math.min(i, n - w), Math.min(j, n - d)];
-    const tiles = plantTiles(item);
-    next = list.filter((it) => !tiles.some((t) => covers(it, t)));
-    next.push(item);
-    note = `Planted ${p.name.toLowerCase()} on tile ${item.at[0] + 1}, ${item.at[1] + 1}.`;
+    next = [...plan.keep, plan.item];
+    note = `Planted ${plantOf(plan.item.kind).name.toLowerCase()} on tile ${plan.item.at[0] + 1}, ${plan.item.at[1] + 1}.`;
   }
   saveDecor({ ...config.decor, gardens: { ...config.decor.gardens, [gardenId]: next } }, note);
 }
@@ -1602,14 +1683,14 @@ function renderDecorPanel() {
   const error = decorError ? `<p class="form-error" role="alert">${escapeXml(decorError)}</p>` : '';
   const status = `<p class="hint decor-status" aria-live="polite">${escapeXml(decorNote)}</p>`;
   if (focusedGarden) {
-    $('decorate-h').textContent = `Plant the ${gardenName(focusedGarden).toLowerCase()}`;
-    const chip = (id, name, extra = '') => `<label class="chip"><input type="radio" name="plant-tool" value="${id}" ${plantTool === id ? 'checked' : ''}>${escapeXml(name)}${extra}</label>`;
+    $('decorate-h').textContent = `Plant the ${gardenName(focusedGarden)}`;
+    const chip = (id, name, extra = '', thumb = '') => `<label class="chip"><input type="radio" name="plant-tool" value="${id}" ${plantTool === id ? 'checked' : ''}>${thumb}${escapeXml(name)}${extra}</label>`;
     const size = (p) => (p.w * p.d > 1 ? ` <span class="size">${p.w}×${p.d}</span>` : '');
     const bench = plantOf(plantTool)?.turns
       ? `<label class="switch"><input type="checkbox" id="bench-turn" ${benchTurn ? 'checked' : ''}> <span>Turn it the other way</span></label>` : '';
     $('decorate-body').innerHTML = `
       <fieldset class="chips"><legend>What to plant</legend>
-        <div class="options">${cat.plants.map((p) => chip(p.id, p.name, size(p))).join('')}${chip('remove', 'Dig up')}</div>
+        <div class="options">${cat.plants.map((p) => chip(p.id, p.name, size(p), plantThumb(p.id, p.w > 1 || p.d > 1))).join('')}${chip('remove', 'Dig up')}</div>
       </fieldset>
       ${bench}
       <p class="hint">Click a tile on the plot. Pieces marked 2×2 take four tiles; whatever they land on is dug up.</p>
@@ -1649,9 +1730,11 @@ $('decorate-body').addEventListener('change', (e) => {
     plantTool = t.value;
     decorNote = '';
     renderDecorPanel();
+    showGhost();
     $('decorate-body').querySelector(`input[name="plant-tool"][value="${plantTool}"]`)?.focus();
   } else if (t.id === 'bench-turn') {
     benchTurn = t.checked;
+    showGhost();
   } else if (t.name === 'floor') {
     const name = config.decorCatalogue.floors.find((f) => f.id === t.value)?.name ?? t.value;
     setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), floor: t.value }, `Floor changed to ${name.toLowerCase()}.`);
@@ -1706,6 +1789,61 @@ $('report-open').addEventListener('click', async () => {
   }
 });
 $('report-files').addEventListener('click', () => bridge.showReportFiles?.());
+
+// ---- wind ------------------------------------------------------------------------
+
+// Now and then a gust blows through: garden trees and flowers bend, and
+// petals (or leaves, if nothing is in blossom) blow off the trees and across
+// the hospital. Nothing happens for people who ask for reduced motion.
+function gardenItemsOf(id) {
+  return config.decor.gardens[id] ?? config.decorCatalogue?.defaultGardens?.[id] ?? [];
+}
+
+function gust() {
+  if (reducedMotion.matches || document.hidden) return;
+  const geometry = $('geometry');
+  geometry.classList.remove('gust');
+  void geometry.getBoundingClientRect(); // restart the animation
+  geometry.classList.add('gust');
+  setTimeout(() => geometry.classList.remove('gust'), 3600);
+
+  // Where the blossoming trees are on screen: petals start there.
+  const stage = $('gust').getBoundingClientRect();
+  const ctm = svg.getScreenCTM();
+  const sources = [];
+  for (const g of config.gardens ?? []) {
+    const plot = gardenPlot(g.id);
+    if (!plot) continue;
+    for (const it of gardenItemsOf(g.id)) {
+      if (!BLOSSOMING.has(it.kind)) continue;
+      const big = it.kind !== 'cherry-sapling';
+      const [x, y] = P(plot.at[0] + it.at[0] + (big ? 1 : 0.5), plot.at[1] + it.at[1] + (big ? 1 : 0.5), plot.z + (big ? 2.3 : 1.2));
+      if (ctm) sources.push([ctm.a * x + ctm.c * y + ctm.e - stage.left, ctm.b * x + ctm.d * y + ctm.f - stage.top]);
+    }
+  }
+  const leaves = sources.length === 0;
+  const n = leaves ? 14 : 30;
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const from = !leaves && i % 3 !== 0 ? sources[i % sources.length] : [-20, stage.height * (0.1 + Math.random() * 0.7)];
+    const jitter = !leaves && i % 3 !== 0 ? 30 : 0;
+    const x0 = from[0] + (Math.random() - 0.5) * jitter;
+    const y0 = from[1] + (Math.random() - 0.5) * jitter;
+    const dx = stage.width * (0.35 + Math.random() * 0.5) + (from[0] < 0 ? stage.width * 0.2 : 0);
+    const dy = 40 + Math.random() * 160;
+    html += `<span class="petal${leaves ? ' leaf' : ''}" style="left:${x0.toFixed(0)}px;top:${y0.toFixed(0)}px;--dx:${dx.toFixed(0)}px;--dy:${dy.toFixed(0)}px;--dur:${(3 + Math.random() * 2).toFixed(2)}s;--delay:${(Math.random() * 1.6).toFixed(2)}s"></span>`;
+  }
+  $('gust').innerHTML = html;
+  setTimeout(() => { $('gust').innerHTML = ''; }, 7000);
+}
+
+(function windLoop() {
+  setTimeout(() => {
+    gust();
+    windLoop();
+  }, 45_000 + Math.random() * 75_000);
+}());
+setTimeout(gust, 12_000); // a first one soon after opening
 
 // ---- updates -------------------------------------------------------------------
 

@@ -279,6 +279,42 @@ function flowerBed(x, y, z, colours, seed, tall = 0.18) {
   return s;
 }
 
+// A soft blossom puff: a shaded disc with a paler cap, then a few flowers.
+function puff(x, y, z, r, light, dark, seed) {
+  const [sx, sy] = P(x, y, z);
+  const R = r * 32;
+  const rnd = seeded(seed);
+  let s = `<circle cx="${f1(sx)}" cy="${f1(sy)}" r="${f1(R)}" fill="${dark}"/>` +
+    `<circle cx="${f1(sx - R * 0.14)}" cy="${f1(sy - R * 0.16)}" r="${f1(R * 0.84)}" fill="${light}"/>`;
+  for (let k = 0; k < 5; k++) {
+    const a = rnd() * Math.PI * 2;
+    const d = rnd() * R * 0.7;
+    s += `<circle cx="${f1(sx + Math.cos(a) * d)}" cy="${f1(sy + Math.sin(a) * d * 0.8)}" r="${f1(R * 0.12)}" fill="#ffffff" fill-opacity="0.75"/>`;
+  }
+  return s;
+}
+
+// A cherry tree: a dark, forked trunk under clouds of pale pink blossom,
+// with petals already fallen round its foot.
+function cherry(x, y, z, scale, seed) {
+  const bark = mix(M.ink.left, M.coral.left, 0.3);
+  const light = mix(M.rose.top, '#ffffff', 0.35);
+  const dark = mix(M.rose.left, M.coral.left, 0.25);
+  const line = (pts, w) => `<polyline points="${pts.map(([a, b, c]) => P(a, b, c).map(f1).join(',')).join(' ')}" fill="none" stroke="${bark}" stroke-width="${f1(w)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const k = scale;
+  let s = '';
+  const rnd = seeded(seed * 7 + 3);
+  for (let n = 0; n < 9; n++) {
+    s += dot(x + (rnd() - 0.5) * 1.6 * k, y + (rnd() - 0.5) * 1.6 * k, z + 0.01, 0.05, n % 2 ? light : dark);
+  }
+  s += line([[x, y, z], [x + 0.05 * k, y, z + 0.7 * k], [x - 0.1 * k, y + 0.05 * k, z + 1.1 * k]], 7 * k);
+  s += line([[x + 0.05 * k, y, z + 0.7 * k], [x + 0.35 * k, y - 0.2 * k, z + 1.25 * k]], 4.5 * k);
+  s += line([[x - 0.1 * k, y + 0.05 * k, z + 1.1 * k], [x - 0.35 * k, y + 0.25 * k, z + 1.45 * k]], 3.5 * k);
+  const puffs = [[-0.35, 0.25, 1.55, 0.42], [0.35, -0.2, 1.4, 0.4], [0, 0, 1.75, 0.5], [0.3, 0.25, 1.95, 0.36], [-0.25, -0.2, 2.05, 0.34]];
+  puffs.forEach(([dx, dy, dz, r], i) => { s += puff(x + dx * k, y + dy * k, z + dz * k, r * k, light, dark, seed + i); });
+  return s;
+}
+
 function tree(x, y, z, scale, crown) {
   return box(x - 0.06 * scale, y - 0.06 * scale, z, 0.12 * scale, 0.12 * scale, 0.9 * scale, M.sand) +
     ball(x, y, z + 1.25 * scale, 0.55 * scale, crown);
@@ -325,14 +361,24 @@ const PLANT_PIECES = {
   'big-tree': (x, y, z) => tree(x + 1, y + 1, z, 1.7, M.leaf),
   'blossom-tree': (x, y, z) =>
     tree(x + 1, y + 1, z, 1.55, M.rose) + ball(x + 0.7, y + 1.2, z + 1.85, 0.45, M.coral) + ball(x + 1.3, y + 0.8, z + 2.2, 0.4, M.rose),
+  'cherry-tree': (x, y, z, n) => cherry(x + 1, y + 1, z, 1.45, n),
+  'cherry-sapling': (x, y, z, n) => cherry(x + 0.5, y + 0.5, z, 0.75, n),
   fountain: (x, y, z) =>
     cylinder(x + 1, y + 1, z, 0.85, 0.3, M.stone) + dot(x + 1, y + 1, z + 0.3, 0.72, M.sky.top) +
     cylinder(x + 1, y + 1, z + 0.3, 0.14, 0.55, M.stone) + cylinder(x + 1, y + 1, z + 0.85, 0.36, 0.1, M.stone) +
     dot(x + 1, y + 1, z + 0.95, 0.28, M.sky.top) + bloom(x + 1, y + 1, z + 1.15, 0.08, M.white.top),
 };
 
+// Pieces that bend when the wind blows through (see the gust in app.js).
+const SWAYS = new Set(['tulips', 'daisies', 'lavender', 'roses', 'shrub', 'small-tree', 'big-tree', 'blossom-tree', 'cherry-tree', 'cherry-sapling']);
+// Pieces that shed petals into a gust.
+export const BLOSSOMING = new Set(['blossom-tree', 'cherry-tree', 'cherry-sapling']);
+
 export function drawPlant(kind, x, y, z, seed = 1, turn = false) {
-  return PLANT_PIECES[kind] ? PLANT_PIECES[kind](x, y, z, seed, turn) : '';
+  if (!PLANT_PIECES[kind]) return '';
+  const s = PLANT_PIECES[kind](x, y, z, seed, turn);
+  // Each swaying piece gets its own delay, so a gust ripples across.
+  return SWAYS.has(kind) ? `<g class="sway" style="animation-delay:${((seed * 37) % 9) * 60}ms">${s}</g>` : s;
 }
 
 export const DRAWN_PLANTS = Object.keys(PLANT_PIECES);

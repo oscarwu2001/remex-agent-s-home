@@ -10,7 +10,7 @@ const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
 const { readRoster } = require('../src/core/roster');
 const { wslRoots, rootKey } = require('../src/core/wsl');
 const {
-  DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
+  DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
@@ -57,14 +57,14 @@ function loadLayout() {
     if (err.code !== 'ENOENT') {
       startupProblems.push({ label: `layout.json could not be read (${err.code}); showing the core hospital`, detail: file, count: 1 });
     }
-    return { file, layout: { departments: [] } };
+    return { file, layout: { departments: [], gardens: [] } };
   }
   try {
     return { file, layout: validateLayout(JSON.parse(text)) };
   } catch (err) {
     const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
     startupProblems.push({ label: `layout.json ignored: ${reason}; showing the core hospital`, detail: file, count: 1 });
-    return { file, layout: { departments: [] } };
+    return { file, layout: { departments: [], gardens: [] } };
   }
 }
 
@@ -72,7 +72,7 @@ function loadLayout() {
 // from layout.json so a bad decoration can never cost the user their
 // departments. Entries that do not check out are left out and each one is
 // reported; the file itself is only rewritten when the user changes decor.
-function loadDecor(rooms) {
+function loadDecor(rooms, gardens) {
   const file = path.join(app.getPath('userData'), 'decor.json');
   let text;
   try {
@@ -82,16 +82,16 @@ function loadDecor(rooms) {
     if (err.code !== 'ENOENT') {
       startupProblems.push({ label: `decor.json could not be read (${err.code}); showing the default look`, detail: file, count: 1 });
     }
-    return { file, decor: decorCatalogue.checkDecor(undefined, rooms).decor };
+    return { file, decor: decorCatalogue.checkDecor(undefined, rooms, gardens).decor };
   }
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch {
     startupProblems.push({ label: 'decor.json ignored: it is not valid JSON; showing the default look', detail: file, count: 1 });
-    return { file, decor: decorCatalogue.checkDecor(undefined, rooms).decor };
+    return { file, decor: decorCatalogue.checkDecor(undefined, rooms, gardens).decor };
   }
-  const { decor, problems: found } = decorCatalogue.checkDecor(parsed, rooms);
+  const { decor, problems: found } = decorCatalogue.checkDecor(parsed, rooms, gardens);
   for (const p of found) startupProblems.push({ label: `decor.json: ${p}; left out`, detail: file, count: 1 });
   return { file, decor };
 }
@@ -189,7 +189,7 @@ app.whenReady().then(() => {
   const { file: overridesFile, overrides: fileOverrides } = loadOverrides(ids());
   // rooms.json, written by hand, wins over assignments made in the app.
   let overrides = { ...overridesFrom(layout), ...fileOverrides };
-  const { file: decorFile, decor: loadedDecor } = loadDecor(roomsWith(layout));
+  const { file: decorFile, decor: loadedDecor } = loadDecor(roomsWith(layout), gardensWith(layout));
   let decor = loadedDecor;
   tracker = new Tracker({ overrides });
   const sink = {
@@ -238,6 +238,7 @@ app.whenReady().then(() => {
     layout,
     departmentKinds: DEPARTMENT_KINDS,
     openCells: openCells(layout),
+    gardens: gardensWith(layout),
     decor,
     decorCatalogue: {
       floors: decorCatalogue.FLOORS,
@@ -245,7 +246,6 @@ app.whenReady().then(() => {
       spotsPerRoom: decorCatalogue.SPOTS_PER_ROOM,
       decorations: decorCatalogue.DECORATIONS,
       gardenSize: decorCatalogue.GARDEN_SIZE,
-      gardens: decorCatalogue.GARDENS,
       plants: decorCatalogue.PLANTS,
       defaultGardens: decorCatalogue.DEFAULT_GARDENS,
     },
@@ -333,7 +333,10 @@ app.whenReady().then(() => {
     }
     try {
       fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
-      fs.writeFileSync(layoutFile, `${JSON.stringify({ departments: next.departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents })) }, null, 2)}\n`);
+      fs.writeFileSync(layoutFile, `${JSON.stringify({
+        departments: next.departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents })),
+        gardens: next.gardens,
+      }, null, 2)}\n`);
     } catch (err) {
       return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
     }
@@ -341,8 +344,12 @@ app.whenReady().then(() => {
     // A removed department takes its floor and decorations with it, so
     // decor.json never names a room that is gone.
     const gone = Object.keys(decor.rooms).filter((id) => !roomsWith(layout).some((r) => r.id === id));
-    if (gone.length) {
-      decor = { ...decor, rooms: Object.fromEntries(Object.entries(decor.rooms).filter(([id]) => !gone.includes(id))) };
+    const goneGardens = Object.keys(decor.gardens).filter((id) => !gardensWith(layout).some((g) => g.id === id));
+    if (gone.length || goneGardens.length) {
+      decor = {
+        rooms: Object.fromEntries(Object.entries(decor.rooms).filter(([id]) => !gone.includes(id))),
+        gardens: Object.fromEntries(Object.entries(decor.gardens).filter(([id]) => !goneGardens.includes(id))),
+      };
       try {
         writeDecor(decorFile, decor);
       } catch (err) {
@@ -357,7 +364,7 @@ app.whenReady().then(() => {
 
   // Saving decor: every entry must check out, or nothing is written.
   ipcMain.handle('home:save-decor', (_event, proposed) => {
-    const { decor: next, problems: found } = decorCatalogue.checkDecor(proposed, roomsWith(layout));
+    const { decor: next, problems: found } = decorCatalogue.checkDecor(proposed, roomsWith(layout), gardensWith(layout));
     if (found.length) return { ok: false, error: `That could not be saved: ${found[0]}` };
     try {
       writeDecor(decorFile, next);

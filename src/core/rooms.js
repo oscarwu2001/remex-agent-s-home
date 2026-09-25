@@ -18,8 +18,13 @@ const ROOMS = [
   { id: 'general-ward', name: 'General Ward', purpose: 'Every other agent', cell: [2, 2] },
 ];
 
-// Core cells holding scenery (a garden and a grove), not rooms.
-const SCENERY_CELLS = [[0, 2], [2, 0]];
+// The two gardens built into the core. Users may add more in the ring
+// (layout.gardens); every garden is a plot people can plant, never a room.
+const SCENERY = [
+  { id: 'garden', name: 'Garden', cell: [0, 2] },
+  { id: 'grove', name: 'Grove', cell: [2, 0] },
+];
+const SCENERY_CELLS = SCENERY.map((g) => g.cell);
 const GRID_MIN = -1;
 const GRID_MAX = 3;
 
@@ -97,12 +102,16 @@ function slug(s) {
 // is already there (the core, or a department listed before it), because
 // that is the room its bridge or stairs joins.
 function validateLayout(layout) {
-  if (layout === undefined || layout === null) return { departments: [] };
+  if (layout === undefined || layout === null) return { departments: [], gardens: [] };
   if (typeof layout !== 'object' || !Array.isArray(layout.departments)) {
     throw new TypeError('layout must be an object with a "departments" list');
   }
+  if (layout.gardens !== undefined && !Array.isArray(layout.gardens)) throw new TypeError('"gardens" must be a list');
   const taken = new Map(ROOMS.map((r) => [key(r.cell), r.id]));
   for (const c of SCENERY_CELLS) taken.set(key(c), 'scenery');
+  // Gardens first: they only need a free cell, and departments must then
+  // steer clear of them. A garden is never a way in to a department.
+  const gardens = checkGardens(layout.gardens ?? [], taken);
   const ids = new Set(ROOM_IDS);
   // Ids already written in the file, so a new department never takes one.
   const reserved = new Set(layout.departments.map((d) => d && d.id).filter((x) => typeof x === 'string'));
@@ -144,7 +153,39 @@ function validateLayout(layout) {
       cell: [c, r], via, agents,
     };
   });
-  return { departments };
+  return { departments, gardens };
+}
+
+function checkGardens(list, taken) {
+  const used = new Set(list.map((g) => g && g.id).filter((id) => typeof id === 'string' && /^plot-[0-9]{1,4}$/.test(id)));
+  const ids = new Set();
+  let next = 1;
+  return list.map((g, i) => {
+    const where = `garden ${i + 1}`;
+    if (!g || typeof g !== 'object') throw new TypeError(`${where} is not an object`);
+    const cell = g.cell;
+    if (!Array.isArray(cell) || cell.length !== 2 || !cell.every(Number.isInteger)) {
+      throw new TypeError(`${where} needs a cell like [col, row]`);
+    }
+    const [c, r] = cell;
+    if (c < GRID_MIN || c > GRID_MAX || r < GRID_MIN || r > GRID_MAX) throw new RangeError(`${where} is outside the 5 x 5 grid`);
+    if (taken.has(key(cell))) throw new RangeError(`${where} sits on a cell that is already taken`);
+    // Ids are kept once given, so a garden keeps its planting when another goes.
+    let id = typeof g.id === 'string' && /^plot-[0-9]{1,4}$/.test(g.id) && !ids.has(g.id) ? g.id : undefined;
+    if (!id) {
+      while (used.has(`plot-${next}`) || ids.has(`plot-${next}`)) next++;
+      id = `plot-${next}`;
+    }
+    ids.add(id);
+    taken.set(key(cell), 'scenery');
+    const name = typeof g.name === 'string' && g.name.trim() ? g.name.trim().slice(0, 30) : `Garden ${id.slice(5)}`;
+    return { id, name, cell: [c, r] };
+  });
+}
+
+// Every garden, the built-in two first.
+function gardensWith(layout) {
+  return [...SCENERY.map((g) => ({ ...g, cell: [...g.cell] })), ...(layout.gardens ?? []).map((g) => ({ ...g, cell: [...g.cell] }))];
 }
 
 // Every room, core first, then departments.
@@ -165,7 +206,7 @@ function overridesFrom(layout) {
 // Free ring cells where a department could go now.
 function openCells(layout) {
   const taken = new Map(roomsWith(layout).map((r) => [key(r.cell), r.id]));
-  for (const c of SCENERY_CELLS) taken.set(key(c), 'scenery');
+  for (const g of gardensWith(layout)) taken.set(key(g.cell), 'scenery');
   const open = [];
   for (let r = GRID_MIN; r <= GRID_MAX; r++) {
     for (let c = GRID_MIN; c <= GRID_MAX; c++) {
@@ -192,6 +233,6 @@ function roomFor(agentType, overrides = {}) {
 }
 
 module.exports = {
-  ROOMS, ROOM_IDS, DEFAULT_ASSIGNMENTS, DEPARTMENT_KINDS, SCENERY_CELLS, GRID_MIN, GRID_MAX,
-  roomFor, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
+  ROOMS, ROOM_IDS, DEFAULT_ASSIGNMENTS, DEPARTMENT_KINDS, SCENERY, SCENERY_CELLS, GRID_MIN, GRID_MAX,
+  roomFor, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
 };

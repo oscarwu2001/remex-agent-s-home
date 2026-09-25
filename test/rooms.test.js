@@ -111,3 +111,36 @@ test('removing one of two same-name departments keeps the id of the other', () =
   const added = validateLayout({ departments: [saved[1], { kind: 'custom', name: 'Hand Surgery', cell: [3, 1] }] });
   assert.deepEqual(added.departments.map((d) => d.id), ['dept-hand-surgery-2', 'dept-hand-surgery']);
 });
+
+const { gardensWith, SCENERY } = require('../src/core/rooms');
+
+test('a layout without gardens still loads, with just the two built-in ones', () => {
+  const layout = validateLayout({ departments: [] });
+  assert.deepEqual(layout.gardens, []);
+  assert.deepEqual(gardensWith(layout).map((g) => g.id), SCENERY.map((g) => g.id));
+});
+
+test('a garden takes a free ring cell and gets a stable id and name', () => {
+  const layout = validateLayout({ departments: [], gardens: [{ cell: [3, 1] }, { cell: [-1, 1], name: '  Rose court  ' }] });
+  assert.deepEqual(layout.gardens, [
+    { id: 'plot-1', name: 'Garden 1', cell: [3, 1] },
+    { id: 'plot-2', name: 'Rose court', cell: [-1, 1] },
+  ]);
+  // Removing the first keeps the second's id, so its planting stays with it.
+  const again = validateLayout({ departments: [], gardens: [layout.gardens[1], { cell: [1, 3] }] });
+  assert.deepEqual(again.gardens.map((g) => g.id), ['plot-2', 'plot-1']);
+});
+
+test('gardens and departments never share a cell, and gardens are not a way in', () => {
+  assert.throws(() => validateLayout({ departments: [{ kind: 'spine', cell: [3, 1] }], gardens: [{ cell: [3, 1] }] }), /already taken/);
+  assert.throws(() => validateLayout({ departments: [], gardens: [{ cell: [1, 1] }] }), /already taken/);
+  assert.throws(() => validateLayout({ departments: [], gardens: [{ cell: [0, 2] }] }), /already taken/);
+  assert.throws(() => validateLayout({ departments: [], gardens: [{ cell: [4, 1] }] }), /outside the 5 x 5 grid/);
+  // A department beyond a garden has no room to join.
+  assert.throws(() => validateLayout({ departments: [{ kind: 'ent', cell: [3, 3] }], gardens: [{ cell: [3, 2] }] }), /not next to any room/);
+});
+
+test('the cell a garden takes is no longer open for building', () => {
+  const layout = validateLayout({ departments: [], gardens: [{ cell: [3, 1] }] });
+  assert.ok(!openCells(layout).some(([c, r]) => c === 3 && r === 1));
+});

@@ -83,9 +83,11 @@ function ends(c) {
   return [[...c.fromXY, LAYOUT[c.a].z], [...c.toXY, LAYOUT[c.b].z]];
 }
 
-// Scenery islands also rise and sink with the view. Each is a garden plot
-// of 4 x 4 tiles (GARDEN_SIZE in src/core/decor.js) starting at `at`.
-const SCENERY = { garden: { cell: [0, 2], at: [1, 17], z: 1 }, grove: { cell: [2, 0], at: [17, 1], z: 1 } };
+// Garden islands (the built-in two and any the user added, from the
+// config) also rise and sink with the view. Each is a plot of 4 x 4 tiles
+// (GARDEN_SIZE in src/core/decor.js) starting at `at`, a tile in from the
+// corner of its cell.
+const SCENERY = {}; // gardenId -> { cell, at, z }
 const PLOT = 4;
 
 // Decoration spots, in room-local tiles: clear of the furniture in both room
@@ -110,8 +112,13 @@ let plantSize = {}; // kind -> [w, d], from the catalogue
 
 // Lays out the rooms the config lists and joins each department to the room
 // it was placed next to.
-export function configureRooms(rooms) {
+export function configureRooms(rooms, gardens = []) {
   for (const k of Object.keys(LAYOUT)) delete LAYOUT[k];
+  for (const k of Object.keys(SCENERY)) delete SCENERY[k];
+  for (const g of gardens) {
+    const [c, r] = g.cell;
+    SCENERY[g.id] = { cell: [c, r], at: [c * CELL + 1, r * CELL + 1], z: 0 };
+  }
   CONNECTORS = [];
   deptMaterial.clear();
   let n = 0;
@@ -598,6 +605,33 @@ export function gardenOutline(id) {
   return [[x, y], [x + PLOT, y], [x + PLOT, y + PLOT], [x, y + PLOT]].map(([a, b]) => P(a, b, g.z));
 }
 
+// Where a garden plot is: { cell, at, z }, or undefined.
+export function gardenPlot(id) {
+  const g = SCENERY[id];
+  return g ? { cell: [...g.cell], at: [...g.at], z: g.z } : undefined;
+}
+
+// A see-through preview of a piece about to be planted: its footprint and
+// the piece itself. `tiles` are the plot tiles it covers; `remove` outlines
+// what digging up would take instead.
+export function plantPreview(id, { kind, at, turn, tiles, remove }) {
+  const g = SCENERY[id];
+  if (!g) return '';
+  const cls = remove ? 'ghost-foot remove' : 'ghost-foot';
+  let s = tiles.map(([i, j]) => `<polygon class="${cls}" points="${gardenTile(id, i, j).map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>`).join('');
+  if (!remove && kind) s += `<g class="ghost-plant">${drawPlant(kind, g.at[0] + at[0], g.at[1] + at[1], g.z, 1, turn)}</g>`;
+  return s;
+}
+
+// A small picture of a piece, for the planting chips: an svg viewBox around
+// the piece drawn at the world origin in the current view.
+export function plantThumb(kind, big) {
+  const c = big ? 1 : 0.5;
+  const [cx, cy] = P(c, c, big ? 1.1 : 0.55);
+  const w = big ? 150 : 80;
+  return `<svg class="thumb" viewBox="${(cx - w / 2).toFixed(1)} ${(cy - w / 2).toFixed(1)} ${w} ${w}" aria-hidden="true">${drawPlant(kind, 0, 0, 0, 3, false)}</svg>`;
+}
+
 // Screen box around a garden, for zooming in.
 export function gardenFrame(id) {
   const g = SCENERY[id];
@@ -611,7 +645,7 @@ export function gardenFrame(id) {
 
 // Floating cubes in empty ring cells; a department built there moves them on.
 function floaters() {
-  const taken = new Set(Object.values(LAYOUT).map((r) => `${r.x / CELL},${r.y / CELL}`));
+  const taken = new Set([...Object.values(LAYOUT), ...Object.values(SCENERY)].map((r) => r.cell.join(',')));
   return [
     [-4, 4, 3, 0.8, M.coral, 'f1'], [24, 13, 5, 0.6, M.sky, 'f2'], [6, 25, 0.5, 0.7, M.lilac, 'f3'],
   ]

@@ -102,3 +102,12 @@ test('a malformed file is one problem, not a crash', () => {
   assert.match(checkDecor({ rooms: [] }, rooms).problems[0], /"rooms" is not an object/);
   assert.match(checkDecor({ gardens: { garden: 'x' } }, rooms).problems[0], /is not a list/);
 });
+
+test('a garden added in the layout can be planted; one that is gone cannot', () => {
+  const { gardensWith } = require('../src/core/rooms');
+  const layout = validateLayout({ departments: [], gardens: [{ cell: [3, 1] }] });
+  const gardens = gardensWith(layout);
+  const input = { gardens: { 'plot-1': [{ kind: 'cherry-tree', at: [1, 1] }] } };
+  assert.deepEqual(checkDecor(input, roomsWith(layout), gardens).problems, []);
+  assert.match(checkDecor(input, roomsWith(layout)).problems[0], /garden "plot-1" does not exist/);
+});

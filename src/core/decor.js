@@ -1,5 +1,7 @@
 'use strict';
 
+const { SCENERY } = require('./rooms');
+
 // What people can choose when they make the hospital their own: a floor for
 // each room, a decoration on each of a room's spots, and what grows in the
 // two gardens. This module owns the catalogue and checks a saved choice; the
@@ -51,13 +53,10 @@ const DECORATIONS = [
   { id: 'spine-model', name: 'Spine model', rooms: ['department', 'radiology'] },
 ];
 
-// The gardens are square plots of GARDEN_SIZE x GARDEN_SIZE tiles. A plant
+// Gardens (the built-in two in rooms.js SCENERY, and any the user adds in
+// the layout) are square plots of GARDEN_SIZE x GARDEN_SIZE tiles. A plant
 // covers w x d tiles; a bench turned round covers d x w.
 const GARDEN_SIZE = 4;
-const GARDENS = [
-  { id: 'garden', name: 'Garden' },
-  { id: 'grove', name: 'Grove' },
-];
 const PLANTS = [
   { id: 'tulips', name: 'Tulips', w: 1, d: 1 },
   { id: 'daisies', name: 'Daisies', w: 1, d: 1 },
@@ -70,6 +69,8 @@ const PLANTS = [
   { id: 'bench', name: 'Bench', w: 2, d: 1, turns: true },
   { id: 'big-tree', name: 'Big tree', w: 2, d: 2 },
   { id: 'blossom-tree', name: 'Blossom tree', w: 2, d: 2 },
+  { id: 'cherry-tree', name: 'Cherry blossom', w: 2, d: 2 },
+  { id: 'cherry-sapling', name: 'Young cherry', w: 1, d: 1 },
   { id: 'fountain', name: 'Fountain', w: 2, d: 2 },
 ];
 const PLANT_BY_ID = Object.fromEntries(PLANTS.map((p) => [p.id, p]));
@@ -131,11 +132,12 @@ function checkGarden(list, where, problems) {
   return out;
 }
 
-// Checks a saved decor.json against the rooms that exist now and returns a
+// Checks a saved decor.json against the rooms and gardens that exist now
+// (roomsWith / gardensWith of the layout) and returns a
 // clean copy plus a list of what was left out and why. Nothing is guessed:
 // a bad entry is dropped and reported, never repaired into something else.
 // Rooms the file names that no longer exist are dropped too, and reported.
-function checkDecor(input, rooms) {
+function checkDecor(input, rooms, gardens = SCENERY) {
   const problems = [];
   const decor = { rooms: {}, gardens: {} };
   if (input === undefined || input === null) return { decor, problems };
@@ -181,7 +183,7 @@ function checkDecor(input, rooms) {
   if (typeof gardensIn !== 'object' || Array.isArray(gardensIn)) problems.push('"gardens" is not an object');
   else {
     for (const [id, list] of Object.entries(gardensIn)) {
-      if (!GARDENS.some((g) => g.id === id)) {
+      if (!gardens.some((g) => g.id === id)) {
         problems.push(`garden "${id}" does not exist`);
         continue;
       }
@@ -193,6 +195,6 @@ function checkDecor(input, rooms) {
 }
 
 module.exports = {
-  FLOORS, DEFAULT_FLOOR, SPOTS_PER_ROOM, DECORATIONS, GARDEN_SIZE, GARDENS, PLANTS, DEFAULT_GARDENS,
+  FLOORS, DEFAULT_FLOOR, SPOTS_PER_ROOM, DECORATIONS, GARDEN_SIZE, PLANTS, DEFAULT_GARDENS,
   footprint, decorationsFor, checkDecor,
 };
