@@ -1,8 +1,9 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const { Tracker } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
@@ -12,6 +13,7 @@ const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
 const decorCatalogue = require('../src/core/decor');
+const weatherService = require('../src/core/weather');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -147,6 +149,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // The spell checker downloads its dictionaries from Google.
+      spellcheck: false,
     },
   });
 
@@ -162,7 +166,23 @@ function createWindow() {
   });
 }
 
+// Local only: Chromium's own background fetches (component updates and the
+// like) are turned off before the app is ready, as a backstop to the spell
+// checker being switched off below. Nothing leaves the machine unless the
+// user turns on the real weather or presses Update.
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-domain-reliability');
+
 app.whenReady().then(() => {
+  // The spell checker would fetch a dictionary from Google at start; the app
+  // has no text worth checking, so it is off, with no languages to fetch.
+  session.defaultSession.setSpellCheckerEnabled(false);
+  try {
+    session.defaultSession.setSpellCheckerLanguages([]);
+  } catch {
+    // macOS uses the system spell checker and fetches nothing; safe to skip.
+  }
   const { file: layoutFile, layout: loaded } = loadLayout();
   let layout = loaded;
   const ids = () => new Set(roomsWith(layout).map((r) => r.id));
@@ -282,7 +302,7 @@ app.whenReady().then(() => {
       height: 900,
       title: 'Agent performance',
       autoHideMenuBar: true,
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false },
     });
     reportWin.webContents.on('will-navigate', (e) => e.preventDefault());
     reportWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -346,6 +366,97 @@ app.whenReady().then(() => {
     }
     decor = next;
     return { ok: true, decor };
+  });
+
+  // The real weather: the app's only trip online, made only when the user
+  // has turned "Use the real weather" on (the renderer never asks before
+  // that), only to Open-Meteo, and carrying only a place name or a rounded
+  // latitude and longitude.
+  async function askWeatherService(url) {
+    if (!weatherService.HOSTS.has(new URL(url).host)) throw new Error('not the weather service');
+    // Electron's own network stack, so the system proxy settings apply.
+    const res = await net.fetch(url, { signal: AbortSignal.timeout(10_000), headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error(`the weather service answered ${res.status}`);
+    return res.json();
+  }
+  const reason = (err) => (err.name === 'TimeoutError' ? 'the weather service did not answer in time'
+    : /^net::ERR_/.test(err.message) ? `the weather service could not be reached (${err.message.slice(5)}); check the internet connection or proxy`
+      : err.message);
+  ipcMain.handle('home:weather-search', async (_event, name) => {
+    try {
+      return { ok: true, places: weatherService.parsePlaces(await askWeatherService(weatherService.searchUrl(name))) };
+    } catch (err) {
+      return { ok: false, error: reason(err) };
+    }
+  });
+  ipcMain.handle('home:weather-now', async (_event, place, unit) => {
+    try {
+      return { ok: true, now: weatherService.parseCurrent(await askWeatherService(weatherService.forecastUrl(place, unit))) };
+    } catch (err) {
+      return { ok: false, error: reason(err) };
+    }
+  });
+
+  // Updating: only when the user presses the button, and only for a copy run
+  // from a git clone (npm start). It pulls fast-forward only, refuses when
+  // the clone has local edits, and restarts on the new code. An installed
+  // copy has no clone to pull into and is updated from a new installer.
+  const repo = app.getAppPath();
+  const git = (args, timeout = 20_000) => new Promise((resolve, reject) => {
+    execFile('git', args, { cwd: repo, timeout, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (err, stdout, stderr) => {
+        if (!err) return resolve(stdout.trim());
+        const first = String(stderr || '').trim().split('\n').find((l) => l.trim()) || err.message;
+        return reject(new Error(err.code === 'ENOENT' ? 'git was not found; install Git for Windows and try again' : first));
+      });
+  });
+  function updateInfo() {
+    if (app.isPackaged || !fs.existsSync(path.join(repo, '.git'))) {
+      return { available: false, reason: 'This copy was installed from the setup file. To update, download the newest build from the repository’s Actions tab and run it.' };
+    }
+    return { available: true };
+  }
+  ipcMain.handle('home:update-info', async () => {
+    const info = updateInfo();
+    if (!info.available) return { ...info, version: app.getVersion() };
+    try {
+      const [branch, commit] = await Promise.all([git(['rev-parse', '--abbrev-ref', 'HEAD']), git(['rev-parse', '--short', 'HEAD'])]);
+      return { ...info, version: app.getVersion(), branch, commit };
+    } catch (err) {
+      return { available: false, reason: `The git clone could not be read: ${err.message}`, version: app.getVersion() };
+    }
+  });
+  ipcMain.handle('home:update', async () => {
+    const info = updateInfo();
+    if (!info.available) return { ok: false, error: info.reason };
+    try {
+      const dirty = await git(['status', '--porcelain', '--untracked-files=no']);
+      if (dirty) {
+        const n = dirty.split('\n').length;
+        return { ok: false, error: `This clone has ${n} changed file${n === 1 ? '' : 's'} not yet committed. Commit or stash them first, so the update cannot overwrite your work.` };
+      }
+      const before = await git(['rev-parse', 'HEAD']);
+      await git(['pull', '--ff-only'], 180_000);
+      const after = await git(['rev-parse', 'HEAD']);
+      if (after === before) return { ok: true, updated: false, message: 'Already up to date.' };
+      const changed = (await git(['diff', '--name-only', before, after])).split('\n');
+      const count = (await git(['rev-list', '--count', `${before}..${after}`])) || '?';
+      if (changed.some((f) => f === 'package.json' || f === 'package-lock.json')) {
+        // New or changed packages: restarting on the old ones could break
+        // the app, and installing over a running Electron fails on Windows.
+        return {
+          ok: true, updated: true, restart: false,
+          message: `Pulled ${count} new commit${count === '1' ? '' : 's'}. This update changes the app's packages: close the app, run "npm ci", then "npm start".`,
+        };
+      }
+      setTimeout(() => {
+        app.relaunch();
+        app.exit(0);
+      }, 1200);
+      return { ok: true, updated: true, restart: true, message: `Pulled ${count} new commit${count === '1' ? '' : 's'}. Restarting…` };
+    } catch (err) {
+      return { ok: false, error: `The update did not complete: ${err.message}` };
+    }
   });
 
   createWindow();

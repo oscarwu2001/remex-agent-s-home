@@ -38,7 +38,12 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // ---- preferences (per-viewer conveniences only) ----------------------------
 
 // time: 'auto' follows the computer's clock, or a fixed part of the day.
-const prefs = { private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false };
+// live: the real weather, off unless the user turns it on. `place` is the
+// town they chose ({ name, region, country, latitude, longitude }).
+const prefs = {
+  private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
+  live: { on: false, place: null, unit: 'celsius' },
+};
 let saved = {};
 try {
   saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}');
@@ -57,12 +62,23 @@ if ('night' in prefs) {
 if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.time = 'auto';
 const WEATHERS = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', fog: 'Fog' };
 if (!WEATHERS[prefs.weather] && prefs.weather !== 'changing') prefs.weather = 'clear';
+if (!prefs.live || typeof prefs.live !== 'object') prefs.live = { on: false, place: null, unit: 'celsius' };
+prefs.live = { on: prefs.live.on === true, place: prefs.live.place ?? null, unit: prefs.live.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius' };
+
+// The last reading of the real weather, and why the last try failed.
+let liveNow; // { weather, temperature, unit, fetchedAt }
+let liveError = '';
+const LIVE_EVERY_MS = 30 * 60_000;
+const LIVE_STALE_MS = 3 * 60 * 60_000; // an older reading no longer stands for "now"
+const liveReading = () => (prefs.live.on && liveNow && Date.now() - liveNow.fetchedAt < LIVE_STALE_MS ? liveNow : undefined);
 
 // The weather being shown. "Changes through the day" picks one for every
 // three hours from the date, so it holds steady for a while, is the same on
 // every redraw, and needs nothing from outside. Mostly fair; snow only in
 // the colder months, rain otherwise.
 function weather(date = new Date()) {
+  const real = liveReading();
+  if (real) return real.weather;
   if (prefs.weather !== 'changing') return prefs.weather;
   const block = Math.floor(date.getHours() / 3);
   const seed = (date.getFullYear() * 400 + date.getMonth() * 32 + date.getDate()) * 8 + block;
@@ -139,8 +155,119 @@ function showClock() {
   const now = new Date();
   const hm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const part = PHASES.find((p) => p.id === phase()).name;
-  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(WEATHERS[weather()])}`;
+  const real = liveReading();
+  const temp = real ? ` · ${real.temperature}${real.unit}` : '';
+  const off = prefs.live.on && prefs.live.place && !real ? ' · real weather unavailable' : '';
+  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(WEATHERS[weather()])}${escapeXml(temp)}${escapeXml(off)}`;
+  $('clock').title = real && prefs.live.place ? `Weather in ${placeName(prefs.live.place)}` : '';
 }
+
+// ---- the real weather (opt-in, online) --------------------------------------
+
+function placeName(p) {
+  return [p.name, p.region && p.region !== p.name ? p.region : '', p.country].filter(Boolean).join(', ');
+}
+
+let liveResults = []; // places found by the last search
+async function refreshLive() {
+  if (!prefs.live.on || !prefs.live.place || !bridge.weatherNow) return;
+  const before = weather();
+  const res = await bridge.weatherNow(prefs.live.place, prefs.live.unit);
+  if (res.ok) {
+    liveNow = { ...res.now, fetchedAt: Date.now() };
+    liveError = '';
+  } else {
+    // Shown in Settings and on the clock; the chosen weather stands in.
+    liveError = res.error;
+  }
+  if (weather() !== before) {
+    applyPrefs();
+    drawScene();
+  }
+  showClock();
+  renderLive();
+}
+setInterval(refreshLive, LIVE_EVERY_MS);
+
+function renderLive() {
+  const body = $('live-body');
+  const online = Boolean(bridge.weatherNow);
+  $('opt-live').checked = prefs.live.on;
+  $('opt-live').disabled = !online;
+  body.hidden = !prefs.live.on;
+  $('live-hint').textContent = !online ? 'The desktop app can read the real weather; this preview cannot.'
+    : prefs.live.on ? 'Asks Open-Meteo (open-meteo.com) every 30 minutes for the weather at the place below. Only the place is sent, never anything from your sessions. The weather you chose above stands in when it cannot be reached.'
+      : 'Off: the weather above is what you see, and the app stays fully offline.';
+  if (!prefs.live.on) return;
+  if (!prefs.live.place) {
+    body.innerHTML = `
+      <form class="add-row" id="live-search"><label class="visually-hidden" for="live-q">Town or city</label>
+        <input id="live-q" type="search" placeholder="Your town or city" autocomplete="off">
+        <button class="button" type="submit">Find</button></form>
+      ${liveError ? `<p class="form-error" role="alert">${escapeXml(liveError)}</p>` : ''}
+      <ul class="live-results">${liveResults.map((p, i) => `<li><button type="button" class="link-btn" data-place="${i}">${escapeXml(placeName(p))}</button></li>`).join('')}</ul>`;
+    return;
+  }
+  const real = liveReading();
+  const status = liveError ? `<p class="form-error" role="alert">Could not read the weather: ${escapeXml(liveError)}.</p>`
+    : real ? `<p class="hint">Now: ${escapeXml(WEATHERS[real.weather].toLowerCase())}, ${real.temperature}${real.unit} (checked ${new Date(real.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).</p>`
+      : '<p class="hint">Checking…</p>';
+  body.innerHTML = `
+    <p class="live-place">${escapeXml(placeName(prefs.live.place))} <button type="button" class="link-btn" id="live-change">Change place</button></p>
+    <label class="field" for="live-unit">Temperature in
+      <select id="live-unit"><option value="celsius" ${prefs.live.unit === 'celsius' ? 'selected' : ''}>°C</option>
+        <option value="fahrenheit" ${prefs.live.unit === 'fahrenheit' ? 'selected' : ''}>°F</option></select></label>
+    ${status}`;
+}
+
+$('opt-live').addEventListener('change', (e) => {
+  prefs.live.on = e.target.checked;
+  liveError = '';
+  if (!prefs.live.on) liveNow = undefined;
+  savePrefs();
+  applyPrefs();
+  drawScene();
+  showClock();
+  renderLive();
+  if (prefs.live.on) refreshLive();
+  if (prefs.live.on && !prefs.live.place) $('live-q')?.focus();
+});
+$('live-body').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('live-q').value;
+  const res = await bridge.weatherSearch(q);
+  liveResults = res.ok ? res.places : [];
+  liveError = res.ok ? (res.places.length ? '' : `No place called “${q.trim()}” was found`) : `Could not search: ${res.error}`;
+  renderLive();
+  $('live-body').querySelector('[data-place]')?.focus();
+});
+$('live-body').addEventListener('click', (e) => {
+  const pick = e.target.closest('[data-place]');
+  if (pick) {
+    prefs.live.place = liveResults[Number(pick.dataset.place)];
+    liveResults = [];
+    liveNow = undefined;
+    savePrefs();
+    renderLive();
+    refreshLive();
+  } else if (e.target.id === 'live-change') {
+    prefs.live.place = null;
+    liveNow = undefined;
+    liveError = '';
+    savePrefs();
+    applyPrefs();
+    drawScene();
+    showClock();
+    renderLive();
+    $('live-q')?.focus();
+  }
+});
+$('live-body').addEventListener('change', (e) => {
+  if (e.target.id !== 'live-unit') return;
+  prefs.live.unit = e.target.value;
+  savePrefs();
+  refreshLive();
+});
 setInterval(showClock, 10_000);
 
 $('opt-time').addEventListener('change', (e) => {
@@ -1580,12 +1707,51 @@ $('report-open').addEventListener('click', async () => {
 });
 $('report-files').addEventListener('click', () => bridge.showReportFiles?.());
 
+// ---- updates -------------------------------------------------------------------
+
+async function showUpdateInfo() {
+  if (!bridge.updateInfo) {
+    $('update-version').textContent = 'The desktop app updates itself from its git clone; this preview cannot.';
+    $('update-run').disabled = true;
+    return;
+  }
+  const info = await bridge.updateInfo();
+  $('update-version').textContent = info.available
+    ? `Version ${info.version}, ${info.branch} at ${info.commit}. Pulls the newest code from GitHub, then restarts.`
+    : `Version ${info.version}. ${info.reason}`;
+  $('update-run').disabled = !info.available;
+}
+
+$('update-run').addEventListener('click', async () => {
+  const button = $('update-run');
+  const status = $('update-status');
+  button.disabled = true;
+  status.classList.remove('form-error');
+  status.textContent = 'Getting the newest version…';
+  try {
+    const res = await bridge.update();
+    status.textContent = res.ok ? res.message : res.error;
+    status.classList.toggle('form-error', !res.ok);
+    if (!res.ok || !res.restart) {
+      button.disabled = false;
+      showUpdateInfo();
+    }
+  } catch (err) {
+    status.textContent = `The update did not complete: ${err.message}`;
+    status.classList.add('form-error');
+    button.disabled = false;
+  }
+});
+
 // ---- settings panel ------------------------------------------------------------
 
 function setSettings(open) {
   $('settings').hidden = !open;
   $('settings-open').setAttribute('aria-expanded', String(open));
-  if (open) $('settings-close').focus();
+  if (open) {
+    showUpdateInfo();
+    $('settings-close').focus();
+  }
   else {
     if (buildMode) setBuildMode(false);
     $('settings-open').focus();
@@ -1602,5 +1768,7 @@ $('settings').addEventListener('keydown', (e) => {
 
 applyPrefs();
 showClock();
+renderLive();
+refreshLive();
 render(true);
 setInterval(render, 250);

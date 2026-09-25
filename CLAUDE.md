@@ -18,7 +18,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 ## Hard rules
 
-1. **Local only.** No network calls from the app: no telemetry, no update checks, no web fonts, no CDN scripts. The renderer's CSP must stay `default-src 'self'`.
+1. **Local only.** No network calls from the app: no telemetry, no automatic update checks, no web fonts, no CDN scripts, no Chromium background fetches (the spell checker is off because it downloads dictionaries). The renderer's CSP must stay `default-src 'self'`. Two exceptions, both off until the user acts, both made from the main process: **Use the real weather** (Settings) asks Open-Meteo for the weather at a place the user typed, sending only that place (`src/core/weather.js` holds the only allowed hosts); and **Update and restart** (Settings) runs `git pull --ff-only` in the app's own clone when pressed. Nothing from a transcript is ever sent.
 2. **Read-only on transcripts.** The app never writes, moves or deletes anything under `~/.claude`.
 3. **Privacy mode is the default.** File names, commands, patterns, URLs and Task descriptions appear only when the user turns privacy mode off. Tool *labels* ("Reading a file") are always safe to show.
 4. **No real transcript content in the repo.** Tests build entries with `test/helpers.js`. Never paste lines from a real session into a test, fixture, issue or commit. A transcript may hold patient identifiers, dataset names or case paths.
@@ -28,7 +28,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 ## Layout
 
-- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report).
+- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report, `weather.js` the opt-in real weather).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
 - `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital (simple furniture), `detailed.js` (detailed room style), `decor.js` (floors, decorations, garden plants), `people.js` figures, `app.js` glue and board, `demo.js`.
 - `src/report/`: the performance report (HTML + CSV), run by the app or `scripts/agent-report.js`.

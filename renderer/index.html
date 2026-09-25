@@ -119,7 +119,9 @@
             <option value="changing">Changes through the day</option>
           </select>
         </label>
-        <p class="hint">Set by hand: the app stays offline, so it cannot look up the weather outside.</p>
+        <label class="switch"><input type="checkbox" id="opt-live"> <span>Use the real weather (goes online)</span></label>
+        <div class="live" id="live-body" hidden></div>
+        <p class="hint" id="live-hint">Off: the weather above is what you see, and the app stays fully offline.</p>
       </section>
 
       <section class="settings-group" aria-labelledby="screen-h">
@@ -144,6 +146,15 @@
           <button type="button" class="link-btn" id="report-files">Show the files</button>
         </div>
         <p class="hint" id="report-status" aria-live="polite"></p>
+      </section>
+
+      <section class="settings-group" aria-labelledby="update-h">
+        <h3 id="update-h">Updates</h3>
+        <p class="hint" id="update-version"></p>
+        <div class="form-actions">
+          <button type="button" class="button" id="update-run">Update and restart</button>
+        </div>
+        <p class="hint" id="update-status" aria-live="polite"></p>
       </section>
 
       <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
