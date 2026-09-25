@@ -68,6 +68,7 @@ export function lookOf(species, v) {
 const FIXED = {
   ink: '#3d3450', white: '#ffffff', pink: '#f59bb0', gold: '#f6cf4f', green: '#6cc47a',
   lens: '#dff3ff', band: '#5b5470', petal: '#f7a6c6', seed: '#f6d36b',
+  silver: '#dfe5f0', gem: '#8fd8f5', ruby: '#f2557a', shadowy: '#8f8aa8',
 };
 
 const blk = (a, b, z, w, d, h, c, more = {}) => ({ a, b, z, w, d, h, c, ...more });
@@ -269,8 +270,13 @@ const BUILD = {
   },
 };
 
-function markings(L, body) {
+function markings(L, body, species) {
   const t = body.z + body.h;
+  if (species === 'turtle' && L.mark === 'stripes') {
+    // Bands round a shell look like bars sticking out: stripe its top instead.
+    for (const f of [-0.25, 0.05]) top(body, 0, body.b + body.d * f, body.w * 0.9, 0.5, 0.08, 'accent');
+    return t;
+  }
   if (L.mark === 'spots') {
     top(body, -body.w * 0.2, body.b - body.d * 0.2, 0.9, 0.9, 0.1, 'accent');
     top(body, body.w * 0.22, body.b + body.d * 0.12, 0.7, 0.7, 0.1, 'accent');
@@ -523,17 +529,41 @@ const EVOLVE = {
   ],
 };
 
+// Rarity shows on the creature itself. SR: silver anklets and a silver-set
+// gem on the chest. SSR: gold. Gold markings and trim, gold anklets, a gem in a gold setting,
+// and a gold halo floating over its head.
+function adorn(m, L, rarity) {
+  if (rarity !== 'SR' && rarity !== 'SSR') return;
+  const gold = rarity === 'SSR';
+  const B = m.body;
+  const setting = on(B, 'front', 0, B.z + B.h * 0.55, 1.0, 1.0, gold ? 'gold' : 'silver', 0.15);
+  on(setting, 'front', 0, setting.z + 0.25, 0.5, 0.5, gold ? 'ruby' : 'gem', 0.08);
+  for (const leg of m.parts.filter((p) => p.leg !== undefined)) wrap(leg, 0, Math.min(0.4, leg.h * 0.35), gold ? 'gold' : 'silver', 0.08);
+  if (!gold) return;
+  L.accent = FIXED.gold;
+  const H = m.head;
+  wrap(H, H.z + H.h - 0.35, 0.25, 'gold', 0.06);
+  let top = 0;
+  for (const p of m.parts) walk(p, (q) => { top = Math.max(top, q.z + q.h); });
+  const z = top + 0.7;
+  const r = Math.min(1.6, H.w * 0.4);
+  for (const [a, b, w, d] of [[0, -r, 2 * r + 0.4, 0.4], [0, r, 2 * r + 0.4, 0.4], [-r, 0, 0.4, 2 * r - 0.4], [r, 0, 0.4, 2 * r - 0.4]]) {
+    m.parts.push(blk(H.a + a, H.b + b, z, w, d, 0.3, 'gold', { halo: 1 }));
+  }
+}
+
 const models = new Map();
-function modelOf(species, variant, stage = 2) {
-  const key = `${species}:${variant}:${stage}`;
+function modelOf(species, variant, stage = 2, rarity = 'R') {
+  const key = `${species}:${variant}:${stage}:${rarity}`;
   if (!models.has(key)) {
     const L = { ...lookOf(species, variant), straw: '#d9a86c' };
     const m = BUILD[species](L);
     if (stage >= 2) EVOLVE[species][0](m, L);
     if (stage >= 3) EVOLVE[species][1](m, L);
     if (stage <= 1) babyfy(m);
-    markings(L, m.body);
+    markings(L, m.body, species);
     accessory(L, m.head);
+    adorn(m, L, rarity);
     models.set(key, finish({ ...m, L }));
   }
   return models.get(key);
@@ -556,8 +586,11 @@ const EGG_COLOURS = [
 ];
 const EGG_LAYERS = [[2.6, 0.6], [3.4, 0.8], [3.8, 1.0], [3.8, 1.0], [3.4, 0.8], [2.8, 0.7], [1.8, 0.6]];
 
-function eggModel(seed, crack) {
-  const [shell, spot] = EGG_COLOURS[seed % EGG_COLOURS.length];
+// A mystery egg: deep lilac with gold spots and a gold band.
+const MYSTERY = ['#b9a6ec', '#f6cf4f'];
+
+function eggModel(seed, crack, mystery) {
+  const [shell, spot] = mystery ? MYSTERY : EGG_COLOURS[seed % EGG_COLOURS.length];
   const L = { shell, spot, straw: '#e3b77a', straw2: '#c99a5c' };
   const parts = [];
   for (const [a, b, w, d, c] of [[0, 2.5, 5.6, 0.8, 'straw'], [0, -2.5, 5.6, 0.8, 'straw2'], [2.5, 0, 0.8, 4.2, 'straw2'], [-2.5, 0, 0.8, 4.2, 'straw']]) {
@@ -576,6 +609,7 @@ function eggModel(seed, crack) {
   on(layers[4], 'front', [-1, 0, 1][pick(3)] * 0.7, layers[4].z + 0.2, 0.6, 0.5, 'spot', 0.1);
   on(layers[1], 'left', [-1, 0, 1][pick(4)] * 0.8, layers[1].z + 0.2, 0.7, 0.5, 'spot', 0.1);
   top(layers[6], 0.3, 0.2, 0.6, 0.6, 0.05, 'spot');
+  if (mystery) wrap(layers[4], layers[4].z + 0.2, 0.4, 'spot', 0.05);
   if (crack >= 1) {
     for (const [a, dz] of [[-0.9, 0.5], [-0.5, 0.2], [-0.1, 0.5], [0.3, 0.2]]) on(layers[3], 'front', a, layers[3].z + dz, 0.35, 0.3, 'ink', 0.12);
   }
@@ -590,8 +624,8 @@ function eggModel(seed, crack) {
 const eggs = new Map();
 export function drawEgg(seed, pose) {
   const crack = pose.progress >= 0.9 ? 2 : pose.progress >= 0.5 ? 1 : 0;
-  const key = `${seed}:${crack}`;
-  if (!eggs.has(key)) eggs.set(key, eggModel(seed, crack));
+  const key = `${seed}:${crack}:${Boolean(pose.mystery)}`;
+  if (!eggs.has(key)) eggs.set(key, eggModel(seed, crack, pose.mystery));
   const m = eggs.get(key);
   // A ready egg rocks in its nest now and then.
   const t = pose.time ?? 0;
@@ -648,7 +682,11 @@ export function facingViewer() {
   return best;
 }
 
-const SPARKS = { SR: ['#f6cf4f', '#f6cf4f'], SSR: ['#ff9ec4', '#ffe07a', '#9fe3cf', '#a9c4f5'], ready: ['#ffe07a', '#ffffff', '#ffe07a'] };
+const SPARKS = {
+  SR: ['#e6edf8', '#b9cdf0', '#e6edf8'],
+  SSR: ['#ffd45e', '#fff1a8', '#f2b634', '#ffe07a', '#fff8dc', '#f2b634'],
+  ready: ['#ffe07a', '#ffffff', '#ffe07a'],
+};
 
 // Place a creature. `pose` = { x, y, z, ground, scale, facing, step, stage,
 // rarity, time, glow } where step is the walk cycle in radians (legs lift
@@ -656,8 +694,9 @@ const SPARKS = { SR: ['#f6cf4f', '#f6cf4f'], SSR: ['#ff9ec4', '#ffe07a', '#9fe3c
 // the height of the ground under it (for the shadow, when it flies).
 // Returns SVG, the height in world units, and the screen points it covers.
 export function drawCreature(species, variant, pose) {
-  const m = modelOf(species, variant, pose.stage ?? 2);
-  return drawModel(m, { ...pose, sparkle: pose.rarity });
+  const rarity = pose.rarity === 'ready' ? pose.worn ?? 'R' : pose.rarity ?? 'R';
+  const m = modelOf(species, variant, pose.stage ?? 2, pose.silhouette ? 'R' : rarity);
+  return drawModel(m, { ...pose, sparkle: pose.silhouette ? null : pose.rarity });
 }
 
 function drawModel(m, pose) {
@@ -683,9 +722,12 @@ function drawModel(m, pose) {
 
   function emit(p, da, dz) {
     const b = place(p, da, dz);
-    let s = box(...b, material(m.L, p.c, glow));
+    let s = box(...b, pose.silhouette ? material(FIXED, 'shadowy') : material(m.L, p.c, glow));
     pts.push(P(b[0], b[1], b[2]), P(b[0] + b[3], b[1] + b[4], b[2]), P(b[0] + b[3], b[1], b[2] + b[5]), P(b[0], b[1] + b[4], b[2] + b[5]));
-    for (const kid of p.kids ?? []) {
+    // Bands wrapped round a block (collars, scarves, stripes) go first:
+    // anything standing proud of a face, like a snout, must cover them.
+    const kids = [...(p.kids ?? [])].sort((u, v) => (v.face === 'wrap') - (u.face === 'wrap'));
+    for (const kid of kids) {
       if (normal[kid.face] && !faceVisible(...normal[kid.face])) continue;
       s += emit(kid, da, dz);
     }
@@ -699,13 +741,14 @@ function drawModel(m, pose) {
     if (moving && p.leg !== undefined) dz = pose.flying ? 0 : Math.max(0, Math.sin(step + p.leg * Math.PI)) * 0.8;
     if (p.flap) dz += Math.sin((step ?? 0) * (pose.flying ? 1.6 : 1)) * (moving ? (pose.flying ? 1.4 : 0.6) : 0);
     if (p.wag) da = Math.sin((step ?? 0) * 1.5) * p.wag * (moving ? 0.5 : 0);
+    if (p.halo) dz = hop + Math.sin(time * 2.2) * 0.25;
     return [da, dz];
   };
 
   const order = m.parts
     .map((p) => {
       const [cx, cy] = world(p.a, p.b);
-      return { p, key: (p.leg !== undefined || p.nest ? -100 : 0) + viewDepth(cx, cy) };
+      return { p, key: (p.leg !== undefined || p.nest ? -100 : p.halo ? 100 : 0) + viewDepth(cx, cy) };
     })
     .sort((u, v) => u.key - v.key);
 
@@ -728,8 +771,8 @@ function drawModel(m, pose) {
     const r = (m.length / 2 + 1.6) * k;
     const [cx, cy] = world(0, m.body.b);
     if (pose.sparkle === 'SSR' && !pose.flying) {
-      const g = r * 0.75;
-      under = `<polygon fill="#fff3b0" opacity="0.3" points="${quad([[cx - g, cy - g], [cx + g, cy - g], [cx + g, cy + g], [cx - g, cy + g]], ground)}"/>` + under;
+      const g = r * 0.8;
+      under = `<polygon fill="#ffd45e" opacity="${(0.28 + 0.08 * Math.sin(time * 3)).toFixed(2)}" points="${quad([[cx - g, cy - g], [cx + g, cy - g], [cx + g, cy + g], [cx - g, cy + g]], ground)}"/>` + under;
     }
     colours.forEach((c, i) => {
       const t = time * 1.4 + (i * 2 * Math.PI) / colours.length;
@@ -747,8 +790,8 @@ function drawModel(m, pose) {
 }
 
 // A small picture of an egg, for the sidebar.
-export function eggThumb(seed, progress = 0) {
-  return thumbOf(drawEgg(seed, { x: 0, y: 0, facing: facingViewer(), progress }));
+export function eggThumb(seed, progress = 0, mystery = false) {
+  return thumbOf(drawEgg(seed, { x: 0, y: 0, facing: facingViewer(), progress, mystery }));
 }
 
 function thumbOf({ svg, pts }) {
@@ -763,8 +806,10 @@ function thumbOf({ svg, pts }) {
 }
 
 // A small picture of a look, for the chooser: facing the viewer.
-export function creatureThumb(species, variant, stage = 2) {
-  return thumbOf(drawCreature(species, variant, { x: 0, y: 0, facing: facingViewer(), stage }));
+// `rarity` dresses it (SR silver, SSR gold); `silhouette` draws it in one
+// dark tone, for index entries not found yet.
+export function creatureThumb(species, variant, stage = 2, { rarity = 'R', silhouette = false } = {}) {
+  return thumbOf(drawCreature(species, variant, { x: 0, y: 0, facing: facingViewer(), stage, worn: rarity, rarity: silhouette ? null : rarity === 'R' ? null : rarity, silhouette }));
 }
 
 // The same agent always gets the same creature until someone picks another.

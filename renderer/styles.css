@@ -761,3 +761,20 @@ body.in-meadow .camera.meadow-only { display: flex; }
 .button.evolve { margin: var(--s-2) 0; width: 100%; }
 .starters .piece small { color: var(--ink-muted); font-weight: 400; }
 .starters .thumb { width: 64px; height: 64px; }
+/* The Meadow: points, mystery eggs and the creature index */
+.shop { display: grid; gap: var(--s-1); margin-bottom: var(--s-3); padding-bottom: var(--s-3); border-bottom: 1px solid var(--line); }
+.shop .points { margin: 0; color: var(--ink); }
+.shop .points strong { font-size: 18px; }
+.shop .button:disabled { opacity: 0.55; cursor: not-allowed; }
+.shop .link-btn { justify-self: start; }
+.rarity-ssr { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #f6d36b; color: #3d3450; }
+.rarity-sr { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #e3e8f2; color: #3d3450; }
+.dex { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.dex-row h4 { margin: 0 0 4px; font-size: 13px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.dex-forms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.dex-card { display: grid; justify-items: center; gap: 2px; padding: 6px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-raised); text-align: center; font-size: 12px; color: var(--ink); }
+.dex-card .thumb { width: 56px; height: 56px; }
+.dex-card small { color: var(--ink-muted); font-size: 11px; }
+.dex-card.missing span { color: var(--ink-muted); font-weight: 700; }
+.dex-card.rarity-card-sr { border-color: #b9c6dc; box-shadow: inset 0 0 0 1px #dfe5f0; }
+.dex-card.rarity-card-ssr { border-color: #d9a82e; box-shadow: inset 0 0 0 2px #f6d36b; }

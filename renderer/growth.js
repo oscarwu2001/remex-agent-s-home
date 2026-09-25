@@ -90,3 +90,67 @@ export function starterChoices(name, speciesIds) {
 export function flies(species, stage) {
   return stage === STAGES && (species === 'dragon' || species === 'bird');
 }
+
+// ---- time in the app: points and mystery eggs ------------------------------------
+//
+// Every 15 minutes the app is open earns a point. Points buy mystery eggs,
+// which hold a creature of a random kind, look and rarity. A mystery
+// creature belongs to no agent: it grows with time in the app instead of
+// tokens, one 15-minute tick counting as TOKENS_PER_TICK.
+
+export const POINT_MINUTES = 15;
+export const MYSTERY_PRICE = 8;
+export const WELCOME_POINTS = 8; // enough for a first mystery egg
+export const TOKENS_PER_TICK = 25_000; // so a mystery egg hatches after an hour
+export const MAX_WILD = 12;
+export const ODDS = [['SSR', 0.05], ['SR', 0.2], ['R', 0.75]];
+const MAX_STEP_MS = 2 * 60_000; // a longer gap is sleep or a closed lid, not use
+
+// Add the time since the last tick. `play` = { points, minutes, last }.
+export function earn(play, now) {
+  const p = { points: WELCOME_POINTS, minutes: 0, ...play };
+  if (!Number.isFinite(p.last) || now < p.last) return { ...p, last: now };
+  const add = Math.min(now - p.last, MAX_STEP_MS) / 60_000;
+  const minutes = p.minutes + add;
+  const points = p.points + Math.floor(minutes / POINT_MINUTES) - Math.floor(p.minutes / POINT_MINUTES);
+  return { points, minutes, last: now };
+}
+
+// Growth of a mystery creature bought when the app had run `born` minutes.
+export function wildTokens(play, born) {
+  return Math.max(0, ((play?.minutes ?? 0) - born) / POINT_MINUTES) * TOKENS_PER_TICK;
+}
+
+// What hatches from a mystery egg. `rand` returns numbers in [0, 1).
+export function rollMystery(speciesIds, variants, rand = Math.random) {
+  const r = rand();
+  let acc = 0;
+  let rarity = 'R';
+  for (const [name, p] of ODDS) {
+    acc += p;
+    if (r < acc) {
+      rarity = name;
+      break;
+    }
+  }
+  return {
+    species: speciesIds[Math.floor(rand() * speciesIds.length) % speciesIds.length],
+    variant: Math.floor(rand() * variants) % variants,
+    rarity,
+  };
+}
+
+// ---- the index ------------------------------------------------------------------
+//
+// Every form (kind and stage) you have raised, with the best rarity and the
+// looks seen. `dex` maps 'kind:stage' to { rarity, looks: [variant, ...] }.
+export function noteInDex(dex = {}, { species, stage, variant, rarity }) {
+  const key = `${species}:${stage}`;
+  const had = dex[key];
+  const looks = new Set(had?.looks ?? []);
+  const before = looks.size;
+  looks.add(variant);
+  const best = bestRarity(had?.rarity, rarity);
+  if (had && looks.size === before && best === had.rarity) return dex; // nothing new
+  return { ...dex, [key]: { rarity: best, looks: [...looks].sort((a, b) => a - b) } };
+}

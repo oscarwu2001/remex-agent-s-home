@@ -62,3 +62,38 @@ test('only fully grown dragons and birds fly', async () => {
   assert.equal(flies('dragon', 2), false);
   assert.equal(flies('cat', 3), false);
 });
+
+test('a point for every 15 minutes the app is open, and none for time asleep', async () => {
+  const { earn, WELCOME_POINTS } = await load();
+  let play = earn(undefined, 0);
+  assert.deepEqual(play, { points: WELCOME_POINTS, minutes: 0, last: 0 });
+  for (let t = 60_000; t <= 30 * 60_000; t += 60_000) play = earn(play, t);
+  assert.equal(play.points, WELCOME_POINTS + 2);
+  play = earn(play, play.last + 8 * 3_600_000); // the laptop slept for 8 hours
+  assert.equal(Math.round(play.minutes), 32, 'a long gap counts as two minutes at most');
+  assert.equal(earn(play, play.last - 1000).minutes, play.minutes, 'a clock set back adds nothing');
+});
+
+test('a mystery creature grows with time in the app: an hour hatches it', async () => {
+  const { wildTokens, lifeOf, HATCH_AT } = await load();
+  assert.equal(lifeOf(wildTokens({ minutes: 100 }, 50), undefined).ready, false);
+  assert.equal(wildTokens({ minutes: 110 }, 50), HATCH_AT);
+});
+
+test('mystery eggs roll rarity by the odds, and kind and look evenly', async () => {
+  const { rollMystery } = await load();
+  const ids = ['cat', 'dog'];
+  const seq = (...xs) => () => xs.shift();
+  assert.deepEqual(rollMystery(ids, 10, seq(0.01, 0.6, 0.35)), { species: 'dog', variant: 3, rarity: 'SSR' });
+  assert.deepEqual(rollMystery(ids, 10, seq(0.2, 0.1, 0.99)), { species: 'cat', variant: 9, rarity: 'SR' });
+  assert.equal(rollMystery(ids, 10, seq(0.9, 0, 0)).rarity, 'R');
+});
+
+test('the index keeps each form found, its best rarity and the looks seen', async () => {
+  const { noteInDex } = await load();
+  let dex = noteInDex({}, { species: 'cat', stage: 1, variant: 2, rarity: 'R' });
+  dex = noteInDex(dex, { species: 'cat', stage: 1, variant: 5, rarity: 'SSR' });
+  dex = noteInDex(dex, { species: 'cat', stage: 1, variant: 2, rarity: 'SR' });
+  assert.deepEqual(dex, { 'cat:1': { rarity: 'SSR', looks: [2, 5] } });
+  assert.equal(noteInDex(dex, { species: 'cat', stage: 1, variant: 5, rarity: 'R' }), dex, 'unchanged when nothing is new');
+});

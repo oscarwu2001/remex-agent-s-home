@@ -88,6 +88,19 @@ Every agent grows up like a Pokémon:
   over 5 or more runs) or SSR (90 over 10 or more), shown with gold or
   rainbow sparkles and stars by its name. Once earned, rarity is kept.
 - **Looks.** Each kind has ten looks to choose from.
+- **SR and SSR show.** An SR creature wears silver anklets and a
+  silver-set gem. An SSR one turns gold: gold markings and trim, gold
+  anklets, a ruby in a gold setting, a floating gold halo and a gold glow.
+- **Points and mystery eggs.** Every 15 minutes the app is open earns a
+  point (time asleep does not count), and you start with 8. A mystery egg
+  costs 8 points and hatches after an hour of the app running, into a
+  random creature: any kind and look, rare (SR) 1 time in 5, super rare
+  (SSR) 1 in 20. Mystery creatures belong to no agent. They grow and evolve
+  with time in the app (hatch after 1 hour, evolve at 10 and 50 hours).
+  The island has room for 12.
+- **Creature index.** Every form you have raised (10 kinds × 3 stages),
+  its best rarity and the looks you have seen. Forms not found yet show as
+  shadows.
 
 Tokens are counted per agent per day and kept, so growth never goes
 backwards. The creatures wander about like mobs in a block game: they walk

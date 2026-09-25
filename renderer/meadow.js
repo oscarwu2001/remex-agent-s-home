@@ -8,7 +8,10 @@
 import { SPECIES, VARIANTS, drawCreature, creatureThumb, defaultCreature, lookOf, setCreatureLight, facingOf, STAGE_NAMES, drawEgg, eggThumb, eggSeed } from './creatures.js';
 import { P, box, poly, viewDepth, faceVisible, getView } from './iso.js';
 import { shade, mix } from './themes.js';
-import { HATCH_AT, STAGES, mergeLedger, lifetimeTokens, lifeOf, sizeOf, rarityFrom, bestRarity, starterChoices, flies } from './growth.js';
+import {
+  HATCH_AT, STAGES, mergeLedger, lifetimeTokens, lifeOf, sizeOf, rarityFrom, bestRarity, starterChoices, flies,
+  earn, wildTokens, rollMystery, noteInDex, MYSTERY_PRICE, MAX_WILD, POINT_MINUTES, TOKENS_PER_TICK,
+} from './growth.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -42,6 +45,8 @@ const DEMO_NEST = {
   reviewer: { species: 'cat', variant: 1, stage: 2, rarity: 'SR' },
   runner: { species: 'fish', variant: 1, stage: 1, rarity: 'R' },
 };
+// Two mystery creatures for the demo: a gold one and an egg about to hatch.
+const DEMO_WILD = [{ id: 'd1', born: 0, species: 'bunny', variant: 6, stage: 2, rarity: 'SSR' }, { id: 'd2', born: 540 }];
 const DEMO_TOKENS = { Explore: 9_000_000, reviewer: 2_600_000, runner: 1_200_000, 'silent-failure-hunter': 130_000, 'ui-reviewer': 42_000 };
 
 // ---- the island ---------------------------------------------------------------------
@@ -104,7 +109,9 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
   let stats = { names: new Map(), seen: [], error: '', loading: false, at: 0 };
   let selected;
   let notice = ''; // a line for the panel after hatching or evolving
+  let view = 'island'; // or 'index', the collection
   const demoNest = structuredClone(DEMO_NEST);
+  const demoState = { wild: structuredClone(DEMO_WILD), play: { points: 12, minutes: 600, last: Date.now() }, dex: {} };
 
   const demo = () => Boolean(getSnapshot().demo);
   // What was kept in the preferences, checked once: an entry for a kind of
@@ -120,17 +127,75 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
       if (!['R', 'SR', 'SSR'].includes(e.rarity)) e.rarity = 'R';
     }
   }
-  if (!prefs.ledger || typeof prefs.ledger !== 'object' || Array.isArray(prefs.ledger)) prefs.ledger = {};
-  // What each agent has hatched into; nothing while it is still an egg.
+  const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObject(prefs.ledger)) prefs.ledger = {};
+  if (!isObject(prefs.dex)) prefs.dex = {};
+  if (!isObject(prefs.play) || !Number.isFinite(prefs.play.points) || !Number.isFinite(prefs.play.minutes)) prefs.play = earn(undefined, Date.now());
+  // Mystery creatures: { id, born (app minutes when bought), and once
+  // hatched species, variant, stage, rarity }.
+  prefs.wild = (Array.isArray(prefs.wild) ? prefs.wild : []).filter((w) => w && typeof w.id === 'string' && Number.isFinite(w.born)
+    && (w.species === undefined || (kinds.has(w.species) && Number.isInteger(w.stage) && w.stage >= 1 && w.stage <= STAGES
+      && Number.isInteger(w.variant) && w.variant >= 0 && w.variant < VARIANTS && ['R', 'SR', 'SSR'].includes(w.rarity))));
+
+  // Everything the Meadow keeps, from the preferences or, in the demo, from
+  // memory (the demo never saves).
   const nest = () => (demo() ? demoNest : prefs.nest);
+  const wild = () => (demo() ? demoState.wild : prefs.wild);
+  const play = () => (demo() ? demoState.play : prefs.play);
+  const dex = () => (demo() ? demoState.dex : prefs.dex);
   const saveNest = () => { if (!demo()) savePrefs(); };
-  const tokensOf = (name) => (demo() ? DEMO_TOKENS[name] ?? 0 : lifetimeTokens(prefs.ledger, name));
-  const entryOf = (name) => nest()[name];
-  const lifeFor = (name) => lifeOf(tokensOf(name), entryOf(name));
-  const looks = (name) => {
-    const e = entryOf(name);
-    return { species: e.species, variant: e.variant ?? defaultCreature(name).variant, stage: e.stage ?? 1, rarity: e.rarity ?? 'R' };
+
+  // A resident is an agent (by name) or a mystery creature ('wild:<id>').
+  const isWild = (key) => key.startsWith('wild:');
+  const wildOf = (key) => wild().find((w) => `wild:${w.id}` === key);
+  const tokensOf = (key) => {
+    if (isWild(key)) return wildTokens(play(), wildOf(key)?.born ?? 0);
+    return demo() ? DEMO_TOKENS[key] ?? 0 : lifetimeTokens(prefs.ledger, key);
   };
+  const entryOf = (key) => (isWild(key) ? (wildOf(key)?.species ? wildOf(key) : undefined) : nest()[key]);
+  const lifeFor = (key) => lifeOf(tokensOf(key), entryOf(key));
+  const looks = (key) => {
+    const e = entryOf(key);
+    return { species: e.species, variant: e.variant ?? defaultCreature(key).variant, stage: e.stage ?? 1, rarity: e.rarity ?? 'R' };
+  };
+  // What to call a resident: an agent by its name, a mystery creature by
+  // what it has become.
+  const nameOf = (key) => {
+    if (!isWild(key)) return key;
+    const e = entryOf(key);
+    return e ? STAGE_NAMES[e.species][e.stage - 1] : 'Mystery egg';
+  };
+  const residents = () => [...agents(), ...wild().map((w) => `wild:${w.id}`)];
+
+  // The index: note every form on the island.
+  function noteAll() {
+    let d = dex();
+    for (const key of residents()) {
+      const e = entryOf(key);
+      if (e) d = noteInDex(d, { species: e.species, stage: e.stage, variant: e.variant ?? defaultCreature(key).variant, rarity: e.rarity ?? 'R' });
+    }
+    if (d === dex()) return;
+    if (demo()) demoState.dex = d;
+    else {
+      prefs.dex = d;
+      savePrefs();
+    }
+  }
+
+  // A point for every 15 minutes the app is open, counted every minute
+  // (and whenever the Meadow is opened), whether or not it is on screen.
+  function tickPlay() {
+    const before = play();
+    const after = earn(before, Date.now());
+    if (demo()) demoState.play = after;
+    else {
+      prefs.play = after;
+      savePrefs();
+    }
+    const newlyReady = wild().some((w) => !w.species && lifeOf(wildTokens(before, w.born)).ready !== lifeOf(wildTokens(after, w.born)).ready);
+    if (open && (after.points !== before.points || newlyReady)) renderPanel();
+  }
+  setInterval(tickPlay, 60_000);
 
   // Everyone who lives here: the agents installed in .claude/agents, every
   // agent called in the transcripts read for the numbers, anyone at work
@@ -210,6 +275,7 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
   const tilesFor = (kind) => (kind === 'fish' ? POOL : kind === 'flyer' ? SKY : LAND);
 
   function settle(names) {
+    names = residents();
     for (const n of [...walkers.keys()]) if (!names.includes(n)) walkers.delete(n);
     const taken = new Set([...walkers.values()].map((w) => `${Math.floor(w.x)},${Math.floor(w.y)}`));
     for (const n of names) {
@@ -388,13 +454,13 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
 
   function labelFor(n) {
     const e = entryOf(n);
-    if (!e) return lifeFor(n).ready ? `${n} · hatch!` : `${n} · egg`;
+    if (!e) return lifeFor(n).ready ? `${nameOf(n)} · hatch!` : isWild(n) ? nameOf(n) : `${n} · egg`;
     const r = RARITY_TEXT[e.rarity ?? 'R'];
-    return `${n}${r ? ` ${r}` : ''}${lifeFor(n).ready ? ' · evolve!' : ''}`;
+    return `${nameOf(n)}${r ? ` ${r}` : ''}${lifeFor(n).ready ? ' · evolve!' : ''}`;
   }
 
   function renderScene() {
-    const names = agents();
+    const names = residents();
     settle(names);
     const svg = $('meadow');
     const time = performance.now() / 1000;
@@ -416,14 +482,14 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
       const moving = w.kind === 'flyer' || (w.pause <= 0 && w.path.length > 0);
       let drawn;
       if (w.kind === 'egg') {
-        drawn = drawEgg(eggSeed(n), { x: w.x, y: w.y, z: w.z, scale: scale * 1.1, facing: 1, progress: life.progress, ready: life.ready, time });
+        drawn = drawEgg(eggSeed(n), { x: w.x, y: w.y, z: w.z, scale: scale * 1.1, facing: 1, progress: life.progress, ready: life.ready, time, mystery: isWild(n) });
       } else {
         const L = looks(n);
         const bob = w.kind === 'fish' ? 0.04 * Math.sin(time * 2.5 + w.x) : 0;
         drawn = drawCreature(L.species, L.variant, {
           x: w.x, y: w.y, z: w.z + bob, ground: groundAt(w.x, w.y) + (w.kind === 'fish' ? WATER : 0),
           scale: w.kind === 'fish' ? scale * 0.85 : scale, facing: w.facing, step: moving ? w.step : null,
-          flying: w.kind === 'flyer', stage: L.stage, rarity: life.ready ? 'ready' : L.rarity, time, glow: Math.min(1, w.flash / 1.2),
+          flying: w.kind === 'flyer', stage: L.stage, rarity: life.ready ? 'ready' : L.rarity, worn: L.rarity, time, glow: Math.min(1, w.flash / 1.2),
         });
       }
       const xs = drawn.pts.map((q) => q[0]);
@@ -498,64 +564,122 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
 
   const speciesName = (id) => SPECIES.find((x) => x.id === id)?.name ?? '';
 
-  function eggPanel(name) {
-    const life = lifeFor(name);
-    const tokens = tokensOf(name);
-    const head = `<div class="critter-head">${eggThumb(eggSeed(name), life.progress)}
-      <div><h3>${esc(name)}</h3><p class="hint">An egg${life.ready ? ', ready to hatch!' : ''}</p></div></div>`;
+  const hours = (tokens) => {
+    const h = tokens / TOKENS_PER_TICK * (POINT_MINUTES / 60);
+    return h < 10 ? `${Math.round(h * 10) / 10} h` : `${Math.round(h)} h`;
+  };
+  // Growth in the unit that drives it: tokens for an agent, hours of the
+  // app running for a mystery creature.
+  const amount = (key, tokens) => (isWild(key) ? hours(tokens) : compact(tokens));
+  const unit = (key) => (isWild(key) ? 'of the app running' : 'tokens');
+
+  function eggPanel(key) {
+    const life = lifeFor(key);
+    const tokens = tokensOf(key);
+    const mystery = isWild(key);
+    const head = `<div class="critter-head">${eggThumb(eggSeed(key), life.progress, mystery)}
+      <div><h3>${esc(nameOf(key))}</h3><p class="hint">${mystery ? 'Anything could be inside' : `${esc(key)}'s egg`}${life.ready ? ', ready to hatch!' : ''}</p></div></div>`;
     if (!life.ready) {
-      return `${head}${bar(life.progress, `${compact(tokens)} of ${compact(HATCH_AT)} tokens to hatch`)}
-        <p class="hint">Every agent starts as an egg. It hatches once the agent has used ${compact(HATCH_AT)} tokens, and then you choose one of three creatures.</p>`;
+      return `${head}${bar(life.progress, `${amount(key, tokens)} of ${amount(key, HATCH_AT)} ${unit(key)} to hatch`)}
+        <p class="hint">${mystery
+    ? 'A mystery egg hatches after an hour of the app running, into a random creature: any kind, any look, and sometimes rare (SR, 1 in 5) or super rare (SSR, 1 in 20).'
+    : `Every agent starts as an egg. It hatches once the agent has used ${compact(HATCH_AT)} tokens, and then you choose one of three creatures.`}</p>`;
     }
-    const choices = starterChoices(name, SPECIES.map((s) => s.id));
-    const v = defaultCreature(name).variant;
-    return `${head}<p class="hint">Choose who hatches. It starts as a baby and grows as ${esc(name)} works.</p>
+    if (mystery) return `${head}<button type="button" class="button evolve" data-hatch-wild>Hatch it!</button>`;
+    const choices = starterChoices(key, SPECIES.map((sp) => sp.id));
+    const v = defaultCreature(key).variant;
+    return `${head}<p class="hint">Choose who hatches. It starts as a baby and grows as ${esc(key)} works.</p>
       <div class="pieces starters" role="group" aria-label="Choose a starter">${choices.map((sp) => `<button type="button" class="piece" data-hatch="${sp}">${creatureThumb(sp, v, 1)}<span>${esc(STAGE_NAMES[sp][0])}<br><small>${esc(speciesName(sp))}</small></span></button>`).join('')}</div>`;
   }
 
-  function creaturePanel(name) {
-    const L = looks(name);
-    const life = lifeFor(name);
-    const tokens = tokensOf(name);
+  const rarityLine = (r) => `<p class="rarity rarity-${r.toLowerCase()}">${r === 'R' ? 'R · common' : `${RARITY_TEXT[r]} · ${r === 'SR' ? 'rare' : 'super rare'}`}</p>`;
+
+  function creaturePanel(key) {
+    const L = looks(key);
+    const life = lifeFor(key);
+    const tokens = tokensOf(key);
     const stageName = STAGE_NAMES[L.species][L.stage - 1];
     const growth = life.stage < STAGES
       ? life.ready
         ? `<button type="button" class="button evolve" data-evolve>Evolve into ${esc(STAGE_NAMES[L.species][L.stage])}</button>`
-        : bar(life.progress, `${compact(tokens)} of ${compact(life.next)} tokens to evolve into ${STAGE_NAMES[L.species][L.stage]}`)
-      : bar(life.progress, life.progress >= 1 ? 'Fully grown' : `${compact(tokens)} of ${compact(life.next)} tokens to full size`);
-    return `<div class="critter-head">${creatureThumb(L.species, L.variant, L.stage)}
-        <div><h3>${esc(name)}</h3><p class="hint">${esc(stageName)} · ${esc(lookOf(L.species, L.variant).name)} ${esc(speciesName(L.species))} · stage ${L.stage} of ${STAGES}</p>
-        <p class="rarity rarity-${L.rarity.toLowerCase()}">${L.rarity === 'R' ? 'R · common' : `${RARITY_TEXT[L.rarity]} · ${L.rarity === 'SR' ? 'rare' : 'super rare'}`}</p></div></div>
+        : bar(life.progress, `${amount(key, tokens)} of ${amount(key, life.next)} ${unit(key)} to evolve into ${STAGE_NAMES[L.species][L.stage]}`)
+      : bar(life.progress, life.progress >= 1 ? 'Fully grown' : `${amount(key, tokens)} of ${amount(key, life.next)} ${unit(key)} to full size`);
+    return `<div class="critter-head">${creatureThumb(L.species, L.variant, L.stage, { rarity: L.rarity })}
+        <div><h3>${esc(nameOf(key))}</h3><p class="hint">${isWild(key) ? 'From a mystery egg' : esc(stageName)} · ${esc(lookOf(L.species, L.variant).name)} ${esc(speciesName(L.species))} · stage ${L.stage} of ${STAGES}</p>
+        ${rarityLine(L.rarity)}</div></div>
       ${notice ? `<p class="grow-note">${esc(notice)}</p>` : ''}
       ${growth}
-      ${numbersFor(name)}
+      ${isWild(key) ? '<p class="hint">A mystery creature belongs to no agent: it grows while the app is open.</p>' : numbersFor(key)}
       <details class="more-pieces"><summary>Rarity and looks</summary>
-        <p class="hint">Rarity is earned by good work and kept once earned: SR at a score of 80 over 5 or more runs, SSR at 90 over 10 or more.</p>
-        <div class="pieces critter-looks">${Array.from({ length: VARIANTS }, (_, v) => `<button type="button" class="piece" data-look="${v}" aria-pressed="${v === L.variant}">${creatureThumb(L.species, v, L.stage)}<span>${esc(lookOf(L.species, v).name)}</span></button>`).join('')}</div>
+        <p class="hint">${isWild(key) ? 'Its rarity came with the egg.' : 'Rarity is earned by good work and kept once earned: SR at a score of 80 over 5 or more runs, SSR at 90 over 10 or more.'}</p>
+        <div class="pieces critter-looks">${Array.from({ length: VARIANTS }, (_, v) => `<button type="button" class="piece" data-look="${v}" aria-pressed="${v === L.variant}">${creatureThumb(L.species, v, L.stage, { rarity: L.rarity })}<span>${esc(lookOf(L.species, v).name)}</span></button>`).join('')}</div>
       </details>`;
+  }
+
+  // Points and the mystery-egg shop, at the top of the sidebar.
+  function shop() {
+    const p = play();
+    const toNext = Math.ceil(POINT_MINUTES - (p.minutes % POINT_MINUTES));
+    const full = wild().length >= MAX_WILD;
+    const canBuy = p.points >= MYSTERY_PRICE && !full;
+    return `<div class="shop"><p class="points"><span aria-hidden="true">✦</span> <strong>${p.points}</strong> points
+        <span class="hint">· next in ${toNext} min</span></p>
+      <button type="button" class="button" data-buy ${canBuy ? '' : 'disabled'}>Mystery egg · ${MYSTERY_PRICE} points</button>
+      ${full ? `<p class="hint">The island has room for ${MAX_WILD} mystery creatures.</p>` : ''}
+      <button type="button" class="link-btn" data-index>Creature index · ${Object.keys(dex()).length} of ${SPECIES.length * STAGES} found</button></div>`;
+  }
+
+  // The index: every kind in its three stages; forms not found yet are
+  // shadows.
+  function indexPanel() {
+    const d = dex();
+    const found = Object.keys(d).length;
+    const looksSeen = Object.values(d).reduce((a, e) => a + e.looks.length, 0);
+    const golds = Object.values(d).filter((e) => e.rarity === 'SSR').length;
+    const rows = SPECIES.map((sp) => `<li class="dex-row"><h4>${esc(sp.name)}</h4><div class="dex-forms">${[1, 2, 3].map((st) => {
+      const e = d[`${sp.id}:${st}`];
+      if (!e) return `<div class="dex-card missing">${creatureThumb(sp.id, 0, st, { silhouette: true })}<span>???</span><small>Stage ${st}</small></div>`;
+      const v = e.looks.includes(0) ? 0 : e.looks[0];
+      return `<div class="dex-card rarity-card-${e.rarity.toLowerCase()}">${creatureThumb(sp.id, v, st, { rarity: e.rarity })}<span>${esc(STAGE_NAMES[sp.id][st - 1])}</span>
+        <small>${e.rarity === 'R' ? 'R' : RARITY_TEXT[e.rarity]} · looks ${e.looks.length}/${VARIANTS}</small></div>`;
+    }).join('')}</div></li>`).join('');
+    return `<div class="title-row"><h3>Creature index</h3><button type="button" class="link-btn" data-index-back>Back</button></div>
+      <p class="hint">${found} of ${SPECIES.length * STAGES} forms found · ${looksSeen} of ${SPECIES.length * STAGES * VARIANTS} looks · ${golds} in gold (SSR). Hatch eggs and evolve creatures to fill it in.</p>
+      <ul class="dex">${rows}</ul>`;
+  }
+
+  function chip(key) {
+    const tag = !entryOf(key) && lifeFor(key).ready ? ' · hatch!' : entryOf(key) && lifeFor(key).ready ? ' · evolve!' : '';
+    return `<button type="button" class="chip" data-pick="${esc(key)}" aria-pressed="${key === selected}">${esc(nameOf(key))}${tag}</button>`;
   }
 
   function renderPanel() {
     const el = $('meadow-body');
+    noteAll();
+    if (view === 'index') {
+      el.innerHTML = indexPanel();
+      return;
+    }
     const names = agents();
+    const finds = wild().map((w) => `wild:${w.id}`);
     // The creatures never stand still, so they can also be picked by name.
-    const picker = names.length
-      ? `<div class="options critter-pick" role="group" aria-label="Agents">${names.map((n) => `<button type="button" class="chip" data-pick="${esc(n)}" aria-pressed="${n === selected}">${esc(n)}${!entryOf(n) && lifeFor(n).ready ? ' · hatch!' : entryOf(n) && lifeFor(n).ready ? ' · evolve!' : ''}</button>`).join('')}</div>`
-      : '';
-    if (!selected || !names.includes(selected)) {
-      el.innerHTML = `<p class="hint">${names.length
+    const picker = (names.length ? `<div class="options critter-pick" role="group" aria-label="Agents">${names.map(chip).join('')}</div>` : '')
+      + (finds.length ? `<div class="options critter-pick" role="group" aria-label="Mystery creatures">${finds.map(chip).join('')}</div>` : '');
+    if (!selected || !residents().includes(selected)) {
+      el.innerHTML = `${shop()}<p class="hint">${names.length
         ? `Every agent that has ever been called lives here, starting as an egg. Its tokens hatch it (${compact(HATCH_AT)}), grow it and evolve it twice; good work earns it rarity. Click one, or its name below.`
         : 'Agents you add to .claude/agents (or the Office pack in Settings), and any agent Claude calls, move in here as eggs.'}</p>
         ${picker}
         ${stats.loading ? '<p class="hint">Working out the numbers…</p>' : ''}${stats.error ? `<p class="form-error">${esc(stats.error)}</p>` : ''}`;
       return;
     }
-    el.innerHTML = picker + (entryOf(selected) ? creaturePanel(selected) : eggPanel(selected));
+    el.innerHTML = shop() + picker + (entryOf(selected) ? creaturePanel(selected) : eggPanel(selected));
   }
 
   function select(name) {
     if (name !== selected) notice = '';
     selected = name;
+    if (name) view = 'island';
     renderScene();
     renderPanel();
   }
@@ -564,6 +688,7 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
     const w = walkers.get(name);
     notice = text;
     $('meadow-live').textContent = text; // a lasting live region, so it is read out
+    noteAll();
     renderScene(); // takes the new form
     const nw = walkers.get(name);
     if (nw) nw.flash = 1.2;
@@ -571,6 +696,8 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
     renderPanel();
     if (reduced.matches) renderScene();
   }
+
+  const refocus = (sel) => $('meadow-body').querySelector(sel)?.focus();
 
   // Picked on press, not on release: the creature may have walked on by
   // then. The scene is redrawn every frame, so the pointer is matched
@@ -588,19 +715,54 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
   $('meadow-body').addEventListener('click', (e) => {
     const pick = e.target.closest('[data-pick]');
     if (pick) {
-      const name = pick.dataset.pick;
-      select(selected === name ? undefined : name);
-      $('meadow-body').querySelector(`[data-pick="${CSS.escape(name)}"]`)?.focus();
+      const key = pick.dataset.pick;
+      select(selected === key ? undefined : key);
+      refocus(`[data-pick="${CSS.escape(key)}"]`);
+      return;
+    }
+    if (e.target.closest('[data-index]')) {
+      view = 'index';
+      noteAll();
+      renderPanel();
+      refocus('[data-index-back]');
+      return;
+    }
+    if (e.target.closest('[data-index-back]')) {
+      view = 'island';
+      renderPanel();
+      refocus('[data-index]');
+      return;
+    }
+    if (e.target.closest('[data-buy]')) {
+      const p = play();
+      if (p.points < MYSTERY_PRICE || wild().length >= MAX_WILD) return;
+      const id = `${Date.now().toString(36)}${wild().length}`;
+      if (demo()) demoState.play = { ...p, points: p.points - MYSTERY_PRICE };
+      else prefs.play = { ...p, points: p.points - MYSTERY_PRICE };
+      wild().push({ id, born: p.minutes });
+      saveNest();
+      $('meadow-live').textContent = 'A mystery egg is on the island.';
+      select(`wild:${id}`);
+      refocus('[data-pick][aria-pressed="true"]');
       return;
     }
     if (!selected) return;
+    if (e.target.closest('[data-hatch-wild]')) {
+      const w = wildOf(selected);
+      if (!w || w.species || !lifeFor(selected).ready) return;
+      Object.assign(w, rollMystery(SPECIES.map((sp) => sp.id), VARIANTS), { stage: 1 });
+      saveNest();
+      celebrate(selected, `${w.rarity === 'R' ? 'A' : w.rarity === 'SR' ? 'A rare' : 'A super rare, golden'} ${STAGE_NAMES[w.species][0]} hatched!`);
+      refocus('[data-pick][aria-pressed="true"]');
+      return;
+    }
     const hatch = e.target.closest('[data-hatch]');
-    if (hatch && !entryOf(selected) && lifeFor(selected).ready) {
+    if (hatch && !isWild(selected) && !entryOf(selected) && lifeFor(selected).ready) {
       const species = hatch.dataset.hatch;
       nest()[selected] = { species, variant: defaultCreature(selected).variant, stage: 1, rarity: rarityFrom(stats.names.get(selected)) };
       saveNest();
       celebrate(selected, `${STAGE_NAMES[species][0]} hatched!`);
-      $('meadow-body').querySelector('[data-pick][aria-pressed="true"]')?.focus();
+      refocus('[data-pick][aria-pressed="true"]');
       return;
     }
     if (e.target.closest('[data-evolve]')) {
@@ -610,13 +772,14 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
       entry.stage += 1;
       saveNest();
       celebrate(selected, `${from} evolved into ${STAGE_NAMES[entry.species][entry.stage - 1]}!`);
-      $('meadow-body').querySelector('[data-pick][aria-pressed="true"]')?.focus();
+      refocus('[data-pick][aria-pressed="true"]');
       return;
     }
     const b = e.target.closest('[data-look]');
     if (b && entryOf(selected)) {
       entryOf(selected).variant = Number(b.dataset.look);
       saveNest();
+      noteAll();
       renderPanel();
       if (reduced.matches) renderScene();
       const details = $('meadow-body').querySelector('details');
@@ -632,12 +795,15 @@ export function createMeadow({ bridge, prefs, savePrefs, getSnapshot, getLight, 
     shown = agents().join('|');
     groundKey = '';
     remember(agents());
+    tickPlay();
+    noteAll();
     renderScene();
     renderPanel();
     start();
     $('meadow-back').focus();
     await loadStats();
     remember(agents());
+    noteAll();
     renderScene();
     renderPanel();
   }
