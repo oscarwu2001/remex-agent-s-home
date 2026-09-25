@@ -1,5 +1,7 @@
 'use strict';
 
+const { LIMIT_TEXT } = require('./usage');
+
 // Turns one line of a Claude Code JSONL transcript into zero or more
 // normalised events. Pure: no clock, no file system. Anything the format
 // does not tell us is left undefined rather than guessed.
@@ -154,7 +156,24 @@ function eventsFromEntry(entry) {
       ? entry.message.id : undefined,
     usage: entry.type === 'assistant' && entry.message && entry.message.usage && typeof entry.message.usage === 'object'
       ? entry.message.usage : undefined,
+    model: entry.type === 'assistant' && entry.message && typeof entry.message.model === 'string' ? entry.message.model : undefined,
   };
+
+  // Claude Code's own error lines (usage limits, overload) are shown to the
+  // user in Claude Code; a limit one is passed on as a notice.
+  if (entry.type === 'assistant' && entry.isApiErrorMessage === true) {
+    const text = promptText(entry.message && entry.message.content).trim();
+    if (LIMIT_TEXT.test(text)) return { meta: { ...meta, usage: undefined }, events: [{ kind: 'limit', ts, text: text.slice(0, 200) }] };
+  }
+
+  // Compaction: where the context stood when Claude Code compacted it.
+  if (entry.type === 'system' && entry.subtype === 'compact_boundary' && entry.compactMetadata && typeof entry.compactMetadata === 'object') {
+    const c = entry.compactMetadata;
+    return {
+      meta,
+      events: [{ kind: 'compact', ts, trigger: String(c.trigger ?? ''), preTokens: Number(c.preTokens) || undefined, postTokens: Number(c.postTokens) || undefined }],
+    };
+  }
 
   if (entry.type === 'assistant' || entry.type === 'user') {
     return { meta, events: messageEvents(entry, ts, undefined) };
@@ -189,3 +208,4 @@ function eventsFromEntry(entry) {
 }
 
 module.exports = { parseLine, eventsFromEntry, MalformedLineError, TASK_TOOLS };
+

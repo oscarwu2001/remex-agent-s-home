@@ -632,6 +632,30 @@ export function plantThumb(kind, big) {
   return `<svg class="thumb" viewBox="${(cx - w / 2).toFixed(1)} ${(cy - w / 2).toFixed(1)} ${w} ${w}" aria-hidden="true">${drawPlant(kind, 0, 0, 0, 3, false)}</svg>`;
 }
 
+// A small picture of a room decoration, for the decorating panel.
+export function decorThumb(id) {
+  const [cx, cy] = P(0, 0, 0.75);
+  return `<svg class="thumb" viewBox="${(cx - 45).toFixed(1)} ${(cy - 45).toFixed(1)} 90 90" aria-hidden="true">${drawDecoration(id, 0, 0, 0)}</svg>`;
+}
+
+// A swatch of a floor in a room's own colours.
+export function floorThumb(kind, roomId) {
+  const body = bodyOf(roomId);
+  const [a, b] = floorTones(body.base ?? body.left, activeTheme);
+  const [cx, cy] = P(1.5, 1.5, 0);
+  return `<svg class="thumb" viewBox="${(cx - 100).toFixed(1)} ${(cy - 50).toFixed(1)} 200 100" aria-hidden="true">${drawFloor(kind, 0, 0, 0, 3, 3, { a, b, body, seed: 7 })}</svg>`;
+}
+
+// A see-through preview of a decoration on one of a room's spots; with no
+// decoration, the spot is outlined to show it would be cleared.
+export function decorPreview(roomId, index, id) {
+  const spot = decorSpots(roomId)[index];
+  if (!spot) return '';
+  const [x, y, z] = spot;
+  const ring = [[x - 0.45, y - 0.45], [x + 0.45, y - 0.45], [x + 0.45, y + 0.45], [x - 0.45, y + 0.45]].map(([a, b]) => P(a, b, z).map((v) => v.toFixed(1)).join(',')).join(' ');
+  return `<polygon class="ghost-foot${id ? '' : ' remove'}" points="${ring}"/>${id ? `<g class="ghost-plant">${drawDecoration(id, x, y, z)}</g>` : ''}`;
+}
+
 // Screen box around a garden, for zooming in.
 export function gardenFrame(id) {
   const g = SCENERY[id];

@@ -300,3 +300,36 @@ test('a reply with usage but no id still counts, once per line', () => {
   feed(t, MAIN, [prompt(0, 'go'), { ...say(1, 'hi'), message: { ...say(1, 'hi').message, usage: { output_tokens: 4 } } }]);
   assert.equal(t.snapshot(s(2)).sessions[0].tokens.total, 4);
 });
+
+test('a session reports how full its context is, from its latest reply', () => {
+  const t = new Tracker();
+  const reply = (s, id, input, cacheRead, model = 'claude-haiku-4-5') => ({
+    ...say(s, 'working on it', null),
+    message: { ...say(s, 'x', null).message, id, model, usage: { input_tokens: input, output_tokens: 50, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: 0 } },
+  });
+  feed(t, MAIN, [prompt(0, 'go'), reply(1, 'm1', 1000, 20000), reply(2, 'm2', 500, 150000)]);
+  const { context } = t.snapshot(s(3)).sessions[0];
+  assert.equal(context.tokens, 150500, 'input plus cache: what the model read this turn');
+  assert.equal(context.model, 'claude-haiku-4-5');
+  assert.equal(context.window, 200000);
+  assert.equal(context.source, 'model');
+});
+
+test('an auto-compaction teaches the tracker where that model compacts', () => {
+  const t = new Tracker();
+  const compact = (sec, pre) => ({ type: 'system', subtype: 'compact_boundary', timestamp: new Date(T0 + sec * 1000).toISOString(), sessionId: 'sess-1', compactMetadata: { trigger: 'auto', preTokens: pre, postTokens: 30000 } });
+  const reply = (sec, id, input) => ({ ...say(sec, 'x', null), message: { ...say(sec, 'x', null).message, id, model: 'claude-opus-5-5', usage: { input_tokens: input, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
+  feed(t, MAIN, [prompt(0, 'go'), reply(1, 'a', 400000), compact(2, 800000), reply(3, 'b', 700000)]);
+  const { context } = t.snapshot(s(4)).sessions[0];
+  assert.equal(context.window, 800000);
+  assert.equal(context.source, 'observed');
+  assert.equal(context.tokens, 700000);
+});
+
+test('Claude Code limit messages are picked up as a notice', () => {
+  const t = new Tracker();
+  const limit = { ...say(1, 'Claude usage limit reached. Your limit will reset at 5pm.', 'stop_sequence'), isApiErrorMessage: true };
+  feed(t, MAIN, [prompt(0, 'go'), limit]);
+  const [sess] = t.snapshot(s(2)).sessions;
+  assert.match(sess.limitNotice.text, /usage limit reached/);
+});

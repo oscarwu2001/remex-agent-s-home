@@ -28,7 +28,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 ## Layout
 
-- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report, `weather.js` the opt-in real weather, `officepack.js` offers and installs the Office pack).
+- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report, `weather.js` the opt-in real weather, `officepack.js` offers and installs the Office pack, `usage.js` Claude Code use and context windows).
 - `office-pack/`: a small team of Claude Code agents and skills for people who do not code, offered to the user by the app.
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
 - `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital (simple furniture), `detailed.js` (detailed room style), `decor.js` (floors, decorations, garden plants), `people.js` figures, `app.js` glue and board, `demo.js`.

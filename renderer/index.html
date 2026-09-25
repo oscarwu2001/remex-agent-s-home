@@ -58,6 +58,11 @@
 
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
 
+    <section class="board-section usage" id="usage" hidden aria-labelledby="usage-h">
+      <h2 id="usage-h">Claude Code use</h2>
+      <div id="usage-body"></div>
+    </section>
+
     <section class="board-section" aria-labelledby="on-shift-h">
       <h2 id="on-shift-h">On shift</h2>
       <div id="sessions"></div>
@@ -133,6 +138,14 @@
         <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
         <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
         <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+      </section>
+
+      <section class="settings-group" aria-labelledby="warn-h">
+        <h3 id="warn-h">Usage warnings</h3>
+        <p class="hint">A session whose context is nearly full is always flagged: save your work before Claude Code compacts it. Claude Code's own usage-limit messages are passed on too.</p>
+        <label class="field" for="opt-budget">Also warn me after this many tokens in 5 hours (leave empty for no warning)
+          <input id="opt-budget" type="number" min="0" step="100000" inputmode="numeric" placeholder="e.g. 5000000"></label>
+        <label class="switch"><input type="checkbox" id="opt-notify" checked> <span>Show warnings as Windows notifications too</span></label>
       </section>
 
       <section class="settings-group" aria-labelledby="pack-settings-h">

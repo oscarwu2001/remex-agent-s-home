@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -15,6 +15,7 @@ const {
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
 const officePack = require('../src/core/officepack');
+const { UsageScanner } = require('../src/core/usage');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -467,6 +468,30 @@ app.whenReady().then(() => {
     }
   });
 
+  // Claude Code use over 5 hours, today and 7 days, from every transcript
+  // folder the app watches. A pass reads only lines added since the last.
+  const usage = new UsageScanner({ roots: [] });
+  let usageSummary;
+  (async function followUsage() {
+    try {
+      usage.setRoots([...watcher.roots, ...wslWatcher.roots]);
+      await usage.scan();
+      usageSummary = usage.summary();
+    } catch (err) {
+      problem(`Counting Claude Code use failed (${err.code || err.name})`, err.message);
+    } finally {
+      setTimeout(followUsage, 60_000);
+    }
+  })();
+
+  // Desktop notifications, asked for by the page (context nearly full, a
+  // usage limit, the user's own warning level). Shown by Windows, locally.
+  ipcMain.handle('home:notify', (_event, { title, body } = {}) => {
+    if (!Notification.isSupported()) return { ok: false };
+    new Notification({ title: String(title ?? '').slice(0, 80), body: String(body ?? '').slice(0, 240), silent: false }).show();
+    return { ok: true };
+  });
+
   // The Office pack: offered to the user, copied in only when they say yes,
   // into the Claude folder the app already reads (never over a file).
   const packDir = path.join(__dirname, '..', 'office-pack');
@@ -498,7 +523,12 @@ app.whenReady().then(() => {
         return { roots: [...a.roots, ...b.roots], filesTailed: a.filesTailed + b.filesTailed };
       })(),
       roster: roster.agents,
-      problems: [...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems],
+      usage: usageSummary,
+      problems: [
+        ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
+        ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),
+        ...(usageSummary?.unreadable ? [{ label: 'Lines that could not be read while counting use', detail: '', count: usageSummary.unreadable }] : []),
+      ],
     });
   }, PUSH_MS);
 

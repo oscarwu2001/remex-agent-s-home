@@ -53,7 +53,7 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
 - **Zoom and move:** scroll to zoom. Right-drag (or Shift-drag) to move.
 - **Settings** (the gear at the top of the panel): colourway, time of day, privacy, name tags, demo patients and the hospital layout.
-- **Decorate:** visit a room and press **Decorate**. Pick its floor (checker tiles, large tiles, mosaic, wooden boards, terrazzo or plain vinyl) and put a decoration on each of its three numbered spots. Each room only offers what belongs there. The Operating Room gets a crash cart, an instrument tray, a scrub sink, an X-ray lightbox or an IV pole. The Laboratory gets a specimen fridge, a test-tube rack or an eyewash station. Radiology gets a lead apron rack. The Vision Clinic gets an eye model or a glasses display, and the Research Office a bookcase, a globe, an armchair or a whiteboard. Plants, flowers and sanitiser stands fit anywhere.
+- **Decorate:** visit a room and press **Decorate**. Pick its floor (checker tiles, large tiles, mosaic, wooden boards, terrazzo or plain vinyl; each shows a swatch) and a decoration for each of its three numbered spots. Choose a spot, then point at a piece in the picture grid to see it standing on that spot before you click. Each room only offers what belongs there. The Operating Room gets a crash cart, an instrument tray, a scrub sink, an X-ray lightbox or an IV pole. The Laboratory gets a specimen fridge, a test-tube rack or an eyewash station. Radiology gets a lead apron rack. The Vision Clinic gets an eye model or a glasses display, and the Research Office a bookcase, a globe, an armchair or a whiteboard. Plants, flowers and sanitiser stands fit anywhere.
 - **Plant the gardens:** click a green island and press **Plant**. You can choose tulips, daisies, lavender, a rose bush, a shrub, a small tree, a young cherry, a lamp post, stepping stones or a bench. The big tree, blossom tree, cherry blossom and fountain take 2 × 2 tiles. As you move over the plot, a see-through preview shows where the piece will stand and which tiles it covers. With **Dig up** selected, the preview shows what would go. Click to plant.
 - **Wind:** every minute or two a gust blows through. The garden trees and flowers bend, and petals blow off the cherry and blossom trees and drift across the hospital (leaves, if nothing is in flower). It doesn't happen if Windows is set to reduce motion. Your choices are saved in `%APPDATA%\Agents Home\decor.json`.
 - **Room style** (in Settings): **Simple** is the storybook furniture. **Detailed** furnishes every room with realistic hospital equipment, still in the same flat-colour style. That means a real operating table with padded sections and arm boards, twin surgical lights on ceiling arms, and an anaesthesia machine with gas cylinders. The ward gets hospital beds with rails, IV poles and privacy curtains. The lab gets a bench with a sink, a microscope and a fume hood. Radiology gets an MRI gantry with a patient cradle, and the Vision Clinic an exam chair with a phoropter and a slit lamp. The Nurses' Station gets a two-level counter with monitors and chairs, and departments get a navigation camera tower on wheels.
@@ -130,6 +130,15 @@ figure is doing:
 | dashed tick | Presumed finished | a background helper went quiet for 2 minutes |
 | red diamond | Failed | a helper returned an error |
 | dark square | Stopped | a helper was interrupted |
+
+**Claude Code use.** A card at the top of the board shows the tokens all your Claude Code sessions used in the last 5 hours, today and the last 7 days, with and without cache reads. Each session row also shows how full its context is.
+
+**Save-your-work warnings.** The app warns you, on the board and as a Windows notification (switch it off in **Settings → Usage warnings**), when:
+- a session has used 85% of its context. The limit is where that model was seen to auto-compact, or otherwise the model's context window.
+- Claude Code itself says a usage limit is near or reached.
+- your own warning level is reached. Set how many tokens in 5 hours in Settings; you get a warning at 80% and again at 100%.
+
+Plan limits (Pro, Max) are not written anywhere on your computer, so the app doesn't guess them.
 
 Each row also shows **tokens used**, counted the same way as the performance report (input, output and cache, each reply once). A session's row includes every helper it has called. The header shows the total for everyone on shift.
 

@@ -18,6 +18,8 @@
 | **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper and is not a new prompt. |
 | **Tokens** | A reply's `usage` (input + output + cache read + cache write), counted once per message id at its fullest, because Claude Code repeats it on every content block's line. A helper counts its own; a session's row adds every helper it called. |
 | **Office pack** | `office-pack/`: five Claude Code agents (writer, summariser, planner, data-helper, checker) and four skills for people who do not code. Offered by the app and copied into `~/.claude` only on a yes, never over existing files. |
+| **Context** | How much a session's model read in its latest reply (input + cache), against where that model was seen to auto-compact, or else its context window (`usage.js`). Flagged at 85%: save your work. |
+| **Claude Code use** | Tokens across all sessions over 5 hours, today and 7 days, counted once per reply by `UsageScanner`, which reads only appended lines after its first pass. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

@@ -12,6 +12,7 @@ const path = require('path');
 const { eventsFromEntry } = require('./transcript');
 const { describeTool, APPROVAL_TOOLS } = require('./activity');
 const { roomFor } = require('./rooms');
+const { contextWindowFor, contextOf } = require('./usage');
 
 const TIMING = {
   approvalQuietMs: 7_000, // pending approval-type tool, file quiet this long
@@ -35,6 +36,8 @@ function newActor(startedAt) {
     history: [],
     errors: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    context: undefined, // tokens the model read in the latest reply
+    model: undefined,
     usageById: new Map(), // message id -> usage counted so far
   };
 }
@@ -81,6 +84,8 @@ class Tracker {
       lastProblem: undefined,
     };
     this.unmatchedRelayIds = new Set();
+    // model -> the most context Claude Code let it reach before auto-compacting
+    this.compactsAt = new Map();
   }
 
   // ---- input -------------------------------------------------------------
@@ -110,7 +115,7 @@ class Tracker {
 
     // Usage rides along as an event of its own, so a helper's tokens wait
     // in the buffer with the rest of its lines until it is linked.
-    const all = meta.usage ? [...events, { kind: 'usage', messageId: meta.messageId, usage: meta.usage, ts: meta.ts }] : events;
+    const all = meta.usage ? [...events, { kind: 'usage', messageId: meta.messageId, usage: meta.usage, model: meta.model, ts: meta.ts }] : events;
     for (const raw of all) {
       // An entry with no usable timestamp still counts, but must not make an
       // old session look fresh, so it never moves lastAt forward.
@@ -275,6 +280,17 @@ class Tracker {
         break;
       case 'usage':
         addUsage(actor, ev.messageId, ev.usage);
+        actor.context = contextOf(ev.usage);
+        if (ev.model) actor.model = ev.model;
+        break;
+      case 'compact':
+        if (ev.trigger === 'auto' && ev.preTokens && actor.model) {
+          this.compactsAt.set(actor.model, Math.max(this.compactsAt.get(actor.model) ?? 0, ev.preTokens));
+        }
+        actor.context = ev.postTokens;
+        break;
+      case 'limit':
+        actor.limitNotice = { ts: ev.ts, text: ev.text };
         break;
       default:
         break; // 'activity': proof of life only
@@ -282,6 +298,16 @@ class Tracker {
   }
 
   // ---- output ------------------------------------------------------------
+
+  // How full a session's context is: against where this model was seen to
+  // auto-compact, else against the model's context window.
+  contextOf(actor) {
+    if (!actor.context) return undefined;
+    const observed = actor.model ? this.compactsAt.get(actor.model) : undefined;
+    let window = observed ?? contextWindowFor(actor.model);
+    if (actor.context > window) window = Math.max(window, 1_000_000);
+    return { tokens: actor.context, model: actor.model, window, source: observed ? 'observed' : 'model', pct: actor.context / window };
+  }
 
   statusOf(actor, now, { isSession = false } = {}) {
     const quiet = now - actor.lastAt;
@@ -366,6 +392,8 @@ class Tracker {
         lastActivityAt: lastAt,
         errors: session.actor.errors,
         tokens: tokensOf(session.actor),
+        context: this.contextOf(session.actor),
+        limitNotice: session.actor.limitNotice,
         // Its own replies plus every helper it has called, finished ones too.
         tokensWithHelpers: [...session.subagents.values()].reduce((n, sub) => n + tokensOf(sub.actor).total, tokensOf(session.actor).total),
         ...this.statusOf(session.actor, now, { isSession: true }),

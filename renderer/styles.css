@@ -694,3 +694,27 @@ details > summary h2 { margin: 0; }
 .pack-row { margin: 0 0 var(--s-1); font-size: 13px; color: var(--ink); }
 .muted { color: var(--ink-muted); font-size: 12px; }
 .pack-names { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s-2); }
+
+/* ---- Claude Code use ----------------------------------------------------------------- */
+
+.usage-row { display: grid; grid-template-columns: 1fr auto; gap: 0 var(--s-2); align-items: baseline; margin: 0 0 var(--s-2); font-size: 13px; color: var(--ink); }
+.usage-row .muted { grid-column: 1 / -1; }
+.usage-row strong { font-variant-numeric: tabular-nums; }
+.meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin: var(--s-2) 0 var(--s-1); }
+.meter span { display: block; height: 100%; background: var(--accent); }
+.row .ctx-warn { grid-column: 2 / -1; font-size: 12px; font-weight: 600; color: var(--warn); }
+
+/* ---- decorating: pictures of each piece ------------------------------------------- */
+
+.floor-chip .thumb { width: 34px; height: 17px; margin-left: calc(-1 * var(--s-1)); }
+.pieces { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: var(--s-1); margin: 0 0 var(--s-2); }
+.piece {
+  display: grid; justify-items: center; gap: 2px; padding: var(--s-1) var(--s-1) var(--s-2); min-height: 44px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-raised); color: var(--ink);
+  font: 12px/1.2 var(--font); text-align: center; cursor: pointer;
+}
+.piece .thumb { width: 52px; height: 52px; }
+.piece:hover { border-color: var(--accent); }
+.piece[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.spot-mark.chosen circle { fill: var(--ink); }
+.spot-mark.chosen ellipse { stroke: var(--ink); stroke-dasharray: none; stroke-width: 3; }

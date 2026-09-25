@@ -93,6 +93,8 @@ export function demoSnapshot(nowMs, epochMs) {
       id: `demo-${key}`,
       tokens: own,
       tokensWithHelpers: own.total + agents.reduce((n, a) => n + a.tokens.total, 0),
+      // One demo session is nearly out of context, to show the warning.
+      context: { tokens: key === 'a' ? 176_000 : 412_000, model: key === 'a' ? 'claude-haiku-4-5' : 'claude-opus-5-5', window: key === 'a' ? 200_000 : 1_000_000, source: 'model', pct: key === 'a' ? 0.88 : 0.412 },
       project: s.project,
       room: 'nurses-station',
       startedAt: epochMs - (key === 'a' ? 14 : 6) * 60_000,
@@ -119,6 +121,11 @@ export function demoSnapshot(nowMs, epochMs) {
       { name: 'ui-reviewer', room: 'vision-clinic', summary: 'Independent interface reviewer.' },
     ],
     problems: [],
+    usage: {
+      last5h: { input: 41_000, output: 96_000, cacheRead: 2_310_000, cacheWrite: 180_000, total: 2_627_000, fresh: 317_000, replies: 214 },
+      today: { input: 88_000, output: 210_000, cacheRead: 5_020_000, cacheWrite: 390_000, total: 5_708_000, fresh: 688_000, replies: 470 },
+      week: { input: 402_000, output: 1_050_000, cacheRead: 26_400_000, cacheWrite: 1_900_000, total: 29_752_000, fresh: 3_352_000, replies: 2_380 },
+    },
   };
 }
 

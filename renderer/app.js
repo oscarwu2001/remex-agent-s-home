@@ -1,6 +1,6 @@
 import {
   buildScene, labelPoint, slotPoint, routeTo, spawnPoint, LAYOUT, targetHeights, setHeights, workSpot, routeBetween, floorOutline, roomFrame, configureRooms, cellOutline,
-  decorSpots, gardenTile, gardenOutline, gardenFrame, gardenPlot, plantPreview, plantThumb,
+  decorSpots, gardenTile, gardenOutline, gardenFrame, gardenPlot, plantPreview, plantThumb, decorThumb, floorThumb, decorPreview,
 } from './scene.js';
 import { P } from './iso.js';
 import { BLOSSOMING } from './decor.js';
@@ -30,6 +30,7 @@ let plantTool = 'tulips'; // what a click on a garden tile plants, or 'remove'
 let benchTurn = false;
 let decorError = '';
 let decorNote = ''; // what the last change did, read out to screen readers
+let decorSpot = 0; // the room spot being decorated
 
 const $ = (id) => document.getElementById(id);
 const svg = $('scene');
@@ -42,6 +43,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // live: the real weather, off unless the user turns it on. `place` is the
 // town they chose ({ name, region, country, latitude, longitude }).
 const prefs = {
+  budget5h: 0, notify: true,
   private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
   live: { on: false, place: null, unit: 'celsius' },
 };
@@ -441,7 +443,7 @@ function decorMarkers() {
     // A ring on the floor and a numbered pin above whatever stands there.
     const [sx, sy] = P(x, y, z);
     const top = P(x, y, z + 2.3)[1] - sy;
-    return `<g class="spot-mark" transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)})" aria-hidden="true">
+    return `<g class="spot-mark${i === decorSpot ? ' chosen' : ''}" transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)})" aria-hidden="true">
       <ellipse rx="24" ry="12"/><line x1="0" y1="0" x2="0" y2="${(top + 12).toFixed(1)}"/>
       <circle cy="${top.toFixed(1)}" r="12"/><text text-anchor="middle" y="${(top + 5).toFixed(1)}">${i + 1}</text></g>`;
   }).join('');
@@ -1100,10 +1102,14 @@ function rowTokens(x, sub) {
   return sub ? x.tokens?.total : x.tokensWithHelpers ?? x.tokens?.total;
 }
 
+const CONTEXT_WARN = 0.85; // share of the context at which a session is flagged
+
 function rowHtml(key, x, name, sub) {
   const what = statusText(x);
   const tokens = rowTokens(x, sub);
-  const tokenText = tokens ? `${compact(tokens)} tokens` : '';
+  const ctx = !sub && x.context?.pct ? Math.round(x.context.pct * 100) : undefined;
+  const tokenText = [tokens ? `${compact(tokens)} tokens` : '', ctx !== undefined ? `context ${ctx}%` : ''].filter(Boolean).join(' · ');
+  const nearlyFull = ctx !== undefined && ctx >= CONTEXT_WARN * 100;
   const detail = !prefs.private && x.activity?.detail ? ` · ${x.activity.detail}` : '';
   const warn = x.status === 'blocked' || x.status === 'your-turn' || glyphKey(x) === 'failed';
   const where = sub ? ` in the ${roomName(x.room)}` : '';
@@ -1114,6 +1120,7 @@ function rowHtml(key, x, name, sub) {
         <span class="what${warn ? ' warn' : ''}">${escapeXml(what + detail)}</span></span>
       <span class="when"><span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
         ${tokenText ? `<span class="tokens">${tokenText}</span>` : ''}</span>
+      ${nearlyFull ? `<span class="ctx-warn">⚠ Context ${ctx}% full: save your work</span>` : ''}
     </button>`;
 }
 
@@ -1179,6 +1186,8 @@ function renderCensus(s) {
   const blocked = s.sessions.reduce((k, x) => k + (x.status === 'blocked') + x.agents.filter((a) => a.status === 'blocked').length, 0);
   const parts = [`${n} session${n === 1 ? '' : 's'}`, `${helpers} helper${helpers === 1 ? '' : 's'} at work`];
   if (waiting) parts.push(`${waiting} waiting for you`);
+  const full = s.sessions.filter((x) => x.context?.pct >= CONTEXT_WARN).length;
+  if (full) parts.push(`${full} nearly out of context`);
   if (blocked) parts.push(`${blocked} may need approval`);
   const tokens = s.sessions.reduce((k, x) => k + (x.tokensWithHelpers ?? x.tokens?.total ?? 0), 0);
   if (tokens) parts.push(`${compact(tokens)} tokens`);
@@ -1248,6 +1257,7 @@ function renderDirectory(s) {
 
 function render(force = false) {
   snapshot = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : liveSnapshot;
+  checkWarnings(snapshot);
   syncPeople(snapshot);
 
   const chart = renderChart(snapshot);
@@ -1255,7 +1265,9 @@ function render(force = false) {
   const signature = JSON.stringify([
     snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail, compact(x.tokensWithHelpers ?? 0),
       x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail, compact(a.tokens?.total ?? 0)])]),
-    chart, problems, (snapshot.roster || []).length, selected, prefs.private,
+    chart, problems, (snapshot.roster || []).length, selected, prefs.private, warnings,
+    snapshot.usage ? [snapshot.usage.last5h.total, snapshot.usage.today.total, snapshot.usage.limitNotice?.ts, prefs.budget5h] : null,
+    snapshot.sessions.map((x) => Math.round((x.context?.pct ?? 0) * 100)),
   ]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
@@ -1264,6 +1276,7 @@ function render(force = false) {
   const focusKey = document.activeElement?.dataset?.key;
   $('sessions').innerHTML = renderSessions(snapshot);
   $('census').textContent = renderCensus(snapshot);
+  renderUsage(snapshot);
   $('source').textContent = renderSource(snapshot);
   $('chart').hidden = !chart;
   if (chart) $('chart-body').innerHTML = chart;
@@ -1292,6 +1305,73 @@ setInterval(() => {
   const now = Date.now();
   for (const el of document.querySelectorAll('[data-since]')) el.textContent = elapsed(Number(el.dataset.since), now);
 }, 1000);
+
+// ---- Claude Code use and warnings -------------------------------------------------
+
+function renderUsage(s) {
+  const u = s.usage;
+  const box = $('usage');
+  box.hidden = !u || s.assistantMode;
+  if (box.hidden) return;
+  const row = (label, t) => `<div class="usage-row"><span>${label}</span><strong>${compact(t.total)}</strong>
+    <span class="muted">${compact(t.fresh)} without cache reads</span></div>`;
+  const budget = prefs.budget5h > 0
+    ? (() => {
+      const pct = Math.min(100, Math.round((u.last5h.total / prefs.budget5h) * 100));
+      return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Your 5-hour warning level used">
+        <span style="width:${pct}%"></span></div><p class="hint">${pct}% of your warning level (${compact(prefs.budget5h)} in 5 hours).</p>`;
+    })()
+    : '';
+  const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(u.limitNotice.text)}</p>` : '';
+  $('usage-body').innerHTML = `${limit}${row('Last 5 hours', u.last5h)}${row('Today', u.today)}${row('Last 7 days', u.week)}${budget}`;
+}
+
+// Warnings are raised once each: per session when its context passes the
+// line, per limit message, and per 5-hour window for the user's own level.
+const warned = new Set();
+let warnings = [];
+function checkWarnings(s) {
+  const now = [];
+  const raise = (key, text) => {
+    now.push(text);
+    if (warned.has(key)) return;
+    warned.add(key);
+    if (prefs.notify && bridge.notify && !s.demo) bridge.notify({ title: "Agent's Home", body: text });
+  };
+  for (const sess of s.sessions) {
+    if (sess.context?.pct >= CONTEXT_WARN) {
+      raise(`ctx:${sess.id}`, `${sess.project} has used ${Math.round(sess.context.pct * 100)}% of its context. Save what you are working on: Claude Code will compact it soon.`);
+    }
+    if (sess.limitNotice) raise(`limit:${sess.id}:${sess.limitNotice.ts}`, `Claude Code (${sess.project}): ${sess.limitNotice.text} Save what you are working on.`);
+  }
+  const u = s.usage;
+  if (u?.limitNotice && !s.sessions.some((x) => x.limitNotice)) raise(`limit:all:${u.limitNotice.ts}`, `Claude Code: ${u.limitNotice.text} Save what you are working on.`);
+  if (u && prefs.budget5h > 0) {
+    const window = Math.floor(Date.now() / (5 * 3_600_000));
+    for (const level of [0.8, 1]) {
+      if (u.last5h.total >= prefs.budget5h * level) {
+        raise(`budget:${window}:${level}`, level === 1
+          ? `Claude Code has used ${compact(u.last5h.total)} tokens in 5 hours, past your warning level. Save what you are working on.`
+          : `Claude Code has used ${Math.round((u.last5h.total / prefs.budget5h) * 100)}% of your 5-hour warning level. Consider saving your work soon.`);
+      }
+    }
+  }
+  warnings = now;
+}
+
+$('opt-budget').value = prefs.budget5h > 0 ? String(prefs.budget5h) : '';
+$('opt-notify').checked = prefs.notify !== false;
+$('opt-budget').addEventListener('change', (e) => {
+  const n = Math.round(Number(e.target.value));
+  prefs.budget5h = Number.isFinite(n) && n > 0 ? n : 0;
+  e.target.value = prefs.budget5h ? String(prefs.budget5h) : '';
+  savePrefs();
+  render(true);
+});
+$('opt-notify').addEventListener('change', (e) => {
+  prefs.notify = e.target.checked;
+  savePrefs();
+});
 
 // ---- hospital layout: add and remove departments ----------------------------
 
@@ -1706,20 +1786,19 @@ function renderDecorPanel() {
   const floor = entry.floor ?? cat.defaultFloor;
   const fits = decorationsFor(id);
   $('decorate-h').textContent = `Decorate the ${ROOM_NAMES[id]?.name ?? 'room'}`;
-  const spots = Array.from({ length: cat.spotsPerRoom }, (_, i) => {
-    const chosen = entry.spots?.[i] ?? '';
-    return `<label class="field">Spot ${i + 1}
-      <select data-spot="${i}">
-        <option value="" ${chosen ? '' : 'selected'}>Nothing</option>
-        ${fits.map((d) => `<option value="${d.id}" ${chosen === d.id ? 'selected' : ''}>${escapeXml(d.name)}</option>`).join('')}
-      </select></label>`;
-  }).join('');
+  if (decorSpot >= cat.spotsPerRoom) decorSpot = 0;
+  const nameOf = (d) => fits.find((x) => x.id === d)?.name ?? 'Nothing';
+  const spotChips = Array.from({ length: cat.spotsPerRoom }, (_, i) => `<label class="chip"><input type="radio" name="decor-spot" value="${i}" ${i === decorSpot ? 'checked' : ''}>
+      ${i + 1} · ${escapeXml(nameOf(entry.spots?.[i]))}</label>`).join('');
+  const chosen = entry.spots?.[decorSpot] ?? '';
+  const piece = (pid, name, thumb) => `<button type="button" class="piece" data-piece="${pid}" aria-pressed="${chosen === pid}">${thumb}<span>${escapeXml(name)}</span></button>`;
   $('decorate-body').innerHTML = `
     <fieldset class="chips"><legend>Floor</legend>
-      <div class="options">${cat.floors.map((f) => `<label class="chip"><input type="radio" name="floor" value="${f.id}" ${floor === f.id ? 'checked' : ''}>${escapeXml(f.name)}</label>`).join('')}</div>
+      <div class="options">${cat.floors.map((f) => `<label class="chip floor-chip"><input type="radio" name="floor" value="${f.id}" ${floor === f.id ? 'checked' : ''}>${floorThumb(f.id, id)}${escapeXml(f.name)}</label>`).join('')}</div>
     </fieldset>
-    <p class="hint">The numbered spots on the floor take a decoration each. Only pieces that belong in this room are offered.</p>
-    <div class="spot-fields">${spots}</div>
+    <fieldset class="chips"><legend>Spot</legend><div class="options">${spotChips}</div></fieldset>
+    <p class="hint">Point at a piece to see it on spot ${decorSpot + 1}, then click to place it. Only pieces that belong in this room are offered.</p>
+    <div class="pieces" id="pieces">${piece('', 'Nothing', '<svg class="thumb" viewBox="0 0 10 10" aria-hidden="true"></svg>')}${fits.map((d) => piece(d.id, d.name, decorThumb(d.id))).join('')}</div>
     ${status}${error}
     <div class="form-actions"><button type="button" class="link-btn" id="room-reset">Back to the plain room</button></div>`;
 }
@@ -1738,12 +1817,31 @@ $('decorate-body').addEventListener('change', (e) => {
   } else if (t.name === 'floor') {
     const name = config.decorCatalogue.floors.find((f) => f.id === t.value)?.name ?? t.value;
     setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), floor: t.value }, `Floor changed to ${name.toLowerCase()}.`);
-  } else if (t.dataset.spot !== undefined) {
-    const spots = Array.from({ length: config.decorCatalogue.spotsPerRoom }, (_, i) => roomEntry(focusedRoom).spots?.[i] ?? null);
-    spots[Number(t.dataset.spot)] = t.value || null;
-    const name = t.selectedOptions[0]?.textContent ?? '';
-    setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), spots }, t.value ? `${name} placed on spot ${Number(t.dataset.spot) + 1}.` : `Spot ${Number(t.dataset.spot) + 1} cleared.`);
+  } else if (t.name === 'decor-spot') {
+    decorSpot = Number(t.value);
+    renderDecorPanel();
+    drawLabels();
+    placeLabels();
+    $('decorate-body').querySelector(`input[name="decor-spot"][value="${decorSpot}"]`)?.focus();
   }
+});
+
+// Pointing at a piece previews it on the chosen spot; clicking places it.
+function previewPiece(el) {
+  $('ghost').innerHTML = el && decorating && focusedRoom ? decorPreview(focusedRoom, decorSpot, el.dataset.piece) : '';
+}
+$('decorate-body').addEventListener('pointerover', (e) => previewPiece(e.target.closest('[data-piece]')));
+$('decorate-body').addEventListener('pointerleave', () => previewPiece(undefined));
+$('decorate-body').addEventListener('focusin', (e) => previewPiece(e.target.closest('[data-piece]')));
+$('decorate-body').addEventListener('focusout', () => previewPiece(undefined));
+$('decorate-body').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-piece]');
+  if (!el || !focusedRoom) return;
+  const spots = Array.from({ length: config.decorCatalogue.spotsPerRoom }, (_, i) => roomEntry(focusedRoom).spots?.[i] ?? null);
+  spots[decorSpot] = el.dataset.piece || null;
+  const name = el.textContent.trim();
+  $('ghost').innerHTML = '';
+  setRoomEntry(focusedRoom, { ...roomEntry(focusedRoom), spots }, el.dataset.piece ? `${name} placed on spot ${decorSpot + 1}.` : `Spot ${decorSpot + 1} cleared.`);
 });
 
 $('decorate-body').addEventListener('click', (e) => {
