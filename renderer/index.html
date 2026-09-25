@@ -54,9 +54,20 @@
         </button>
       </div>
       <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
+      <fieldset class="mode-switch" id="mode-switch">
+        <legend class="visually-hidden">Mode</legend>
+        <label><input type="radio" name="mode" value="monitor"><span>Monitor</span></label>
+        <label><input type="radio" name="mode" value="assistant"><span>Assistant</span></label>
+      </fieldset>
     </header>
 
-    <section class="board-section" aria-labelledby="on-shift-h">
+    <section class="board-section front-desk" id="front-desk" hidden aria-labelledby="fd-h">
+      <h2 id="fd-h">Front desk</h2>
+      <div id="fd-form"></div>
+      <div id="fd-tasks" class="tasks" aria-live="polite"></div>
+    </section>
+
+    <section class="board-section" id="on-shift" aria-labelledby="on-shift-h">
       <h2 id="on-shift-h">On shift</h2>
       <div id="sessions"></div>
     </section>
@@ -131,6 +142,11 @@
         <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
         <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
         <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+      </section>
+
+      <section class="settings-group" aria-labelledby="assistant-h">
+        <h3 id="assistant-h">Assistant (goes online)</h3>
+        <div id="assistant-settings"></div>
       </section>
 
       <section class="settings-group" aria-labelledby="report-h">

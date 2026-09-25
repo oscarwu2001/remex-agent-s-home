@@ -14,6 +14,7 @@ const {
 } = require('../src/core/rooms');
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
+const { setupAssistant } = require('./assistant');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -466,6 +467,9 @@ app.whenReady().then(() => {
     }
   });
 
+  // Assistant mode: the built-in team. Idle until the user adds a key.
+  const assistantSnapshot = setupAssistant({ problem });
+
   createWindow();
 
   setInterval(() => {
@@ -478,6 +482,7 @@ app.whenReady().then(() => {
         return { roots: [...a.roots, ...b.roots], filesTailed: a.filesTailed + b.filesTailed };
       })(),
       roster: roster.agents,
+      assistant: assistantSnapshot(),
       problems: [...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems],
     });
   }, PUSH_MS);

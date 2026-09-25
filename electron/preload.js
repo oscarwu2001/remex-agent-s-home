@@ -10,6 +10,16 @@ contextBridge.exposeInMainWorld('agentsHome', {
   weatherNow: (place, unit) => ipcRenderer.invoke('home:weather-now', place, unit),
   updateInfo: () => ipcRenderer.invoke('home:update-info'),
   update: () => ipcRenderer.invoke('home:update'),
+  assistant: {
+    status: () => ipcRenderer.invoke('assistant:status'),
+    setKey: (key) => ipcRenderer.invoke('assistant:set-key', key),
+    clearKey: () => ipcRenderer.invoke('assistant:clear-key'),
+    check: (text) => ipcRenderer.invoke('assistant:check', text),
+    run: (task) => ipcRenderer.invoke('assistant:run', task),
+    reply: (msg) => ipcRenderer.invoke('assistant:reply', msg),
+    stop: (id) => ipcRenderer.invoke('assistant:stop', id),
+    forget: (id) => ipcRenderer.invoke('assistant:forget', id),
+  },
   buildReport: (days) => ipcRenderer.invoke('home:build-report', days),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
   onSnapshot: (fn) => {

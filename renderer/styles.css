@@ -683,3 +683,43 @@ details > summary h2 { margin: 0; }
 .ghost-plant { opacity: 0.72; }
 .chip .thumb { width: 26px; height: 26px; margin-left: calc(-1 * var(--s-1)); flex: none; }
 .button:disabled { background: var(--line); color: var(--ink-muted); cursor: not-allowed; box-shadow: none; }
+
+/* ---- mode switch and the Front desk (Assistant mode) ----------------------------- */
+
+.mode-switch { display: inline-flex; margin: var(--s-2) 0 0; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-raised); }
+.mode-switch label { position: relative; cursor: pointer; }
+.mode-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-switch span { display: grid; place-items: center; min-height: 36px; padding: 0 var(--s-4); border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mode-switch input:checked + span { background: var(--accent); color: var(--on-accent, #fff); }
+.mode-switch input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.fd-form { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
+.fd-form textarea {
+  width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; padding: var(--s-2);
+  border: 1px solid var(--ink-muted); border-radius: var(--r-md); background: var(--panel-raised); color: var(--ink);
+  font: 14px/1.45 var(--font);
+}
+.fd-warn { padding: var(--s-3); border-radius: var(--r-md); background: var(--warn-soft); color: var(--ink); font-size: 13px; }
+.fd-warn p { margin: 0 0 var(--s-2); }
+.fd-warn ul { margin: 0 0 var(--s-2); padding-left: var(--s-4); }
+.fd-warn code { font-size: 12px; }
+.button.danger { background: var(--warn); }
+.tasks { display: grid; gap: var(--s-3); }
+.task { padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel-raised); }
+.task.error { border-color: var(--warn); }
+.task h3 { margin: 0; font-size: 15px; color: var(--ink); }
+.task-meta { margin: 2px 0 var(--s-2); font-size: 12px; color: var(--ink-muted); }
+.task:not(.done):not(.error):not(.stopped) .task-status { color: var(--accent); font-weight: 700; }
+.answer { font-size: 14px; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+.answer p, .answer ul, .answer ol { margin: 0 0 var(--s-2); }
+.answer ul, .answer ol { padding-left: var(--s-5); }
+.answer h4 { margin: var(--s-3) 0 var(--s-1); font-size: 14px; }
+.answer code { padding: 0 3px; border-radius: 4px; background: var(--accent-soft); font-size: 13px; }
+.answer .table-wrap { overflow-x: auto; margin: 0 0 var(--s-2); }
+.answer table { border-collapse: collapse; font-size: 13px; }
+.answer th, .answer td { padding: 4px 8px; border: 1px solid var(--line); text-align: left; }
+.answer th { background: var(--accent-soft); }
+.turn.you { margin: 0 0 var(--s-2); padding: var(--s-2); border-radius: var(--r-md); background: var(--accent-soft); font-size: 13px; color: var(--ink); white-space: pre-wrap; }
+.turn.you .who { font-weight: 700; margin-right: var(--s-1); }
+.reply { display: grid; gap: var(--s-2); margin: var(--s-2) 0; }
+.reply textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: var(--s-2); border: 1px solid var(--ink-muted); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: 14px/1.4 var(--font); }
+.button.small { justify-self: start; min-height: 36px; padding: 0 var(--s-4); font-size: 13px; }

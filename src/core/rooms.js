@@ -61,6 +61,15 @@ const DEFAULT_ASSIGNMENTS = {
   'general-purpose': 'research-office',
   'claude-code-guide': 'research-office',
   researcher: 'research-office',
+  // The built-in team of Assistant mode (src/assistant/team.js).
+  writer: 'research-office',
+  summariser: 'radiology',
+  planner: 'vision-clinic',
+  'data-helper': 'laboratory',
+  helper: 'general-ward',
+  checker: 'operating-room',
+  coach: 'vision-clinic',
+  teacher: 'research-office',
 };
 
 // Then keyword rules, for agents the defaults do not name.

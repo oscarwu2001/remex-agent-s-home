@@ -59,5 +59,8 @@
       "target": "AppImage",
       "icon": "build/icon.png"
     }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0"
   }
 }

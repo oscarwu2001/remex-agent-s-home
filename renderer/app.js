@@ -4,6 +4,7 @@ import {
 } from './scene.js';
 import { P } from './iso.js';
 import { BLOSSOMING } from './decor.js';
+import { createFrontDesk } from './frontdesk.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -18,6 +19,23 @@ function useConfig(next) {
   configureRooms(config.rooms, config.gardens);
 }
 useConfig(config);
+
+// Assistant mode's Front desk (renderer/frontdesk.js). Made first: the room
+// signs ask it who works where. Its callbacks only run after start-up.
+const frontDesk = createFrontDesk({
+  bridge,
+  openSettings: (focusId) => {
+    setSettings(true);
+    const el = $(focusId);
+    el?.scrollIntoView({ block: 'center' });
+    el?.focus();
+  },
+  onChange: () => {
+    drawLabels();
+    placeLabels();
+    render(true);
+  },
+});
 
 // Layout editing state (see "hospital layout" below).
 let buildMode = false;
@@ -42,7 +60,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // live: the real weather, off unless the user turns it on. `place` is the
 // town they chose ({ name, region, country, latitude, longitude }).
 const prefs = {
-  private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
+  private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false, mode: 'monitor',
   live: { on: false, place: null, unit: 'celsius' },
 };
 let saved = {};
@@ -55,6 +73,7 @@ try {
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
 if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
 if (prefs.detail !== 'simple' && prefs.detail !== 'detailed') prefs.detail = 'simple';
+if (prefs.mode !== 'monitor' && prefs.mode !== 'assistant') prefs.mode = 'monitor';
 if ('night' in prefs) {
   // The old Night switch becomes a fixed night; otherwise follow the clock.
   if (prefs.night && saved.time === undefined) prefs.time = 'night';
@@ -119,6 +138,9 @@ function applyPrefs() {
   for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === prefs.theme;
   for (const r of document.querySelectorAll('input[name="detail"]')) r.checked = r.value === prefs.detail;
   $('opt-demo').checked = prefs.demo;
+  for (const r of document.querySelectorAll('input[name="mode"]')) r.checked = r.value === prefs.mode;
+  $('front-desk').hidden = prefs.mode !== 'assistant';
+  $('on-shift').hidden = prefs.mode === 'assistant';
   const sel = $('opt-time');
   sel.value = prefs.time;
   sel.options[0].textContent = `Follow my clock (now: ${PHASES.find((p) => p.id === phaseAt(new Date())).name.toLowerCase()})`;
@@ -402,14 +424,24 @@ function drawLabels() {
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const [x, y] = labelPoint(r.id);
-      const w = Math.max(r.name.length * 16, r.purpose.length * 9.8) + 32;
+      const purpose = purposeOf(r);
+      const w = Math.max(r.name.length * 16, purpose.length * 9.8) + 32;
       return `<g class="room-label" data-room="${r.id}" role="button" tabindex="0"
           aria-label="Visit the ${escapeXml(r.name)}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
         <rect x="${-w / 2}" y="-24" width="${w}" height="56" rx="14"/>
         <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
-        <text class="purpose" text-anchor="middle" y="22">${escapeXml(r.purpose)}</text></g>`;
+        <text class="purpose" text-anchor="middle" y="22">${escapeXml(purpose)}</text></g>`;
     })
     .join('') + decorMarkers();
+}
+
+// What a room's sign says: its job in Monitor mode, and in Assistant mode
+// who of the built-in team works there.
+function purposeOf(r) {
+  if (prefs.mode !== 'assistant' || prefs.demo) return r.purpose;
+  if (r.id === 'nurses-station') return 'Front desk: your tasks arrive here';
+  const here = frontDesk.team().filter((a) => a.room === r.id).map((a) => a.title);
+  return here.length ? here.join(', ') : r.purpose;
 }
 
 const pointsOf = (list) => list.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ');
@@ -881,6 +913,10 @@ function syncPeople(snapshot) {
 // as visitors and leave again, as before.
 function staffList(snap) {
   const list = new Map(); // name -> room
+  if (snap.assistantMode) {
+    for (const a of frontDesk.team()) list.set(a.name, a.room);
+    return list;
+  }
   for (const a of snap.roster || []) list.set(a.name, a.room);
   for (const d of config.layout?.departments || []) for (const a of d.agents) if (!list.has(a)) list.set(a, d.id);
   for (const [name, room] of list) if (!LAYOUT[room]) list.set(name, 'general-ward');
@@ -1188,6 +1224,7 @@ function renderCensus(s) {
 // Folder paths carry the user name, so they only show with privacy off.
 function renderSource(s) {
   if (s.demo) return 'Showing demo patients. Turn off “Demo patients” to see your own sessions.';
+  if (s.assistantMode) return 'Assistant mode: tasks go to Anthropic only when you send them. Monitor mode stays on this computer.';
   const roots = s.watcher.roots;
   if (!roots.length) return 'Connecting…';
   const where = (list) => (prefs.private ? 'your Claude Code transcripts folder' : list.map((r) => r.path).join(', '));
@@ -1248,6 +1285,12 @@ function renderDirectory(s) {
 
 function render(force = false) {
   snapshot = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : liveSnapshot;
+  // Assistant mode: the built-in team's tasks fill the hospital instead of
+  // Claude Code sessions (the demo still shows its own patients).
+  if (prefs.mode === 'assistant' && !prefs.demo) {
+    snapshot = { ...snapshot, sessions: snapshot.assistant?.sessions ?? [], assistantMode: true };
+    frontDesk.renderJobs(snapshot.assistant?.jobs);
+  }
   syncPeople(snapshot);
 
   const chart = renderChart(snapshot);
@@ -1255,7 +1298,8 @@ function render(force = false) {
   const signature = JSON.stringify([
     snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail, compact(x.tokensWithHelpers ?? 0),
       x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail, compact(a.tokens?.total ?? 0)])]),
-    chart, problems, (snapshot.roster || []).length, selected, prefs.private,
+    chart, problems, (snapshot.roster || []).length, selected, prefs.private, prefs.mode,
+    snapshot.assistantMode ? frontDesk.census(snapshot.assistant?.jobs) : '',
   ]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
@@ -1263,7 +1307,7 @@ function render(force = false) {
   // Re-render, then put keyboard focus back where it was.
   const focusKey = document.activeElement?.dataset?.key;
   $('sessions').innerHTML = renderSessions(snapshot);
-  $('census').textContent = renderCensus(snapshot);
+  $('census').textContent = snapshot.assistantMode ? frontDesk.census(snapshot.assistant?.jobs) : renderCensus(snapshot);
   $('source').textContent = renderSource(snapshot);
   $('chart').hidden = !chart;
   if (chart) $('chart-body').innerHTML = chart;
@@ -1880,6 +1924,22 @@ $('update-run').addEventListener('click', async () => {
     button.disabled = false;
   }
 });
+
+// ---- mode: Monitor (Claude Code sessions) or Assistant (the built-in team) ----------
+
+
+for (const radio of document.querySelectorAll('input[name="mode"]')) {
+  radio.addEventListener('change', () => {
+    prefs.mode = radio.value;
+    savePrefs();
+    applyPrefs();
+    selected = undefined;
+    drawLabels();
+    placeLabels();
+    render(true);
+    if (prefs.mode === 'assistant') frontDesk.focusTask();
+  });
+}
 
 // ---- settings panel ------------------------------------------------------------
 
