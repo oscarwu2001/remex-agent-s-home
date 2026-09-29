@@ -76,6 +76,16 @@ function samePrompt(a, b) {
 }
 
 // All helper runs and main sessions found in the transcripts.
+// The skill a Skill tool call runs: its name only (without a leading slash),
+// never its arguments.
+function skillName(ev) {
+  if (ev.name !== 'Skill') return undefined;
+  const raw = ev.input?.skill ?? ev.input?.command;
+  if (typeof raw !== 'string') return undefined;
+  const name = raw.trim().replace(/^\//, '').split(/\s/)[0];
+  return name || undefined;
+}
+
 function collect(roots, { since, until = Date.now() } = {}) {
   const problems = [];
   const stats = {
@@ -89,11 +99,15 @@ function collect(roots, { since, until = Date.now() } = {}) {
   // of it, so each id counts once, at the largest figure seen.
   const usageById = new Map(); // messageId -> { usage, owner }
   const orphanUsage = []; // [owner, usage] for lines with usage but no id
+  // Skill uses: by the main session (typed as /name, or picked by Claude
+  // with the Skill tool) and inside helpers. Names only, never arguments.
+  const skillUses = [];
+  const skillById = new Map(); // Skill tool_use id -> use
 
   const session = (id, meta) => {
     let s = sessions.get(id);
     if (!s) {
-      s = { id, project: undefined, start: meta.ts, end: meta.ts, prompts: 0, toolCalls: 0, tokens: emptyTokens(), runs: [] };
+      s = { id, project: undefined, start: meta.ts, end: meta.ts, prompts: 0, toolCalls: 0, tokens: emptyTokens(), runs: [], steps: [] };
       sessions.set(id, s);
     }
     if (meta.cwd && !s.project) s.project = path.basename(meta.cwd.replace(/\\/g, '/'));
@@ -149,7 +163,7 @@ function collect(roots, { since, until = Date.now() } = {}) {
         const key = `${file}#${meta.agentId || 'sidechain'}`;
         let st = streams.get(key);
         if (!st) {
-          st = { sessionId: sid, prompt: undefined, toolCalls: 0, toolErrors: 0, tokens: emptyTokens() };
+          st = { sessionId: sid, prompt: undefined, toolCalls: 0, toolErrors: 0, tokens: emptyTokens(), skills: [] };
           streams.set(key, st);
         }
         noteUsage(st.tokens);
@@ -157,6 +171,13 @@ function collect(roots, { since, until = Date.now() } = {}) {
           if (ev.kind === 'user-prompt' && st.prompt === undefined) st.prompt = ev.text;
           if (ev.kind === 'tool-start' || ev.kind === 'task-start') st.toolCalls += 1;
           if (ev.kind === 'tool-end' && ev.isError) st.toolErrors += 1;
+          const name = ev.kind === 'tool-start' && skillName(ev);
+          if (name && !skillById.has(ev.id)) {
+            const use = { name, source: 'helper', by: undefined, sessionId: sid, ts: ev.ts, isError: false };
+            st.skills.push(use);
+            skillById.set(ev.id, use);
+          }
+          if (ev.kind === 'tool-end' && skillById.has(ev.id)) skillById.get(ev.id).isError = ev.isError;
         }
         continue;
       }
@@ -182,13 +203,23 @@ function collect(roots, { since, until = Date.now() } = {}) {
             };
             runs.set(ev.id, run);
             sess.runs.push(run);
+            sess.steps.push({ ts: ev.ts, kind: 'agent', run });
             sess.toolCalls += 1;
             break;
           }
-          case 'tool-start':
+          case 'tool-start': {
             sess.toolCalls += 1;
+            const name = skillName(ev);
+            if (name && !skillById.has(ev.id)) { // a resumed transcript repeats earlier lines
+              const use = { name, source: 'claude', by: 'you', sessionId: sid, ts: ev.ts, isError: false };
+              skillUses.push(use);
+              skillById.set(ev.id, use);
+              sess.steps.push({ ts: ev.ts, kind: 'skill', use });
+            }
             break;
+          }
           case 'tool-end': {
+            if (skillById.has(ev.id)) skillById.get(ev.id).isError = ev.isError;
             const run = runs.get(ev.id);
             if (run && !run.background) endRun(run, ev.ts, ev.isError ? 'failed' : 'finished', ev.text);
             break;
@@ -204,7 +235,16 @@ function collect(roots, { since, until = Date.now() } = {}) {
             endRun(run, ev.ts, outcome, undefined);
             break;
           }
-          case 'user-prompt':
+          case 'user-prompt': {
+            const typed = /<command-name>\/?([^<\s]+)<\/command-name>/.exec(ev.text ?? '');
+            const key = typed && `${sid}|${ev.ts}|${typed[1]}`;
+            if (typed && !skillById.has(key)) {
+              skillById.set(key, true);
+              const use = { name: typed[1], source: 'typed', by: 'you', sessionId: sid, ts: ev.ts, isError: false };
+              skillUses.push(use);
+              sess.steps.push({ ts: ev.ts, kind: 'skill', use });
+            }
+          }
             sess.prompts += 1;
             for (const run of sess.runs) if (!run.background) endRun(run, ev.ts, 'stopped', undefined);
             break;
@@ -229,6 +269,7 @@ function collect(roots, { since, until = Date.now() } = {}) {
       continue;
     }
     const [run] = candidates;
+    for (const use of st.skills) use.by = run.type;
     run.linked = true;
     run.toolCalls = st.toolCalls;
     run.toolErrors = st.toolErrors;
@@ -256,7 +297,17 @@ function collect(roots, { since, until = Date.now() } = {}) {
   const allSessions = [...sessions.values()].filter((s) => inRange(s.start) || s.runs.some((r) => inRange(r.start)));
   for (const s of allSessions) s.runs = s.runs.filter((r) => inRange(r.start));
 
-  return { runs: allRuns, sessions: allSessions, stats, problems: [...new Set(problems)] };
+  // Helper skill uses whose helper could not be matched stay unattributed.
+  for (const st of streams.values()) for (const use of st.skills) skillUses.push(use);
+  const skills = skillUses.filter((u) => inRange(u.ts));
+  for (const s of allSessions) {
+    s.steps = s.steps.filter((st) => inRange(st.ts)).sort((a, b) => a.ts - b.ts)
+      .map((st) => (st.kind === 'agent'
+        ? { kind: 'agent', ts: st.ts, name: st.run.type, outcome: st.run.outcome, verdict: st.run.verdict }
+        : { kind: 'skill', ts: st.ts, name: st.use.name, source: st.use.source }));
+  }
+
+  return { runs: allRuns, sessions: allSessions, skills, stats, problems: [...new Set(problems)] };
 }
 
 // A run is a re-run when the same session calls the same agent type again

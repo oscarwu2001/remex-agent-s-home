@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { collect, rollUp, summarise, dayKey, totalTokens } = require('../core/metrics');
+const { teamwork, readInventory, YOU } = require('../core/teamwork');
 const { defaultRoots } = require('../core/watcher');
 const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../core/rooms');
 const os = require('os');
@@ -262,7 +263,83 @@ function deltaText(now, before, fmt, upIsGood = true) {
   return `<span class="${good ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${fmt(Math.abs(diff))}, ${good ? 'better' : 'worse'}</span> than the period before`;
 }
 
-function page({ opt, roll, runs, prevRuns, days, stats, problems }) {
+// Who called whom: You on the left, the agents and skills you (or Claude
+// for you) called in the middle, and the skills those agents ran on the
+// right. Line width is the number of calls; every node carries its name and
+// count, and the tables below hold the same numbers.
+function flowChart(team) {
+  const FIRST = 12;
+  const fromYou = team.edges.filter((e) => e.from === YOU);
+  if (!fromYou.length) return '<p class="muted">No agents or skills were called in this period.</p>';
+  const shown = fromYou.slice(0, FIRST);
+  const rest = fromYou.slice(FIRST);
+  const middle = [...shown.map((e) => ({ name: e.to, kind: e.kind, count: e.count }))];
+  if (rest.length) middle.push({ name: `${rest.length} more`, kind: 'more', count: rest.reduce((a, e) => a + e.count, 0) });
+  const agentsShown = new Set(shown.filter((e) => e.kind === 'agent').map((e) => e.to));
+  const inner = team.edges.filter((e) => e.from !== YOU && agentsShown.has(e.from)).slice(0, FIRST);
+  const right = [...new Set(inner.map((e) => e.to))];
+
+  const ROW = 34;
+  const NODE_H = 26;
+  const rows = Math.max(middle.length, right.length, 1);
+  const H = rows * ROW + 16;
+  const W = 960;
+  const col = [16, 330, 690];
+  const NODE_W = [120, 230, 230];
+  const max = Math.max(...team.edges.map((e) => e.count));
+  const width = (n) => 1.5 + 12 * Math.sqrt(n / max);
+  const yMid = (i, n) => 8 + (H - 16 - n * ROW) / 2 + i * ROW + ROW / 2;
+  const youY = H / 2;
+  const midY = new Map(middle.map((m, i) => [m.name, yMid(i, middle.length)]));
+  const rightY = new Map(right.map((r, i) => [r, yMid(i, right.length)]));
+  const link = (x1, y1, x2, y2, n, title) => {
+    const mx = (x1 + x2) / 2;
+    return `<path class="flow" d="M${x1},${y1.toFixed(1)} C${mx},${y1.toFixed(1)} ${mx},${y2.toFixed(1)} ${x2},${y2.toFixed(1)}" stroke-width="${width(n).toFixed(1)}"><title>${esc(title)}</title></path>`;
+  };
+  const node = (x, y, w, text, kind, title) => `<g class="node ${kind}"><title>${esc(title)}</title>
+    <rect x="${x}" y="${(y - NODE_H / 2).toFixed(1)}" width="${w}" height="${NODE_H}" rx="${kind === 'skill' ? 4 : 13}"/>
+    <text class="label" x="${x + 10}" y="${(y + 4).toFixed(1)}">${esc(text)}</text></g>`;
+  let links = '';
+  for (const m of middle) links += link(col[0] + NODE_W[0], youY, col[1], midY.get(m.name), m.count, `You → ${m.name}: ${m.count}`);
+  for (const e of inner) links += link(col[1] + NODE_W[1], midY.get(e.from), col[2], rightY.get(e.to), e.count, `${e.from} → /${e.to}: ${e.count}`);
+  const nodes = [
+    node(col[0], youY, NODE_W[0], 'You', 'you', 'Your sessions (you, or Claude working for you)'),
+    ...middle.map((m) => node(col[1], midY.get(m.name), NODE_W[1],
+      `${m.kind === 'skill' ? '/' : ''}${m.name} · ${m.count}`, m.kind, `${m.kind === 'agent' ? 'Agent' : m.kind === 'skill' ? 'Skill' : 'Others'}: ${m.count} call${m.count === 1 ? '' : 's'}`)),
+    ...right.map((r) => node(col[2], rightY.get(r), NODE_W[2], `/${r} · ${inner.filter((e) => e.to === r).reduce((a, e) => a + e.count, 0)}`, 'skill', 'Skill run inside an agent')),
+  ].join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Who called whom: you, the agents and skills you called, and the skills those agents used">${links}${nodes}</svg>`;
+}
+
+function teamSection(team, opt) {
+  const chains = team.chains.slice(0, 8).map((c) => `<tr><td>${esc(c.chain)}</td><td class="num">${c.count}</td></tr>`).join('');
+  const skills = team.skillRows.map((r) => `<tr><th scope="row">/${esc(r.name)}</th><td class="num">${r.uses}</td><td class="num">${r.typed || '—'}</td>
+    <td class="num">${r.byClaude || '—'}</td><td>${r.byHelpers.length ? esc(r.byHelpers.map(([a, n]) => `${a} ${n}`).join(', ')) : '—'}</td>
+    <td class="num">${pct(r.errorRate)}</td></tr>`).join('');
+  const unusedOf = (kind) => team.unused.filter((r) => r.kind === kind).map((r) => `${kind === 'skill' ? '/' : ''}${esc(r.name)}`).join(', ');
+  const unusedAgents = unusedOf('agent');
+  const unusedSkills = unusedOf('skill');
+  return `<section class="card">
+    <h2>How your team works together</h2>
+    <p class="muted">From what the transcripts show happened, not from anyone's routing rules, so it fits any set-up. Rounded boxes are agents, square ones skills; line width is the number of calls. Hover for the numbers.</p>
+    ${flowChart(team)}
+    <h3>Usual hand-off chains</h3>
+    <p class="muted">The agents and skills each session used, in order. Repeats are folded (×2); a verdict or a failure is shown in brackets.${team.sessionsWithSteps ? ` ${team.sessionsWithSteps} session${team.sessionsWithSteps === 1 ? '' : 's'} used at least one.` : ''}</p>
+    <table><thead><tr><th>Chain</th><th class="num">Sessions</th></tr></thead>
+      <tbody>${chains || '<tr><td colspan="2" class="muted">No session used two or more steps.</td></tr>'}</tbody></table>
+    <h3>Skills</h3>
+    <table><thead><tr><th>Skill</th><th class="num">Uses</th><th class="num">Typed by you</th><th class="num">Picked by Claude</th>
+      <th>Inside agents</th><th class="num">Errors</th></tr></thead>
+      <tbody>${skills || '<tr><td colspan="6" class="muted">No skills were used in this period.</td></tr>'}</tbody></table>
+    <h3>Installed, not used in these ${opt.days} days</h3>
+    ${unusedAgents || unusedSkills
+    ? `<dl class="score">${unusedAgents ? `<dt>Agents</dt><dd>${unusedAgents}</dd>` : ''}${unusedSkills ? `<dt>Skills</dt><dd>${unusedSkills}</dd>` : ''}</dl>
+       <p class="muted">Worth a look: an agent or skill nobody calls may have a description that never matches, or may no longer be needed.</p>`
+    : '<p class="muted">Everything installed was used.</p>'}
+  </section>`;
+}
+
+function page({ opt, roll, runs, prevRuns, days, stats, problems, team }) {
   const all = summarise(runs);
   const before = summarise(prevRuns);
   const typeOrder = [...roll.types].sort((a, b) => roll.overall[b].runs - roll.overall[a].runs);
@@ -382,6 +459,12 @@ tbody th { font-weight: 600; }
 .spark polyline { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
 details summary { cursor: pointer; color: var(--ink-2); margin-top: 12px; }
 .notes li { color: var(--ink-2); }
+h3 { font-size: 14px; font-weight: 600; margin: 20px 0 4px; }
+.flow { fill: none; stroke: var(--s0); stroke-opacity: 0.35; stroke-linecap: round; }
+.flow:hover { stroke-opacity: 0.7; }
+.node rect { fill: var(--surface); stroke: var(--axis); stroke-width: 1; }
+.node.you rect { stroke: var(--ink-2); stroke-width: 1.5; }
+.node.more rect { stroke-dasharray: 4 3; }
 dl.score { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 0; }
 dl.score dt { font-weight: 600; }
 dl.score dd { margin: 0; color: var(--ink-2); }
@@ -434,6 +517,8 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     <p class="muted">Dot: median run. Line: out to the slowest 10% (p90).</p>
     ${durationRanges(typeOrder, roll.overall)}
   </section>
+
+  ${teamSection(team, opt)}
 
   <section class="card">
     <h2>How the score works</h2>
@@ -519,7 +604,16 @@ function run(argv) {
   fs.mkdirSync(opt.out, { recursive: true });
   const stamp = dayKey(now);
   const htmlFile = path.join(opt.out, `agent-report-${stamp}.html`);
-  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems }));
+  // The team picture covers this period only; the installed agents and
+  // skills are read from the .claude folder beside each projects folder.
+  const inventory = readInventory([...new Set(roots.map((r) => path.dirname(r)))]);
+  data.problems.push(...inventory.problems);
+  const team = teamwork({
+    runs,
+    sessions: sessions.map((x) => ({ ...x, steps: (x.steps ?? []).filter((st) => st.ts >= since) })),
+    skills: (data.skills ?? []).filter((u) => u.ts >= since),
+  }, inventory);
+  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems, team }));
 
   // Sessions get anonymous handles; project names only on request.
   const handle = new Map([...new Set(runs.map((r) => r.sessionId))].map((id, i) => [id, `s${i + 1}`]));

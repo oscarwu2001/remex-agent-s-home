@@ -148,7 +148,7 @@ Remove a department or garden from the same list. A garden takes its planting wi
 
 ## Performance report
 
-Open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:
+Press **Report** at the top of the map to build it for the chosen period and open it straight away. Or open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:
 
 ```powershell
 npm run report                 # last 28 days
@@ -160,6 +160,7 @@ This reads your transcripts (read-only) and writes `out/reports/agent-report-<da
 - **Headline numbers:** helper runs, the share that finished, median helper time and tokens used, each compared with the period before.
 - **Scorecard per agent:** runs, a score out of 100, finished %, re-runs, median and p90 time, tokens per run, tool calls per run, tool error rate, PASS/FAIL or Approve/Block verdicts, and a 14-day sparkline.
 - **Charts:** runs per day, weekly score per agent, and how long each agent takes.
+- **How your team works together:** a flow from you to the agents and skills you (or Claude for you) called, and on to the skills those agents ran, with the number of calls on every line. It also lists the usual hand-off chains within a session (for example `/implement → /tdd → reviewer (FAIL) → reviewer (PASS)`), a table of skills (typed by you, picked by Claude, run inside an agent, error rate), and the agents and skills that are installed but were not used in the period. It is built only from what the transcripts show happened, not from anyone's routing rules, so it fits any set-up. It reads skill names only, never their arguments. It also reads the names in the `agents` and `skills` folders beside each `projects` folder.
 
 The **score** is reliability (40), right first time (20), speed (20) and efficiency (20). Speed and efficiency are measured against the same agent's own history, never against other agents. A reviewer answering FAIL is doing its job and is never marked down for it. The report keeps no prompts, results, file names or commands. Sessions appear as `s1`, `s2`…, and project names appear only if you ask with `--by-project`.
 
