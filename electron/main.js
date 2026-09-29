@@ -163,9 +163,12 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), {
-    query: process.argv.includes('--demo') ? { demo: '1' } : {},
-  });
+  // Launch options: --demo shows scripted patients; --meadow (or
+  // AGENTS_HOME_MEADOW=1) turns on the Meadow, which is otherwise hidden.
+  const query = {};
+  if (process.argv.includes('--demo')) query.demo = '1';
+  if (process.argv.includes('--meadow') || process.env.AGENTS_HOME_MEADOW === '1') query.meadow = '1';
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), { query });
 }
 
 // Local only: Chromium's own background fetches (component updates and the

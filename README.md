@@ -66,7 +66,14 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 
 ## The Meadow
 
-Press **Meadow** at the top of the map for a second screen, away from the
+The Meadow is a hidden extra. A normal start shows a **Report** button at the
+top of the map instead, which builds the performance report and opens it
+straight away. To turn the Meadow on, start the app with `--meadow`:
+`npm run meadow` (or `npm start -- --meadow`); for the installed app, add
+` --meadow` to the end of the shortcut's Target, or set the environment
+variable `AGENTS_HOME_MEADOW=1`. In the browser preview, add `&meadow=1`.
+
+With it on, press **Meadow** at the top of the map for a second screen, away from the
 hospital: a floating island of nine grass terraces at different heights,
 drawn in the same Monument Valley isometric 3D as the hospital. Every agent
 lives there: the agents in your `.claude/agents`, plus every agent Claude

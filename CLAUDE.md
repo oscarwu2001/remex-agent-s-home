@@ -10,6 +10,7 @@ Vocabulary is in `CONTEXT.md`.
 - `npm test`: the fast loop (parser, tracker, rooms, file tailer). Runs in about a second.
 - `npm start`: run the app against your real transcripts.
 - `npm run demo`: run the app with scripted demo patients.
+- `npm run meadow`: run the app with the Meadow turned on (a hidden extra; `--meadow` or `AGENTS_HOME_MEADOW=1`). A normal start shows a Report button in its place.
 - `npm run preview`: serve the renderer to a browser at `http://localhost:5178/?demo=1` (design work, screenshots).
 - `npm run report`: build the agent performance report (HTML and CSV) in `out/reports/` from the real transcripts. The app builds the same report from Settings, in a utility process (`src/report/agent-report.js`), into its own data folder.
 - `npm run dist:win`: build `dist/AgentsHome-Setup-<v>.exe` and the portable exe. Windows only (Linux needs Wine); CI builds it on every push.

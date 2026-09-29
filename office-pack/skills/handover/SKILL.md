@@ -12,3 +12,5 @@ Point to documents, links or folders the user mentioned instead of copying their
 Leave out passwords, keys and anything that identifies a patient or other private individual; write [removed] in its place.
 
 Write in plain words, in the language the user wrote in.
+
+Keep it simple but useful: the shortest version that still does the job, nothing extra.

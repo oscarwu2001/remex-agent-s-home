@@ -19,6 +19,13 @@ and never overwrites anything already there.
 | `handover` | a handover note for a colleague | `handoff` |
 | `break-down` | a project split into small tasks | `to-tickets` |
 
+Every agent and skill follows the same few rules:
+
+- **Keep it simple but useful:** the shortest version that still does the job, nothing extra.
+- Plain words for someone who is not technical, in the language the user wrote in.
+- Never invent facts, figures, names or sources; ask for what is missing.
+- Never repeat identifiers of real patients unless the task needs them.
+
 Claude picks the right agent or skill from what you ask; you can also name
 one ("use the writer", "/handover"). Start a new Claude Code session after
 adding them.

@@ -12,3 +12,5 @@ Give each task the tasks it waits for (the ones that must be finished before it 
 Answer with a table: # | Task | Done when | Waits for. Then one line naming the tasks that can start today.
 
 Write in plain words, in the language the user wrote in.
+
+Keep it simple but useful: the shortest version that still does the job, nothing extra.

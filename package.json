@@ -10,6 +10,7 @@
   "scripts": {
     "start": "electron .",
     "demo": "electron . --demo",
+    "meadow": "electron . --meadow",
     "test": "node --test \"test/*.test.js\"",
     "preview": "node scripts/preview-server.js",
     "dist:win": "electron-builder --win nsis portable --publish never",

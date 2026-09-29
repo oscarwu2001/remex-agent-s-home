@@ -1292,7 +1292,7 @@ function render(force = false) {
   ]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
-  meadow.refresh();
+  meadow?.refresh();
 
   // Re-render, then put keyboard focus back where it was.
   const focusKey = document.activeElement?.dataset?.key;
@@ -2205,17 +2205,47 @@ loadPack();
 
 // ---- the Meadow: agents as creatures -------------------------------------------------
 
-const meadow = createMeadow({
-  bridge,
-  prefs,
-  savePrefs,
-  getSnapshot: () => snapshot,
-  getLight: () => ({ theme: themeFor(prefs.theme, shownPhase ?? phase()), phase: shownPhase ?? phase() }),
-  onEnter: () => {
-    if (decorating) setDecorating(false);
-    if (buildMode) setBuildMode(false);
-  },
-});
+// A hidden extra: only when the app is started with --meadow (npm run
+// meadow). Otherwise the same toolbar button opens the performance report.
+const meadowOn = new URLSearchParams(location.search).get('meadow') === '1';
+const meadow = meadowOn
+  ? createMeadow({
+    bridge,
+    prefs,
+    savePrefs,
+    getSnapshot: () => snapshot,
+    getLight: () => ({ theme: themeFor(prefs.theme, shownPhase ?? phase()), phase: shownPhase ?? phase() }),
+    onEnter: () => {
+      if (decorating) setDecorating(false);
+      if (buildMode) setBuildMode(false);
+    },
+  })
+  : null;
+
+if (!meadowOn) {
+  const button = $('cam-meadow');
+  button.textContent = 'Report';
+  button.title = 'Open the performance report of your helpers';
+  button.addEventListener('click', async () => {
+    // The browser preview cannot build it: show where it lives instead.
+    if (!bridge.buildReport) {
+      setSettings(true);
+      $('report-h').scrollIntoView({ block: 'center' });
+      return;
+    }
+    button.disabled = true;
+    button.textContent = 'Building report…';
+    const res = await bridge.buildReport(Number($('report-days').value)).catch((err) => ({ ok: false, error: `The report could not be built: ${err.message}` }));
+    button.disabled = false;
+    button.textContent = 'Report';
+    if (!res.ok) {
+      // Shown where the report's other messages go, not lost.
+      setSettings(true);
+      $('report-status').textContent = res.error;
+      $('report-h').scrollIntoView({ block: 'center' });
+    }
+  });
+}
 
 // ---- settings panel ------------------------------------------------------------
 
