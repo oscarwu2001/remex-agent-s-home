@@ -27,6 +27,8 @@ let draft; // { cell, kind, name, agents: Set }
 let layoutError = '';
 
 // Decorating state (see "decorating" below).
+let liveMapFor; // the session whose live map is open
+let liveMapSig = '';
 let decorating = false; // the panel is open for the room or garden being visited
 let plantTool = 'tulips'; // what a click on a garden tile plants, or 'remove'
 let benchTurn = false;
@@ -749,7 +751,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'q' || e.key === 'Q') turnView(-1);
   else if (e.key === 'e' || e.key === 'E') turnView(1);
   else if (e.key === 'Escape') {
-    if (decorating) setDecorating(false);
+    if (liveMapFor) openLiveMap(undefined);
+    else if (decorating) setDecorating(false);
     else showOverview();
   }
 });
@@ -1290,6 +1293,7 @@ function render(force = false) {
     snapshot.usage ? [snapshot.usage.last5h.total, snapshot.usage.today.total, snapshot.usage.limitNotice?.ts, prefs.budget5h] : null,
     snapshot.sessions.map((x) => Math.round((x.context?.pct ?? 0) * 100)),
   ]);
+  renderLiveMap();
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
   meadow?.refresh();
@@ -1312,7 +1316,14 @@ function render(force = false) {
 
 $('sessions').addEventListener('click', (e) => {
   const row = e.target.closest('.row');
-  if (row) select(row.dataset.key);
+  if (row) {
+    const key = row.dataset.key;
+    select(key);
+    // A session, or one of its helpers: show that session's live map; the
+    // same row clicked again closes it.
+    const sess = snapshot.sessions.find((x) => `s:${x.id}` === key || x.agents.some((a) => `a:${a.id}` === key));
+    openLiveMap(sess && selected ? sess.id : undefined);
+  }
   if (e.target.id === 'start-demo') {
     prefs.demo = true;
     demoEpoch = Date.now();
@@ -1321,6 +1332,69 @@ $('sessions').addEventListener('click', (e) => {
     render(true);
   }
 });
+
+// ---- live map: one session and everything it has called ---------------------------
+
+function openLiveMap(id) {
+  liveMapFor = id;
+  liveMapSig = '';
+  $('live-map').hidden = !id;
+  renderLiveMap();
+}
+
+$('live-map-close').addEventListener('click', () => {
+  const back = liveMapFor && document.querySelector(`[data-key="${CSS.escape(`s:${liveMapFor}`)}"]`);
+  openLiveMap(undefined);
+  back?.focus();
+});
+
+function mapStep(st) {
+  if (st.kind === 'skill') {
+    return `<li class="map-step skill${st.active ? ' live' : ''}">
+      <span class="skill-mark" aria-hidden="true"></span><span class="name">/${escapeXml(st.name)}</span>
+      <span class="what">${st.active ? 'Running now' : 'Used'}</span></li>`;
+  }
+  const live = st.status !== 'done';
+  const detail = live && !prefs.private && st.activity?.detail ? ` · ${st.activity.detail}` : '';
+  const time = live ? `<span class="time" data-since="${st.startedAt}">${elapsed(st.startedAt, Date.now())}</span>`
+    : st.endedAt ? `<span class="time">${elapsed(st.startedAt, st.endedAt)}</span>` : '';
+  const skills = st.skills?.length ? `<ol>${st.skills.map((k) => mapStep({ kind: 'skill', ...k })).join('')}</ol>` : '';
+  return `<li class="map-step agent${live ? ' live' : ''}">
+    ${glyph(st)}<span class="name">${escapeXml(st.type)}${st.background ? ' <small>(background)</small>' : ''}</span>
+    <span class="what${glyphKey(st) === 'failed' || st.status === 'blocked' ? ' warn' : ''}">${live ? '<strong>Running now:</strong> ' : ''}${escapeXml(statusText(st) + detail)}</span>
+    <span class="meta">${time}${st.tokens ? `<span>${compact(st.tokens)} tokens</span>` : ''}</span>${skills}</li>`;
+}
+
+function renderLiveMap() {
+  if (!liveMapFor) return;
+  const sess = snapshot.sessions.find((x) => x.id === liveMapFor);
+  const steps = sess?.map?.steps ?? sess?.agents.map((a) => ({ kind: 'agent', ...a, tokens: a.tokens?.total })) ?? [];
+  const sig = JSON.stringify([sess && [sess.status, sess.activity?.label, sess.activity?.detail], steps.map((st) =>
+    [st.kind, st.name ?? st.id, st.status, st.endReason, st.activity?.label, st.activity?.detail, st.active, compact(st.tokens ?? 0), st.skills?.map((k) => k.active)]), prefs.private]);
+  if (sig === liveMapSig) return;
+  liveMapSig = sig;
+  const body = $('live-map-body');
+  if (!sess) {
+    body.innerHTML = '<p class="hint">This session has gone quiet and left the board.</p>';
+    return;
+  }
+  const agents = steps.filter((st) => st.kind === 'agent');
+  const running = agents.filter((a) => a.status !== 'done').length + steps.filter((st) => st.kind === 'skill' && st.active).length
+    + agents.reduce((n, a) => n + (a.skills ?? []).filter((k) => k.active).length, 0);
+  const failed = agents.filter((a) => glyphKey(a) === 'failed').length;
+  const finished = agents.filter((a) => a.status === 'done').length - failed;
+  const skills = steps.filter((st) => st.kind === 'skill').length + agents.reduce((n, a) => n + (a.skills?.length ?? 0), 0);
+  const summary = [`${running} running now`, `${finished} helper${finished === 1 ? '' : 's'} finished`, failed ? `${failed} failed` : '', `${skills} skill${skills === 1 ? '' : 's'} used`].filter(Boolean).join(' · ');
+  const detail = !prefs.private && sess.activity?.detail ? ` · ${sess.activity.detail}` : '';
+  body.innerHTML = `<p class="map-summary">${escapeXml(summary)}</p>
+    <ol class="map-tree">
+      <li class="map-step root${sess.status === 'your-turn' ? '' : ' live'}">${glyph(sess)}<span class="name">${escapeXml(sess.project)}</span>
+        <span class="what">${escapeXml(statusText(sess) + detail)}</span>
+        ${steps.length ? `<ol>${sess.map?.more ? `<li class="map-step more"><span class="what">${sess.map.more} earlier step${sess.map.more === 1 ? '' : 's'} not shown</span></li>` : ''}${steps.map(mapStep).join('')}</ol>`
+    : '<p class="hint">Nothing called yet: no helpers or skills in this session so far.</p>'}
+      </li>
+    </ol>`;
+}
 
 // Elapsed timers tick every second without a re-render.
 setInterval(() => {

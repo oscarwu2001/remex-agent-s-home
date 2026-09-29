@@ -26,6 +26,7 @@
 | **Points / mystery egg** | A point for every 15 minutes the app is open (`play` in the preferences; at most 2 minutes counted per minute-tick, so sleep earns nothing). A mystery egg costs 8 points and holds a random creature (rarity by fixed odds) that belongs to no agent and grows with app time (`wild`). |
 | **Creature index** | The collection: each form (kind × stage) raised so far, with its best rarity and the looks seen (`dex`). |
 | **Team picture** | The report's "How your team works together" (`src/core/teamwork.js`): who called which agent, which skills ran and from where (typed, picked by Claude, inside an agent), each session's hand-off chain, and what is installed but unused. Built from transcripts only; skill names, never arguments. |
+| **Live map** | The pop-up beside the hospital when a session (or one of its helpers) is clicked on the board: that session and everything it has called, in order: skills it ran and every helper, finished ones too, each with the skills it ran. What runs now pulses and says "Running now". Built from the tracker's `map` on each session in the snapshot. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

@@ -146,6 +146,10 @@ Tick the agents who work there, or type a new agent's name. The department is bu
 
 Remove a department or garden from the same list. A garden takes its planting with it. The layout is saved in `%APPDATA%\Agents Home\layout.json`. Assignments written by hand in `rooms.json` still win over ones made in the app.
 
+## Live map
+
+Click a session (or any of its helpers) under **On shift** and a **live map** of that session pops up beside the hospital. The session is at the top; below it, in order, is everything it has called: the skills it ran and every helper, finished ones included, each with the skills it ran itself. Whatever is running right now pulses and says **Running now** with what it is doing; finished helpers show how they finished (finished, failed, stopped), their time and tokens. A line at the top counts what is running, finished, failed and the skills used. It updates as the session works. Click the same row again, press Esc, or use the close button to hide it. Like the board, file names and commands appear only with privacy mode off; skill names and agent types always show.
+
 ## Performance report
 
 Press **Report** at the top of the map to build it for the chosen period and open it straight away. Or open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:

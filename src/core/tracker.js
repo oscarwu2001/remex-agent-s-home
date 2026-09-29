@@ -39,7 +39,17 @@ function newActor(startedAt) {
     context: undefined, // tokens the model read in the latest reply
     model: undefined,
     usageById: new Map(), // message id -> usage counted so far
+    skills: [], // [{ id, name, at }] skills this actor ran, for the live map
   };
+}
+
+const SKILL_LIMIT = 40;
+// A skill's name as shown on the live map: installed-skill names only
+// (letters, digits, - _ . :), never whatever else a call might carry.
+function skillLabel(input) {
+  const raw = input?.skill ?? input?.command;
+  const name = typeof raw === 'string' ? raw.trim().replace(/^\//, '').split(/\s/)[0] : '';
+  return /^[\w.:-]{1,64}$/.test(name) ? name : 'a skill';
 }
 
 const USAGE_FIELDS = [
@@ -256,6 +266,10 @@ class Tracker {
       case 'task-start': {
         actor.pending.set(ev.id, { name: ev.name, input: ev.input, startedAt: ev.ts });
         actor.lastKind = 'tool';
+        if (ev.name === 'Skill' && !actor.skills.some((k) => k.id === ev.id)) {
+          actor.skills.push({ id: ev.id, name: skillLabel(ev.input), at: ev.ts });
+          if (actor.skills.length > SKILL_LIMIT) actor.skills.shift();
+        }
         const d = describeTool(ev.name, ev.input);
         pushHistory(actor, { ts: ev.ts, kind: d.kind, label: d.label, detail: d.detail });
         break;
@@ -399,11 +413,30 @@ class Tracker {
         ...this.statusOf(session.actor, now, { isSession: true }),
         history: session.actor.history.slice(),
         agents,
+        map: this.mapOf(session, now),
       });
     }
 
     sessions.sort((a, b) => a.startedAt - b.startedAt);
     return { generatedAt: now, sessions, stats: { ...this.stats } };
+  }
+
+  // The live map of one session: everything it called, in order: the
+  // skills it ran and every helper (finished ones too), each helper with the
+  // skills it ran. Names, statuses and tool labels only.
+  mapOf(session, now) {
+    const skillsOf = (actor) => actor.skills.map((k) => ({ name: k.name, at: k.at, active: actor.pending.has(k.id) }));
+    const steps = skillsOf(session.actor).map((k) => ({ kind: 'skill', ...k }));
+    for (const sub of session.subagents.values()) {
+      const st = sub.endedAt !== undefined ? { status: 'done', activity: null } : this.statusOf(sub.actor, now);
+      steps.push({
+        kind: 'agent', id: sub.id, type: sub.type, room: sub.room, background: sub.background,
+        at: sub.actor.startedAt, startedAt: sub.actor.startedAt, endedAt: sub.endedAt, endReason: sub.endReason,
+        tokens: tokensOf(sub.actor).total, ...st, skills: skillsOf(sub.actor),
+      });
+    }
+    steps.sort((a, b) => a.at - b.at);
+    return { steps: steps.slice(-SKILL_LIMIT), more: Math.max(0, steps.length - SKILL_LIMIT) };
   }
 
   // Drop state for sessions that have been stale a long time. A session

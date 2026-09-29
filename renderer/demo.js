@@ -29,6 +29,16 @@ const SESSIONS = {
   b: { project: 'carm-calib', start: 0 },
 };
 
+// Skills on the live map: [second, session, name, helper type or '' for the
+// session itself, how long it runs].
+const SKILLS = [
+  [1, 'a', 'implement', '', 1.5],
+  [1, 'b', 'diagnosing-bugs', '', 2],
+  [6, 'a', 'project-quality', 'reviewer', 3],
+  [26, 'b', 'tdd', '', 2],
+  [39, 'b', 'project-quality', 'reviewer', 3],
+];
+
 function activity(tool) {
   const [label, kind, detail] = DETAILS[tool];
   return { label, kind, detail };
@@ -43,9 +53,13 @@ export function demoSnapshot(nowMs, epochMs) {
 
   const sessions = Object.entries(SESSIONS).map(([key, s]) => {
     const agents = [];
+    const steps = [];
+    const skill = ([s0, , name, , len]) => ({ name, at: at(s0), active: t >= s0 && t < s0 + len });
+    for (const row of SKILLS) if (row[1] === key && row[3] === '' && t >= row[0]) steps.push({ kind: 'skill', ...skill(row) });
     for (const [i, row] of SCRIPT.entries()) {
       const [start, end, sess, type, room, description, ...tools] = row;
-      if (sess !== key || t < start || t > end + 6) continue;
+      if (sess !== key || t < start) continue;
+      const lingering = t <= end + 6;
       const done = t > end;
       const span = (end - start) / tools.length;
       const idx = Math.min(tools.length - 1, Math.floor((t - start) / span));
@@ -58,7 +72,7 @@ export function demoSnapshot(nowMs, epochMs) {
       const history = tools.slice(0, idx + 1).map((tool, k) => ({
         ts: at(start + k * span), ...activity(tool),
       }));
-      agents.push({
+      const agent = {
         id: `demo-${loop}-${i}`,
         type,
         room,
@@ -74,8 +88,14 @@ export function demoSnapshot(nowMs, epochMs) {
         status,
         activity: status === 'working' || status === 'blocked' ? activity(tools[idx]) : null,
         history,
+      };
+      steps.push({
+        kind: 'agent', ...agent, at: agent.startedAt, tokens: agent.tokens.total,
+        skills: SKILLS.filter((k) => k[1] === key && k[3] === type && k[0] >= start && k[0] <= end && t >= k[0]).map(skill),
       });
+      if (lingering) agents.push(agent);
     }
+    steps.sort((x, y) => x.at - y.at);
     const live = agents.filter((a) => a.status !== 'done');
     let status;
     let act = null;
@@ -104,6 +124,7 @@ export function demoSnapshot(nowMs, epochMs) {
       activity: act,
       history: [{ ts: nowMs - 4000, label: 'Editing a file', kind: 'write', detail: 'pipeline.py' }],
       agents,
+      map: { steps, more: 0 },
     };
   });
 

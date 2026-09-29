@@ -778,3 +778,37 @@ body.in-meadow .camera.meadow-only { display: flex; }
 .dex-card.missing span { color: var(--ink-muted); font-weight: 700; }
 .dex-card.rarity-card-sr { border-color: #b9c6dc; box-shadow: inset 0 0 0 1px #dfe5f0; }
 .dex-card.rarity-card-ssr { border-color: #d9a82e; box-shadow: inset 0 0 0 2px #f6d36b; }
+
+/* ---- live map: one session and everything it has called --------------------- */
+
+.live-map {
+  position: absolute; z-index: 3; top: calc(var(--s-4) + 96px); right: var(--s-4);
+  width: min(400px, calc(100% - 2 * var(--s-4))); max-height: calc(100% - 160px); overflow-y: auto;
+  padding: var(--s-3) var(--s-4) var(--s-4); border-radius: var(--r-lg);
+  background: var(--panel); color: var(--ink); box-shadow: 0 8px 30px rgba(40, 30, 80, 0.2);
+}
+.live-map .settings-head h2 { font-size: 16px; }
+.map-summary { margin: 0 0 var(--s-2); font-size: 13px; color: var(--ink-muted); }
+.map-tree, .map-tree ol { list-style: none; margin: 0; padding: 0; }
+.map-tree ol { margin-left: 15px; padding-left: 14px; border-left: 2px solid var(--line); }
+.map-step { position: relative; display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--s-2); align-items: center; padding: 5px 0; }
+.map-step > ol { grid-column: 1 / -1; }
+.map-tree ol > .map-step::before { content: ""; position: absolute; left: -14px; top: 17px; width: 12px; border-top: 2px solid var(--line); }
+.map-step .glyph { width: 26px; height: 26px; }
+.map-step .name { font-weight: 700; font-size: 14px; }
+.map-step .name small { font-weight: 400; color: var(--ink-muted); }
+.map-step .what { grid-column: 2 / 3; font-size: 12px; color: var(--ink-muted); }
+.map-step .what.warn { color: var(--warn); font-weight: 600; }
+.map-step .meta { grid-column: 3; grid-row: 1 / span 2; display: grid; justify-items: end; font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.map-step.live > .name { color: var(--ink); }
+.map-step.live > .what { color: var(--ink); }
+.map-step.agent.live > .glyph, .map-step.root.live > .glyph { border-radius: 50%; box-shadow: 0 0 0 3px var(--accent-soft); animation: map-pulse 1.6s ease-in-out infinite; }
+.map-tree ol > .map-step.live::before { border-top-color: var(--accent); }
+.map-step.skill { grid-template-columns: 26px 1fr auto; }
+.skill-mark { justify-self: center; width: 10px; height: 10px; transform: rotate(45deg); border: 2px solid var(--ink-muted); border-radius: 2px; }
+.map-step.skill.live .skill-mark { background: var(--accent); border-color: var(--accent); animation: map-pulse 1.6s ease-in-out infinite; }
+.map-step.skill .name { font-weight: 600; font-size: 13px; }
+.map-step.skill .what { grid-column: 3; }
+.map-step.more .what { grid-column: 1 / -1; font-style: italic; }
+@keyframes map-pulse { 50% { box-shadow: 0 0 0 6px var(--accent-soft); } }
+@media (prefers-reduced-motion: reduce) { .map-step.live .glyph, .map-step.skill.live .skill-mark { animation: none; } }

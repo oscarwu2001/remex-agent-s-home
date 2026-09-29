@@ -333,3 +333,27 @@ test('Claude Code limit messages are picked up as a notice', () => {
   const [sess] = t.snapshot(s(2)).sessions;
   assert.match(sess.limitNotice.text, /usage limit reached/);
 });
+
+test('the live map lists every step in order, keeps finished helpers, and marks what is running', () => {
+  const t = new Tracker();
+  const SUB = '/p/sess-1/subagents/agent-a.jsonl';
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'k1', 'Skill', { skill: 'implement', args: 'never kept' }),
+    toolResult(2, 'k1', 'loaded'),
+    toolUse(3, 'r1', 'Task', { subagent_type: 'reviewer', prompt: 'Review it' }),
+    toolResult(40, 'r1', 'FAIL'),
+    toolUse(41, 'r2', 'Task', { subagent_type: 'reviewer', prompt: 'Review again' }),
+    toolUse(42, 'k2', 'Skill', { skill: '<img src=x>' }),
+  ]);
+  feed(t, SUB, [prompt(42, 'Review again', sidechain('a')), toolUse(43, 'q1', 'Skill', { skill: 'project-quality' }, sidechain('a'))]);
+  // Long after the first reviewer finished: the board has let it go, the map has not.
+  const later = s(44) + TIMING.doneLingerMs;
+  const [sess] = t.snapshot(later).sessions;
+  assert.equal(sess.agents.some((a) => a.id === 'r1'), false);
+  const steps = sess.map.steps.map((st) => (st.kind === 'agent' ? `${st.type}:${st.status}` : `/${st.name}:${st.active}`));
+  assert.deepEqual(steps, ['/implement:false', 'reviewer:done', 'reviewer:working', '/a skill:true']);
+  const running = sess.map.steps.find((st) => st.id === 'r2');
+  assert.deepEqual(running.skills.map((k) => [k.name, k.active]), [['project-quality', true]]);
+  assert.ok(!JSON.stringify(sess.map).includes('never kept'), 'skill arguments are never kept');
+});
