@@ -677,6 +677,7 @@ let drag;
 svg.addEventListener('contextmenu', (e) => e.preventDefault());
 svg.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.button !== 2) return;
+  if (e.button === 0 && startAgentDrag(e)) return;
   const mode = e.button === 2 || e.shiftKey ? 'pan' : 'turn';
   drag = { mode, x: e.clientX, y: e.clientY, cam: { ...cam }, moved: false, angle };
 });
@@ -795,6 +796,7 @@ function freeSeat(roomId, key) {
 }
 
 function select(key) {
+  if (agentDrag?.moved) return; // the click that ends a drag is not a selection
   const p = people.get(key);
   if (key.startsWith('r:') && p?.busyWith) key = p.busyWith;
   selected = selected === key ? undefined : key;
@@ -803,7 +805,7 @@ function select(key) {
 }
 
 svg.addEventListener('click', (e) => {
-  if (drag?.moved) return;
+  if (drag?.moved || agentDrag?.moved) return;
   const cell = e.target.closest('[data-cell]');
   if (cell) {
     chooseCell(cell.dataset.cell.split(',').map(Number));
@@ -909,6 +911,11 @@ function staffList(snap) {
   const list = new Map(); // name -> room
   for (const a of snap.roster || []) list.set(a.name, a.room);
   for (const d of config.layout?.departments || []) for (const a of d.agents) if (!list.has(a)) list.set(a, d.id);
+  // A drag takes effect at once (the roster catches up on its next read),
+  // unless rooms.json places that agent: rooms.json always wins.
+  for (const [name, room] of Object.entries(config.layout?.moves ?? {})) {
+    if (list.has(name) && !(config.pinned ?? []).includes(name)) list.set(name, room);
+  }
   for (const [name, room] of list) if (!LAYOUT[room]) list.set(name, 'general-ward');
   return list;
 }
@@ -1199,7 +1206,12 @@ function renderChart(s) {
     .map((h) => `<li><span class="t">${clock(h.ts)}</span>
         <span>${escapeXml(h.label)}${!prefs.private && h.detail ? `<span class="d"> · ${escapeXml(h.detail)}</span>` : ''}</span></li>`)
     .join('');
-  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>
+  // Idle staff can be sent to another room: from here, or by dragging.
+  const moveTo = found.resident && !people.get(`r:${name}`)?.busyWith
+    ? `<label class="field move-to" for="move-to">Work in another room
+        <select id="move-to" data-agent="${escapeXml(name)}">${config.rooms.filter((r) => LAYOUT[r.id]).map((r) => `<option value="${r.id}" ${r.id === room ? 'selected' : ''}>${escapeXml(r.name)}</option>`).join('')}</select></label>`
+    : '';
+  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>${moveTo}
     <ol aria-label="Recent activity">${history || `<li><span class="t">—</span><span>${found.resident ? 'Standing by in their room' : 'No tool calls yet'}</span></li>`}</ol>`;
 }
 
@@ -1331,6 +1343,103 @@ $('sessions').addEventListener('click', (e) => {
     applyPrefs();
     render(true);
   }
+});
+
+// ---- moving idle staff to another room ----------------------------------------------
+//
+// Press on an idle agent standing at its post, drag it onto another room and
+// let go: it walks over and works there from now on (saved with the layout,
+// like a department's agents). Busy agents finish where they are first.
+
+let agentDrag; // { name, p, x, y, moved, ghost, over }
+let moveNote = '';
+
+function startAgentDrag(e) {
+  const el = e.target.closest('.person');
+  const key = el?.dataset.id;
+  if (!key?.startsWith('r:') || decorating || buildMode) return false;
+  const p = people.get(key);
+  if (!p || p.busyWith || p.leaving) return false;
+  agentDrag = { name: key.slice(2), p, x: e.clientX, y: e.clientY, moved: false };
+  e.preventDefault(); // no text selection while dragging
+  return true;
+}
+
+function roomAt(x, y) {
+  const hit = document.elementsFromPoint(x, y).find((el) => el.classList?.contains('room-hit'));
+  return hit?.dataset.room;
+}
+
+window.addEventListener('pointermove', (e) => {
+  if (!agentDrag) return;
+  if (!agentDrag.moved && Math.hypot(e.clientX - agentDrag.x, e.clientY - agentDrag.y) < 6) return;
+  if (!agentDrag.moved) {
+    agentDrag.moved = true;
+    agentDrag.ghost = agentDrag.p.el.cloneNode(true);
+    agentDrag.ghost.classList.add('drag-ghost');
+    agentDrag.ghost.removeAttribute('tabindex');
+    agentDrag.ghost.setAttribute('aria-hidden', 'true');
+    peopleLayer.appendChild(agentDrag.ghost);
+    agentDrag.p.el.classList.add('being-moved');
+    svg.classList.add('moving-agent');
+    document.body.classList.add('no-select');
+  }
+  const m = peopleLayer.getScreenCTM();
+  if (m) {
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    agentDrag.ghost.setAttribute('transform', `translate(${pt.x.toFixed(1)} ${(pt.y + 20).toFixed(1)}) scale(1.3)`);
+  }
+  const over = roomAt(e.clientX, e.clientY);
+  if (over !== agentDrag.over) {
+    document.querySelectorAll('.room-hit.drop-target').forEach((x) => x.classList.remove('drop-target'));
+    if (over && over !== agentDrag.p.roomId) document.querySelector(`.room-hit[data-room="${CSS.escape(over)}"]`)?.classList.add('drop-target');
+    agentDrag.over = over;
+  }
+});
+
+window.addEventListener('pointerup', (e) => {
+  if (!agentDrag) return;
+  const d = agentDrag;
+  if (d.moved) {
+    d.ghost.remove();
+    d.p.el.classList.remove('being-moved');
+    svg.classList.remove('moving-agent');
+    document.body.classList.remove('no-select');
+    document.querySelectorAll('.room-hit.drop-target').forEach((x) => x.classList.remove('drop-target'));
+    const to = roomAt(e.clientX, e.clientY);
+    if (to && to !== d.p.roomId) moveAgent(d.name, to);
+    // Let the click that follows the release pass before selections resume.
+    setTimeout(() => { agentDrag = undefined; }, 0);
+  } else {
+    agentDrag = undefined;
+  }
+});
+
+// Sends an agent to work in a room: a department takes it on its list; any
+// other room records a move. Saved like the rest of the layout.
+async function moveAgent(name, roomId) {
+  if ((config.pinned ?? []).includes(name)) {
+    moveNote = `${name} is placed by rooms.json, which always wins; change it there.`;
+    render(true);
+    return;
+  }
+  const depts = config.layout.departments.map((d) => ({ ...d, agents: new Set(d.agents) }));
+  for (const d of depts) d.agents.delete(name);
+  const moves = { ...(config.layout.moves ?? {}) };
+  delete moves[name];
+  const dept = depts.find((d) => d.id === roomId);
+  if (dept) dept.agents.add(name);
+  else moves[name] = roomId;
+  const plain = depts.map(({ id, kind, name: n, purpose, cell, agents }) => ({ id, kind, name: n, purpose, cell, agents: [...agents] }));
+  const result = await bridge.saveLayout({ departments: plain, gardens: config.layout.gardens ?? [], moves });
+  moveNote = result.ok ? `${name} now works in the ${roomName(roomId)}.` : `${name} could not be moved: ${result.error}`;
+  if (result.ok) useConfig(result.config);
+  $('move-status').textContent = moveNote;
+  render(true);
+}
+
+$('chart-body').addEventListener('change', (e) => {
+  if (e.target.id === 'move-to') moveAgent(e.target.dataset.agent, e.target.value);
 });
 
 // ---- live map: one session and everything it has called ---------------------------
@@ -1513,9 +1622,9 @@ function setBuildMode(on) {
 }
 
 // Departments carry their agents as a Set while being edited.
-async function saveLayout(departments, gardens = config.layout.gardens ?? []) {
+async function saveLayout(departments, gardens = config.layout.gardens ?? [], moves = config.layout.moves ?? {}) {
   const plain = departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents: [...agents] }));
-  const result = await bridge.saveLayout({ departments: plain, gardens });
+  const result = await bridge.saveLayout({ departments: plain, gardens, moves });
   if (!result.ok) {
     layoutError = result.error;
     renderLayoutEditor();
@@ -2268,7 +2377,13 @@ function renderPack() {
         <button type="button" class="link-btn" id="pack-later">Not now</button></div>`
       : `<h2 id="pack-h">Office team</h2>${note}<div class="form-actions"><button type="button" class="link-btn" id="pack-ok">OK</button></div>`;
   }
-  settings.innerHTML = `${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
+  const speed = (value, title, text) => `<label class="check"><input type="radio" name="team-speed" value="${value}" ${pack.mode === value ? 'checked' : ''}>
+    <span><strong>${title}</strong> <span class="muted">${text}</span></span></label>`;
+  settings.innerHTML = `<fieldset class="team-speed"><legend>Team speed</legend>
+      ${speed('base', 'Base', 'Claude hands work to a helper when one fits. Fewer tokens.')}
+      ${speed('fast', 'Fast', 'Claude also splits a task across several helpers working at the same time. Done sooner, uses more tokens.')}
+    </fieldset>
+    ${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
       <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
     ${missing.length ? `<div class="checks">${packChoices('pack-pick-settings', true)}</div>
       <button type="button" class="button" id="pack-add-settings">Add to Claude</button>` : '<p class="hint">All of the office team is in Claude.</p>'}
@@ -2290,6 +2405,17 @@ async function addPack(names, fromCard = false) {
   else if (!res.ok) packError = res.error;
   await loadPack();
 }
+
+document.addEventListener('change', async (e) => {
+  if (e.target.name !== 'team-speed') return;
+  const mode = e.target.value;
+  packError = '';
+  const res = await bridge.packMode(mode);
+  if (!res.ok) packError = res.error;
+  else packNote = `${mode === 'fast' ? 'Fast' : 'Base'} team speed is on${res.remindersAdded ? ', with team reminders' : ''}. It applies from the next prompt.`;
+  await loadPack();
+  document.querySelector(`input[name="team-speed"][value="${mode}"]`)?.focus();
+});
 
 document.addEventListener('click', (e) => {
   const id = e.target.id;

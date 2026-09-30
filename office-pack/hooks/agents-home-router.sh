@@ -5,7 +5,7 @@
 # hand the work over; Claude Code adds it to the conversation. When nothing
 # fits it prints nothing, so it costs no tokens. It reads the prompt from
 # stdin, keeps nothing and sends nothing. Only agents that are installed are
-# mentioned.
+# mentioned. In fast mode (see below) it also asks for work in parallel.
 
 dir="$(cd "$(dirname "$0")/.." && pwd)"
 input="$(cat)"
@@ -34,6 +34,16 @@ fits '\b(spreadsheet|excel|csv|formula|calculate|average|percent(age)?|pivot)\b'
   && tip data-helper 'For tables, numbers and formulas, use the data-helper agent.'
 fits '\b(proofread|double-check|check (this|my|it)|before (i )?send)\b' \
   && tip checker 'Before this goes out, have the checker agent give it a second look.'
+
+# Team speed, set in Agent's Home: "base" (the default) or "fast". Fast
+# spends more tokens to finish sooner: for any real task (8 words or more)
+# it asks Claude to split independent parts across agents working at once.
+mode="base"
+[ -f "$dir/hooks/agents-home-mode" ] && mode="$(tr -d '[:space:]' < "$dir/hooks/agents-home-mode")"
+if [ "$mode" = "fast" ] && [ "$(printf '%s' "$prompt" | wc -w)" -ge 8 ]; then
+  tips="$tips
+- Fast mode: split independent parts of this across several agents started together (several Task calls in one reply), for example one Explore agent per area to search, code-reviewer and test-runner side by side, or one general-purpose agent per independent file or document. Start the next one without waiting unless it needs the other's result, then combine what they return."
+fi
 
 [ -n "$tips" ] && printf "Agent's Home team: a helper fits this request (use the Task tool):%s\n" "$tips"
 exit 0

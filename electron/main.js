@@ -257,6 +257,8 @@ app.whenReady().then(() => {
     },
     overridesFile,
     layoutFile,
+    // Agents rooms.json places: dragging them would have no effect.
+    pinned: Object.keys(fileOverrides),
     platform: process.platform,
     version: app.getVersion(),
   });
@@ -369,6 +371,7 @@ app.whenReady().then(() => {
       fs.writeFileSync(layoutFile, `${JSON.stringify({
         departments: next.departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents })),
         gardens: next.gardens,
+        moves: next.moves,
       }, null, 2)}\n`);
     } catch (err) {
       return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
@@ -540,6 +543,15 @@ app.whenReady().then(() => {
     for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
     rosterAt = 0; // the new agents show in the hospital at the next check
     return { ok: res.errors.length === 0, ...res };
+  });
+  ipcMain.handle('pack:mode', (_event, mode) => {
+    try {
+      const res = officePack.setMode(packDir, claudeDir, String(mode));
+      for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+      return { ok: res.errors.length === 0, ...res, error: res.errors.join('; ') };
+    } catch (err) {
+      return { ok: false, error: `The team speed could not be set (${err.code || err.message})` };
+    }
   });
   ipcMain.handle('pack:update', () => {
     let versions;

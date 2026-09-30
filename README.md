@@ -132,6 +132,14 @@ with their own plan, and the team shows up in the hospital:
 - **Skills:** *Question me*, *Teach me*, *Handover note* and *Break into tasks*, adapted from `grilling`, `teach`, `handoff` and `to-tickets`.
 - **Team reminders (a hook):** Claude only calls an agent when it thinks one fits, and it often doesn't think of it. With reminders on, a request that fits one of the team gets a one-line reminder added to it ("After you change code, give the change to the code-reviewer agent…"). It mentions only agents that are installed. When nothing fits it adds nothing, so it costs no tokens. It reads the prompt and keeps nothing. Turning it on adds one entry to `~/.claude/settings.json`, and changes nothing else there. The app first keeps a copy as `settings.json.agents-home-backup`, and leaves a file it cannot read as JSON alone.
 
+**Team speed** (Settings → Office team for Claude) has two settings. **Base**
+is the default: Claude hands a part to a helper when one fits, and it uses
+fewer tokens. **Fast** also asks Claude, for any real task, to split
+independent parts across several helpers working at the same time and then
+combine their results. It finishes sooner and uses more tokens. Choosing Fast
+turns the team reminders on. How work flows in each is drawn in
+[`office-pack/PIPELINE.md`](office-pack/PIPELINE.md).
+
 On first start the app asks, in one short card, whether to add them. If
 Claude has no agents yet, one **Add** does it. If it already has some, you
 tick the ones you want. Anything already in `~/.claude` is never replaced.
@@ -151,6 +159,8 @@ The core hospital is a 3 × 3 block. Open **Settings** (the gear), go to **Hospi
 Spine Surgery · Neurosurgery · ENT · Dental Implantology · Maxillofacial (CMF) · Orthopaedics · Trauma · Sports Medicine · Pulmonology · Interventional Radiology · Cardiac Electrophysiology · Surgical Oncology, or **Your own department** with a name you choose.
 
 Tick the agents who work there, or type a new agent's name. The department is built as its own tower, joined by stairs to the room next to it. It comes with a navigation suite (table, tracking camera, planning monitor) and a piece that marks its specialty. Its agents walk there when they are called. Corner spots open up once a neighbouring department exists.
+
+**Move an agent to another room:** press on an idle agent standing at its post, drag it onto another room and let go. The room lights up as you pass over it, and the agent walks over and works there from now on. You can also click the agent and use **Work in another room** in its chart, which works with the keyboard. Busy agents finish where they are first. The move is saved with the layout. An agent that `rooms.json` places stays where that file says, because `rooms.json` always wins.
 
 Remove a department or garden from the same list. A garden takes its planting with it. The layout is saved in `%APPDATA%\Agents Home\layout.json`. Assignments written by hand in `rooms.json` still win over ones made in the app.
 

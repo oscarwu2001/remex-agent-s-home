@@ -206,3 +206,22 @@ test('the reminder hook exits 0 on empty or broken input, and reads past an esca
   const r = spawnSync('bash', [hook], { input: JSON.stringify({ prompt: 'fix it\ntests fail' }), encoding: 'utf8' });
   assert.match(r.stdout, /test-runner/);
 });
+
+test('team speed: base by default; fast turns the reminders on and the hook asks for parallel work', () => {
+  const { getMode, setMode } = require('../src/core/officepack');
+  const claude = tmp();
+  assert.equal(getMode(claude), 'base');
+  const res = setMode(PACK, claude, 'fast');
+  assert.deepEqual([res.mode, res.remindersAdded, res.errors], ['fast', true, []]);
+  assert.equal(getMode(claude), 'fast');
+  assert.equal(packStatus(PACK, claude).mode, 'fast');
+  assert.throws(() => setMode(PACK, claude, 'turbo'), /unknown team speed/);
+  if (hasBash) {
+    const hook = path.join(claude, 'hooks', 'agents-home-router.sh');
+    const run = (prompt) => spawnSync('bash', [hook], { input: JSON.stringify({ prompt }), encoding: 'utf8' }).stdout;
+    assert.match(run('Please look through the three services and tidy up how they log things'), /Fast mode/);
+    assert.equal(run('thanks!'), '', 'a short message is not a task');
+    setMode(PACK, claude, 'base');
+    assert.doesNotMatch(run('Please look through the three services and tidy up how they log things'), /Fast mode/);
+  }
+});

@@ -110,7 +110,7 @@ function slug(s) {
 // is already there (the core, or a department listed before it), because
 // that is the room its bridge or stairs joins.
 function validateLayout(layout) {
-  if (layout === undefined || layout === null) return { departments: [], gardens: [] };
+  if (layout === undefined || layout === null) return { departments: [], gardens: [], moves: {} };
   if (typeof layout !== 'object' || !Array.isArray(layout.departments)) {
     throw new TypeError('layout must be an object with a "departments" list');
   }
@@ -161,7 +161,24 @@ function validateLayout(layout) {
       cell: [c, r], via, agents,
     };
   });
-  return { departments, gardens };
+  const moves = checkMoves(layout.moves, new Set([...ROOM_IDS, ...departments.map((d) => d.id)]));
+  return { departments, gardens, moves };
+}
+
+// Agents the user dragged to another room: { agentName: roomId }. A move to
+// a room that is no longer there is dropped: that agent simply goes back to
+// its usual room, which is what removing the room should mean.
+function checkMoves(moves, roomIds) {
+  if (moves === undefined || moves === null) return {};
+  if (typeof moves !== 'object' || Array.isArray(moves)) throw new TypeError('"moves" must be an object of { agentName: roomId }');
+  const out = {};
+  for (const [agent, room] of Object.entries(moves)) {
+    const name = agent.trim();
+    if (!name || name.length > 64) throw new RangeError(`a moved agent needs a name of 1 to 64 characters, not "${agent.slice(0, 20)}"`);
+    if (typeof room !== 'string') throw new TypeError(`the room for "${name}" must be a room id`);
+    if (roomIds.has(room)) out[name] = room;
+  }
+  return out;
 }
 
 function checkGardens(list, taken) {
@@ -204,11 +221,12 @@ function roomsWith(layout) {
   ];
 }
 
-// Agents the user placed in departments, as room overrides.
+// Agents the user placed in departments, or dragged to a room, as room
+// overrides. A drag is the newer choice, so it wins.
 function overridesFrom(layout) {
   const out = {};
   for (const d of layout.departments) for (const a of d.agents) out[a] = d.id;
-  return out;
+  return { ...out, ...(layout.moves ?? {}) };
 }
 
 // Free ring cells where a department could go now.

@@ -15,7 +15,7 @@ const port = Number(process.env.PORT) || 5178;
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 // The layout lives in memory here; the app keeps it in layout.json.
-let layout = { departments: [], gardens: [] };
+let layout = { departments: [], gardens: [], moves: {} };
 let decor = { rooms: {}, gardens: {} };
 const config = () => ({
   rooms: roomsWith(layout), layout, departmentKinds: DEPARTMENT_KINDS, openCells: openCells(layout),

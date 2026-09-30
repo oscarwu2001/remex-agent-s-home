@@ -812,3 +812,16 @@ body.in-meadow .camera.meadow-only { display: flex; }
 .map-step.more .what { grid-column: 1 / -1; font-style: italic; }
 @keyframes map-pulse { 50% { box-shadow: 0 0 0 6px var(--accent-soft); } }
 @media (prefers-reduced-motion: reduce) { .map-step.live .glyph, .map-step.skill.live .skill-mark { animation: none; } }
+
+/* ---- moving idle staff to another room --------------------------------------- */
+
+.person { touch-action: none; }
+.person.being-moved { opacity: 0.35; }
+.drag-ghost { pointer-events: none; opacity: 0.9; }
+svg.moving-agent, svg.moving-agent * { cursor: grabbing !important; }
+.room-hit.drop-target { fill: var(--accent); fill-opacity: 0.22; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 8 5; }
+.move-to { margin-top: var(--s-2); }
+.move-to select { width: 100%; }
+body.no-select, body.no-select * { user-select: none; }
+.team-speed { border: 0; margin: 0 0 var(--s-3); padding: 0; display: grid; gap: var(--s-1); }
+.team-speed legend { font-weight: 600; margin-bottom: var(--s-1); }

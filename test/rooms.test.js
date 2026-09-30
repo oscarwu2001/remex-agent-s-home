@@ -144,3 +144,18 @@ test('the cell a garden takes is no longer open for building', () => {
   const layout = validateLayout({ departments: [], gardens: [{ cell: [3, 1] }] });
   assert.ok(!openCells(layout).some(([c, r]) => c === 3 && r === 1));
 });
+
+test('agents dragged to another room: kept, checked, and they beat an older department choice', () => {
+  const { validateLayout, overridesFrom } = require('../src/core/rooms');
+  const layout = validateLayout({
+    departments: [{ kind: 'ent', cell: [1, -1], agents: ['writer', 'runner'] }],
+    moves: { writer: 'laboratory', ghost: 'dept-gone', ' planner ': 'radiology' },
+  });
+  assert.deepEqual(layout.moves, { writer: 'laboratory', planner: 'radiology' }, 'a move to a room that is gone is dropped');
+  const o = overridesFrom(layout);
+  assert.equal(o.writer, 'laboratory');
+  assert.equal(o.runner, layout.departments[0].id);
+  assert.throws(() => validateLayout({ departments: [], moves: ['writer'] }), /moves/);
+  assert.throws(() => validateLayout({ departments: [], moves: { writer: 3 } }), /room id/);
+  assert.deepEqual(validateLayout({ departments: [] }).moves, {});
+});

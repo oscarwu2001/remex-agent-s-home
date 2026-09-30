@@ -29,6 +29,8 @@
 | **Live map** | The pop-up beside the hospital when a session (or one of its helpers) is clicked on the board: that session and everything it has called, in order: skills it ran and every helper, finished ones too, each with the skills it ran. What runs now pulses and says "Running now". Built from the tracker's `map` on each session in the snapshot. |
 | **Team reminders** | The Office pack's hook (`office-pack/hooks/agents-home-router.sh`, a UserPromptSubmit hook): when a prompt fits an installed team agent, it adds a one-line reminder to hand the work over; otherwise it prints nothing. |
 | **Update agents** | Settings → Updates: adds missing team items, turns reminders on, and refreshes pack files the user has not edited (matched against `office-pack/versions.json`). |
+| **Team speed (Base / Fast)** | How the team reminders steer Claude: Base reminds only when a helper fits; Fast also asks for independent parts to run on several helpers at once (more tokens, sooner done). Kept in `~/.claude/hooks/agents-home-mode`; drawn in `office-pack/PIPELINE.md`. |
+| **Move (an agent)** | An idle agent dragged to another room (or sent there from its chart): `moves` in `layout.json`, `{ agentName: roomId }`, beating a department's list; `rooms.json` still wins over both. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 
