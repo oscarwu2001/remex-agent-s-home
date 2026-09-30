@@ -151,20 +151,22 @@ function utilisation(snap) {
 }
 
 // The reminder hook's own log (~/.claude/hooks/agents-home-router.log):
-// "time<TAB>speed<TAB>what fired". A summary for the last `hours`.
+// "time<TAB>what fired" (the last column is what fired). A summary for the
+// last `hours`.
 function reminderSummary(lines, now = Date.now(), hours = 24) {
   let runs = 0;
   let reminded = 0;
   let last;
   const since = now - hours * 3_600_000;
   for (const line of lines) {
-    const [time, mode, fired] = line.split('\t');
+    const cols = line.split('\t');
+    const [time, fired] = [cols[0], cols.length > 1 ? cols.at(-1) : undefined];
     const t = Date.parse(time);
     if (!Number.isFinite(t) || t < since) continue;
     runs += 1;
     if (fired && fired !== 'none') {
       reminded += 1;
-      last = { time: t, mode, fired };
+      last = { time: t, fired };
     }
   }
   return { runs, reminded, last };

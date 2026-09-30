@@ -5,9 +5,8 @@
 # hand the work over; Claude Code adds it to the conversation. When nothing
 # fits it prints nothing, so it costs no tokens. It reads the prompt from
 # stdin, keeps nothing and sends nothing. Only agents that are installed are
-# mentioned. In fast mode (see below) it also asks for work in parallel.
-# Each run adds one line to agents-home-router.log beside it: the time, the
-# speed and which reminders fired (agent names only, never the prompt), so
+# mentioned. Each run adds one line to agents-home-router.log beside it: the
+# time and which reminders fired (agent names only, never the prompt), so
 # Agent's Home can show that the reminders are working.
 
 dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,22 +38,11 @@ fits '\b(spreadsheet|excel|csv|formula|calculate|average|percent(age)?|pivot)\b'
 fits '\b(proofread|double-check|check (this|my|it)|before (i )?send)\b' \
   && tip checker 'Before this goes out, have the checker agent give it a second look.'
 
-# Team speed, set in Agent's Home: "base" (the default) or "fast". Fast
-# spends more tokens to finish sooner: for any real task (8 words or more)
-# it asks Claude to split independent parts across agents working at once.
-mode="base"
-[ -f "$dir/hooks/agents-home-mode" ] && mode="$(tr -d '[:space:]' < "$dir/hooks/agents-home-mode")"
-if [ "$mode" = "fast" ] && [ "$(printf '%s' "$prompt" | wc -w)" -ge 8 ]; then
-  tips="$tips
-- Fast mode: split independent parts of this across several agents started together (several Task calls in one reply), for example one Explore agent per area to search, code-reviewer and test-runner side by side, or one general-purpose agent per independent file or document. Start the next one without waiting unless it needs the other's result, then combine what they return."
-  fired="$fired${fired:+,}parallel"
-fi
-
 # The log: kept to the last 1000 runs. A failure to write it never gets in
 # the way of the prompt.
 log="$dir/hooks/agents-home-router.log"
 {
-  printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mode" "${fired:-none}" >> "$log"
+  printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${fired:-none}" >> "$log"
   if [ "$(wc -l < "$log")" -gt 1200 ]; then tail -n 1000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; fi
 } 2>/dev/null
 

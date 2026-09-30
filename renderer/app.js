@@ -2338,14 +2338,13 @@ async function showLogStatus() {
     return;
   }
   const { summary: s, team } = res;
-  const speed = team.speed === 'fast' ? 'Fast' : 'Base';
   if (team.reminders !== 'on') {
-    line.textContent = `Team reminders are off (team speed ${speed}, ${team.team} of the team in Claude). Update agents turns them on.`;
+    line.textContent = `Team reminders are off (${team.team} of the team in Claude). Update agents turns them on.`;
   } else if (!s.runs) {
-    line.textContent = `Team reminders are on (${speed}) but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
+    line.textContent = `Team reminders are on but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
   } else {
     const last = s.last ? ` Last reminder at ${clock(s.last.time)}: ${s.last.fired.split(',').join(', ')}.` : '';
-    line.textContent = `Team reminders are working (${speed}): in the last 24 hours they ran on ${s.runs} prompt${s.runs === 1 ? '' : 's'} and reminded Claude on ${s.reminded}.${last}`;
+    line.textContent = `Team reminders are working: in the last 24 hours they ran on ${s.runs} prompt${s.runs === 1 ? '' : 's'} and reminded Claude on ${s.reminded}.${last}`;
   }
 }
 
@@ -2424,12 +2423,7 @@ function renderPack() {
         <button type="button" class="link-btn" id="pack-later">Not now</button></div>`
       : `<h2 id="pack-h">Office team</h2>${note}<div class="form-actions"><button type="button" class="link-btn" id="pack-ok">OK</button></div>`;
   }
-  const speed = (value, title, text) => `<label class="check"><input type="radio" name="team-speed" value="${value}" ${pack.mode === value ? 'checked' : ''}>
-    <span><strong>${title}</strong> <span class="muted">${text}</span></span></label>`;
-  settings.innerHTML = `<fieldset class="team-speed"><legend>Team speed</legend>
-      ${speed('base', 'Base', 'Claude hands work to a helper when one fits. Fewer tokens.')}
-      ${speed('fast', 'Fast', 'Claude also splits a task across several helpers working at the same time. Done sooner, uses more tokens.')}
-    </fieldset>
+  settings.innerHTML = `
     ${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
       <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
     ${missing.length ? `<div class="checks">${packChoices('pack-pick-settings', true)}</div>
@@ -2452,17 +2446,6 @@ async function addPack(names, fromCard = false) {
   else if (!res.ok) packError = res.error;
   await loadPack();
 }
-
-document.addEventListener('change', async (e) => {
-  if (e.target.name !== 'team-speed') return;
-  const mode = e.target.value;
-  packError = '';
-  const res = await bridge.packMode(mode);
-  if (!res.ok) packError = res.error;
-  else packNote = `${mode === 'fast' ? 'Fast' : 'Base'} team speed is on${res.remindersAdded ? ', with team reminders' : ''}. It applies from the next prompt.`;
-  await loadPack();
-  document.querySelector(`input[name="team-speed"][value="${mode}"]`)?.focus();
-});
 
 document.addEventListener('click', (e) => {
   const id = e.target.id;

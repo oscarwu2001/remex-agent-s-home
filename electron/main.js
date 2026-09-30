@@ -560,16 +560,6 @@ app.whenReady().then(() => {
     rosterAt = 0; // the new agents show in the hospital at the next check
     return { ok: res.errors.length === 0, ...res };
   });
-  ipcMain.handle('pack:mode', (_event, mode) => {
-    try {
-      const res = officePack.setMode(packDir, claudeDir, String(mode));
-      for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
-      syslog.write('activity', 'team-speed', { speed: res.errors.length ? undefined : res.mode, reminders: res.remindersAdded ? 'turned-on' : undefined, errors: res.errors.length || undefined });
-      return { ok: res.errors.length === 0, ...res, error: res.errors.join('; ') };
-    } catch (err) {
-      return { ok: false, error: `The team speed could not be set (${err.code || err.message})` };
-    }
-  });
   ipcMain.handle('pack:update', () => {
     let versions;
     try {
@@ -593,7 +583,6 @@ app.whenReady().then(() => {
     try {
       const st = officePack.packStatus(packDir, claudeDir);
       return {
-        speed: st.mode,
         reminders: st.items.find((i) => i.kind === 'hook')?.installed ? 'on' : 'off',
         team: `${st.items.filter((i) => i.kind !== 'hook' && i.installed).length}/${st.items.filter((i) => i.kind !== 'hook').length}`,
       };

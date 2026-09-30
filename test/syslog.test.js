@@ -59,6 +59,6 @@ test('the summary counts sessions and who is working now', () => {
 
 test('the reminder log shows whether the reminders run and fire', () => {
   const now = Date.parse('2026-09-30T12:00:00Z');
-  const lines = ['2026-09-28T10:00:00Z\tbase\twriter', '2026-09-30T09:00:00Z\tfast\tnone', '2026-09-30T11:00:00Z\tfast\tcode-reviewer,parallel', 'garbage'];
-  assert.deepEqual(reminderSummary(lines, now), { runs: 2, reminded: 1, last: { time: Date.parse('2026-09-30T11:00:00Z'), mode: 'fast', fired: 'code-reviewer,parallel' } });
+  const lines = ['2026-09-28T10:00:00Z\twriter', '2026-09-30T09:00:00Z\tnone', '2026-09-30T11:00:00Z\tbase\tcode-reviewer,test-runner', 'garbage'];
+  assert.deepEqual(reminderSummary(lines, now), { runs: 2, reminded: 1, last: { time: Date.parse('2026-09-30T11:00:00Z'), fired: 'code-reviewer,test-runner' } });
 });

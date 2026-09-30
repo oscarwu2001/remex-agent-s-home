@@ -132,12 +132,7 @@ with their own plan, and the team shows up in the hospital:
 - **Skills:** *Question me*, *Teach me*, *Handover note* and *Break into tasks*, adapted from `grilling`, `teach`, `handoff` and `to-tickets`.
 - **Team reminders (a hook):** Claude only calls an agent when it thinks one fits, and it often doesn't think of it. With reminders on, a request that fits one of the team gets a one-line reminder added to it ("After you change code, give the change to the code-reviewer agent…"). It mentions only agents that are installed. When nothing fits it adds nothing, so it costs no tokens. It reads the prompt and keeps nothing. Turning it on adds one entry to `~/.claude/settings.json`, and changes nothing else there. The app first keeps a copy as `settings.json.agents-home-backup`, and leaves a file it cannot read as JSON alone.
 
-**Team speed** (Settings → Office team for Claude) has two settings. **Base**
-is the default: Claude hands a part to a helper when one fits, and it uses
-fewer tokens. **Fast** also asks Claude, for any real task, to split
-independent parts across several helpers working at the same time and then
-combine their results. It finishes sooner and uses more tokens. Choosing Fast
-turns the team reminders on. How work flows in each is drawn in
+How work flows through the team is drawn in
 [`office-pack/PIPELINE.md`](office-pack/PIPELINE.md).
 
 On first start the app asks, in one short card, whether to add them. If
@@ -172,12 +167,12 @@ Click a session (or any of its helpers) under **On shift** and a **live map** of
 
 For checking the team is working, and for debugging. The app keeps two plain-text logs in its data folder (`%APPDATA%\Agents Home\logs`), never under `~/.claude`:
 
-- **activity.log:** app start (version, team speed, whether the reminders are on, how much of the team is in Claude), each session starting and going quiet, each helper starting (agent, session, room) and finishing (how it finished, time, tokens), skills used and by whom, a summary every 5 minutes of who is working, and team changes (speed, installs, Update agents).
+- **activity.log:** app start (version, whether the reminders are on, how much of the team is in Claude), each session starting and going quiet, each helper starting (agent, session, room) and finishing (how it finished, time, tokens), skills used and by whom, a summary every 5 minutes of who is working, and team changes (installs, Update agents).
 - **errors.log:** everything that appears under **Needs attention**, crashes in the app, and errors in its window.
 
 Each line reads `2026-09-30 14:03:12  helper-end     agent=reviewer session=spine-seg outcome=finished time=48s tokens=38211`. A log over 2 MB moves aside to `activity.1.log` and starts again. It keeps names, rooms, statuses, times and token counts only: never prompts, task descriptions, file names or commands. errors.log can name a folder that could not be read.
 
-**Settings → System log** shows the newest lines of either log, opens the folder, and says whether the **team reminders** are running. The reminder hook keeps its own short log (`~/.claude/hooks/agents-home-router.log`: time, speed and which reminders fired, never the prompt). From that the app shows, for example: "Team reminders are working (Fast): in the last 24 hours they ran on 42 prompts and reminded Claude on 17."
+**Settings → System log** shows the newest lines of either log, opens the folder, and says whether the **team reminders** are running. The reminder hook keeps its own short log (`~/.claude/hooks/agents-home-router.log`: time and which reminders fired, never the prompt). From that the app shows, for example: "Team reminders are working: in the last 24 hours they ran on 42 prompts and reminded Claude on 17."
 
 ## Performance report
 

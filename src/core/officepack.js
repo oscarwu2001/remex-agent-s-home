@@ -18,8 +18,6 @@ const crypto = require('crypto');
 const { parseFrontmatter } = require('./roster');
 
 const HOOK_FILE = 'hooks/agents-home-router.sh';
-const MODE_FILE = 'hooks/agents-home-mode'; // "base" or "fast", read by the hook
-const MODES = ['base', 'fast'];
 const HOOK_MARK = 'agents-home-router';
 
 // Replaces a file whole: written next to it, then renamed over it, so it is
@@ -160,35 +158,7 @@ function packStatus(packDir, claudeDir) {
     ...i,
     installed: fs.existsSync(path.join(claudeDir, i.to)) && (i.kind !== 'hook' || hookIsOn(claudeDir)),
   }));
-  return { claudeDir, hasOwnAgents, items, mode: getMode(claudeDir) };
-}
-
-// Team speed: base (reminders only when a request fits a helper) or fast
-// (also asks Claude to run independent parts in parallel, spending more
-// tokens to finish sooner).
-function getMode(claudeDir) {
-  try {
-    const m = fs.readFileSync(path.join(claudeDir, MODE_FILE), 'utf8').trim();
-    return MODES.includes(m) ? m : 'base';
-  } catch (err) {
-    if (err.code === 'ENOENT') return 'base'; // never set: the default
-    throw err;
-  }
-}
-
-// Sets the speed; fast needs the reminders, so it turns them on if needed.
-function setMode(packDir, claudeDir, mode) {
-  if (!MODES.includes(mode)) throw new RangeError(`unknown team speed "${String(mode).slice(0, 20)}"`);
-  const result = { mode, remindersAdded: false, errors: [] };
-  if (mode === 'fast' && !hookIsOn(claudeDir)) {
-    const res = installPack(packDir, claudeDir, ['team-reminders']);
-    result.remindersAdded = res.installed.length > 0;
-    result.errors.push(...res.errors);
-    if (res.errors.length) return result;
-  }
-  fs.mkdirSync(path.join(claudeDir, 'hooks'), { recursive: true });
-  replaceFile(path.join(claudeDir, MODE_FILE), `${mode}\n`);
-  return result;
+  return { claudeDir, hasOwnAgents, items };
 }
 
 // File by file, never replacing: the packaged app reads the pack from its
@@ -304,4 +274,4 @@ function updatePack(packDir, claudeDir, versions) {
   return result;
 }
 
-module.exports = { listPack, packStatus, installPack, updatePack, getMode, setMode, fingerprint, packFiles, HOOK_FILE, MODE_FILE };
+module.exports = { listPack, packStatus, installPack, updatePack, fingerprint, packFiles, HOOK_FILE };

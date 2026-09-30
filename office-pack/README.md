@@ -33,9 +33,7 @@ request fits an installed agent, reminds Claude to hand it over; it adds
 nothing otherwise. Agent's Home turns it on by adding one entry to
 `settings.json` (a copy of the old file is kept).
 
-**Team speed:** Base (a helper when one fits) or Fast (several helpers at
-once, more tokens, done sooner), chosen in Agent's Home. See
-[PIPELINE.md](PIPELINE.md) for how work flows in each.
+See [PIPELINE.md](PIPELINE.md) for how work flows through the team.
 
 Claude picks the right agent or skill from what you ask; you can also name
 one ("use the writer", "/handover"). Start a new Claude Code session after
