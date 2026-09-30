@@ -2176,11 +2176,45 @@ $('update-run').addEventListener('click', async () => {
   }
 });
 
+// Update agents: the team in Claude, up to date and switched on.
+if (!bridge.packUpdate) $('update-agents').disabled = true;
+$('update-agents').addEventListener('click', async () => {
+  const button = $('update-agents');
+  const status = $('update-status');
+  button.disabled = true;
+  status.classList.remove('form-error');
+  status.textContent = 'Updating the team in Claude…';
+  try {
+    const res = await bridge.packUpdate();
+    if (!res.updated) {
+      status.textContent = res.error;
+      status.classList.add('form-error');
+      return;
+    }
+    const list = (names) => names.map(packLabel).join(', ');
+    const parts = [
+      res.added.length ? `Added: ${list(res.added)}.` : '',
+      res.updated.length ? `Updated: ${list(res.updated)}.` : '',
+      res.edited.length ? `Left as you edited them: ${list(res.edited)}.` : '',
+      !res.added.length && !res.updated.length ? 'The team was already up to date.' : 'Start a new Claude session to use the changes.',
+      res.errors.length ? `Problems: ${res.errors.join('; ')}` : '',
+    ].filter(Boolean);
+    status.textContent = parts.join(' ');
+    status.classList.toggle('form-error', res.errors.length > 0);
+    await loadPack();
+  } catch (err) {
+    status.textContent = `The team could not be updated: ${err.message}`;
+    status.classList.add('form-error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ---- the Office pack: a ready-made team offered to Claude ---------------------------
 
 // Asked once in a short card on the board: "Not now" is remembered until the
 // pack has something new. The same list stays in Settings.
-const packLabel = (name) => ({ handover: 'Handover note', 'break-down': 'Break into tasks' }[name]
+const packLabel = (name) => ({ handover: 'Handover note', 'break-down': 'Break into tasks', 'team-reminders': 'Team reminders' }[name]
   ?? name.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
 let pack; // { hasOwnAgents, items: [{ kind, name, summary, installed }] }
 let packNote = '';
@@ -2228,7 +2262,7 @@ function renderPack() {
   if (!offer.hidden) {
     offer.innerHTML = missing.length && prefs.packDismissed !== key ? `
       <h2 id="pack-h">Add the office team to Claude?</h2>
-      ${pack.hasOwnAgents ? `<div class="checks pack-names">${packChoices('pack-pick', false)}</div>` : '<p class="hint">Helpers for emails, summaries, plans and numbers.</p>'}
+      ${pack.hasOwnAgents ? `<div class="checks pack-names">${packChoices('pack-pick', false)}</div>` : '<p class="hint">Helpers for emails, summaries, plans, numbers and code, and reminders so Claude uses them.</p>'}
       ${err}<div class="form-actions">
         <button type="button" class="button" id="pack-add">${pack.hasOwnAgents ? 'Add selected' : 'Add'}</button>
         <button type="button" class="link-btn" id="pack-later">Not now</button></div>`

@@ -27,6 +27,8 @@
 | **Creature index** | The collection: each form (kind × stage) raised so far, with its best rarity and the looks seen (`dex`). |
 | **Team picture** | The report's "How your team works together" (`src/core/teamwork.js`): who called which agent, which skills ran and from where (typed, picked by Claude, inside an agent), each session's hand-off chain, and what is installed but unused. Built from transcripts only; skill names, never arguments. |
 | **Live map** | The pop-up beside the hospital when a session (or one of its helpers) is clicked on the board: that session and everything it has called, in order: skills it ran and every helper, finished ones too, each with the skills it ran. What runs now pulses and says "Running now". Built from the tracker's `map` on each session in the snapshot. |
+| **Team reminders** | The Office pack's hook (`office-pack/hooks/agents-home-router.sh`, a UserPromptSubmit hook): when a prompt fits an installed team agent, it adds a one-line reminder to hand the work over; otherwise it prints nothing. |
+| **Update agents** | Settings → Updates: adds missing team items, turns reminders on, and refreshes pack files the user has not edited (matched against `office-pack/versions.json`). |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

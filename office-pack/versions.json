@@ -1,0 +1,48 @@
+{
+  "agents/checker.md": [
+    "24549b498f0c80b41fc4a23179127d0d",
+    "1970cfd2c588927f3efb4996020e980b"
+  ],
+  "agents/code-reviewer.md": [
+    "634722673c7eb7456aaf814f1fa15d74"
+  ],
+  "agents/data-helper.md": [
+    "24e579b0201468f86e10cc28a263cb04",
+    "6d0f3dc758b0bbc87047d996818b6328"
+  ],
+  "agents/planner.md": [
+    "c4040eab06727a72abae0ea73b4e29ad",
+    "b779b91fbe2a934569d0b86ebbaaf622"
+  ],
+  "agents/summariser.md": [
+    "324bdee7ad0c273482ae412226bb60c7",
+    "493ee832e0129b4045e525920076841a"
+  ],
+  "agents/test-runner.md": [
+    "f9ef060c55820a0cae942e0f157b4a4b"
+  ],
+  "agents/writer.md": [
+    "259da62600629eb7443ec9f6b972249b",
+    "ca8bb6e4b1fee8326bb0deb3100e5056"
+  ],
+  "hooks/agents-home-router.sh": [
+    "5cd77c65343816f2bcfccfad2e58e5d1",
+    "75098563c1f9723b91157942e0ac2464"
+  ],
+  "skills/break-down/SKILL.md": [
+    "8393a4e2ba1ac1605df384631a634fe1",
+    "083cdb03a343a4ab9340327a6a496fa2"
+  ],
+  "skills/handover/SKILL.md": [
+    "0ef0815e7eae53cd5904e1f2b464caea",
+    "741a4eebfdacd953a13d0b811a15a422"
+  ],
+  "skills/question-me/SKILL.md": [
+    "01301e4f40ad4782999f2f99b4c2e4cd",
+    "7022e0a8fa6a3940e09a9886e2334188"
+  ],
+  "skills/teach-me/SKILL.md": [
+    "4eeba70fdf7fe8d7660f9ab7abd9c54e",
+    "24f8e849a0968fba8ce3904a7070c4a0"
+  ]
+}

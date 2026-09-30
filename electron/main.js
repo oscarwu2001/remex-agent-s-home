@@ -541,6 +541,18 @@ app.whenReady().then(() => {
     rosterAt = 0; // the new agents show in the hospital at the next check
     return { ok: res.errors.length === 0, ...res };
   });
+  ipcMain.handle('pack:update', () => {
+    let versions;
+    try {
+      versions = JSON.parse(fs.readFileSync(path.join(packDir, 'versions.json'), 'utf8'));
+    } catch (err) {
+      return { ok: false, error: `The app's list of team versions could not be read (${err.code || err.message})` };
+    }
+    const res = officePack.updatePack(packDir, claudeDir, versions);
+    for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    rosterAt = 0;
+    return { ok: res.errors.length === 0, ...res };
+  });
 
   createWindow();
 

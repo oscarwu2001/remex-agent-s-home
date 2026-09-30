@@ -67,6 +67,8 @@ const DEFAULT_ASSIGNMENTS = {
   planner: 'vision-clinic',
   'data-helper': 'laboratory',
   checker: 'operating-room',
+  'code-reviewer': 'operating-room',
+  'test-runner': 'laboratory',
 };
 
 // Then keyword rules, for agents the defaults do not name.

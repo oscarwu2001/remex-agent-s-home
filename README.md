@@ -124,17 +124,25 @@ every stage without saving anything.
 ## The office team for Claude
 
 Agent's Home can add a small, ready-made team to Claude Code, for people who
-do not code. They keep prompting in Claude as usual, with their own plan, and
-the team shows up in the hospital:
+do not code and for people who do. They keep prompting in Claude as usual,
+with their own plan, and the team shows up in the hospital:
 
-- **Agents:** a writer (Research Office), a summariser (Radiology), a planner (Vision Clinic), a data helper (Laboratory) and a checker (Operating Room).
+- **Agents for office work:** a writer (Research Office), a summariser (Radiology), a planner (Vision Clinic), a data helper (Laboratory) and a checker (Operating Room).
+- **Agents for coding:** a code reviewer (Operating Room) that checks a change before it is called done, and a test runner (Laboratory) that runs tests and builds and reports only what matters.
 - **Skills:** *Question me*, *Teach me*, *Handover note* and *Break into tasks*, adapted from `grilling`, `teach`, `handoff` and `to-tickets`.
+- **Team reminders (a hook):** Claude only calls an agent when it thinks one fits, and it often doesn't think of it. With reminders on, a request that fits one of the team gets a one-line reminder added to it ("After you change code, give the change to the code-reviewer agent…"). It mentions only agents that are installed. When nothing fits it adds nothing, so it costs no tokens. It reads the prompt and keeps nothing. Turning it on adds one entry to `~/.claude/settings.json`, and changes nothing else there. The app first keeps a copy as `settings.json.agents-home-backup`, and leaves a file it cannot read as JSON alone.
 
 On first start the app asks, in one short card, whether to add them. If
 Claude has no agents yet, one **Add** does it. If it already has some, you
 tick the ones you want. Anything already in `~/.claude` is never replaced.
 **Not now** is remembered, and **Settings → Office team for Claude** keeps
 the list. The files are in `office-pack/` if you'd rather copy them by hand.
+
+**Settings → Updates → Update agents** brings the team up to date in one go.
+It adds any helpers not there yet and turns on the reminders. It also refreshes
+files that are exactly as some earlier version of the app shipped them. A file
+you edited is left as it is, and listed. Press **Update and restart** first to
+get the newest team, then **Update agents**, then start a new Claude session.
 
 ## Grow the hospital
 
