@@ -130,6 +130,12 @@ test('the reminder hook names only installed helpers that fit, and is silent oth
   assert.match(fix.stdout, /code-reviewer/);
   assert.doesNotMatch(fix.stdout, /test-runner/, 'not installed, so not mentioned');
   assert.equal(run('What is the weather like?').stdout, '');
+  // Its own log: one line per run, agent names only, never the prompt.
+  const log = fs.readFileSync(path.join(claude, 'hooks', 'agents-home-router.log'), 'utf8').trim().split('\n');
+  assert.equal(log.length, 2);
+  assert.match(log[0], /^\d{4}-\d\d-\d\dT[\d:]+Z\tbase\tcode-reviewer$/);
+  assert.match(log[1], /\tbase\tnone$/);
+  assert.ok(!log.join('\n').includes('parser'), 'the prompt is never written');
 });
 
 // A pack of our own, to test what the real one does not have (a skill with

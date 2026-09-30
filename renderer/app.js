@@ -2319,6 +2319,53 @@ $('update-agents').addEventListener('click', async () => {
   }
 });
 
+// ---- system log --------------------------------------------------------------------
+
+// Errors in this window go to the log too (the main process keeps it).
+window.addEventListener('error', (e) => bridge.logError?.({ message: e.message, where: `${String(e.filename).split('/').pop()}:${e.lineno}` }));
+window.addEventListener('unhandledrejection', (e) => bridge.logError?.({ message: String(e.reason?.message ?? e.reason), where: 'promise' }));
+
+async function showLogStatus() {
+  const line = $('log-reminders');
+  if (!bridge.logTail) {
+    line.textContent = 'The desktop app keeps the log; this preview cannot.';
+    for (const id of ['log-activity', 'log-errors', 'log-open']) $(id).disabled = true;
+    return;
+  }
+  const res = await bridge.logTail('reminders');
+  if (!res.ok) {
+    line.textContent = res.error;
+    return;
+  }
+  const { summary: s, team } = res;
+  const speed = team.speed === 'fast' ? 'Fast' : 'Base';
+  if (team.reminders !== 'on') {
+    line.textContent = `Team reminders are off (team speed ${speed}, ${team.team} of the team in Claude). Update agents turns them on.`;
+  } else if (!s.runs) {
+    line.textContent = `Team reminders are on (${speed}) but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
+  } else {
+    const last = s.last ? ` Last reminder at ${clock(s.last.time)}: ${s.last.fired.split(',').join(', ')}.` : '';
+    line.textContent = `Team reminders are working (${speed}): in the last 24 hours they ran on ${s.runs} prompt${s.runs === 1 ? '' : 's'} and reminded Claude on ${s.reminded}.${last}`;
+  }
+}
+
+async function showLog(which) {
+  const view = $('log-view');
+  const res = await bridge.logTail(which);
+  view.hidden = false;
+  view.textContent = res.ok
+    ? res.lines.length ? res.lines.join('\n') : `Nothing in the ${which} log yet.`
+    : res.error;
+  view.scrollTop = view.scrollHeight;
+  showLogStatus();
+}
+$('log-activity').addEventListener('click', () => showLog('activity'));
+$('log-errors').addEventListener('click', () => showLog('errors'));
+$('log-open').addEventListener('click', async () => {
+  const res = await bridge.logOpen();
+  if (!res.ok) $('log-reminders').textContent = `The log folder could not be opened: ${res.error}`;
+});
+
 // ---- the Office pack: a ready-made team offered to Claude ---------------------------
 
 // Asked once in a short card on the board: "Not now" is remembered until the
@@ -2488,6 +2535,7 @@ function setSettings(open) {
   $('settings-open').setAttribute('aria-expanded', String(open));
   if (open) {
     showUpdateInfo();
+    showLogStatus();
     $('settings-close').focus();
   }
   else {

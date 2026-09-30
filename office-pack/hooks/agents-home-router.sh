@@ -6,6 +6,9 @@
 # fits it prints nothing, so it costs no tokens. It reads the prompt from
 # stdin, keeps nothing and sends nothing. Only agents that are installed are
 # mentioned. In fast mode (see below) it also asks for work in parallel.
+# Each run adds one line to agents-home-router.log beside it: the time, the
+# speed and which reminders fired (agent names only, never the prompt), so
+# Agent's Home can show that the reminders are working.
 
 dir="$(cd "$(dirname "$0")/.." && pwd)"
 input="$(cat)"
@@ -16,9 +19,10 @@ prompt="$(printf '%s' "$input" | tr '\n' ' ' | sed -En 's/.*"prompt"[[:space:]]*
 [ -n "$prompt" ] || exit 0
 
 tips=""
+fired=""
 fits() { printf '%s' "$prompt" | grep -Eq "$1"; }
 tip() { [ -f "$dir/agents/$1.md" ] && tips="$tips
-- $2"; }
+- $2" && fired="$fired${fired:+,}$1"; }
 
 fits '\b(implement|refactor|fix|bug|feature|endpoint|pull request|merge request|commit|change the code|add (a|an|the) (function|method|class|test))\b' \
   && tip code-reviewer 'After you change code, give the change to the code-reviewer agent and fix what it finds before you say it is done.'
@@ -43,7 +47,16 @@ mode="base"
 if [ "$mode" = "fast" ] && [ "$(printf '%s' "$prompt" | wc -w)" -ge 8 ]; then
   tips="$tips
 - Fast mode: split independent parts of this across several agents started together (several Task calls in one reply), for example one Explore agent per area to search, code-reviewer and test-runner side by side, or one general-purpose agent per independent file or document. Start the next one without waiting unless it needs the other's result, then combine what they return."
+  fired="$fired${fired:+,}parallel"
 fi
+
+# The log: kept to the last 1000 runs. A failure to write it never gets in
+# the way of the prompt.
+log="$dir/hooks/agents-home-router.log"
+{
+  printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mode" "${fired:-none}" >> "$log"
+  if [ "$(wc -l < "$log")" -gt 1200 ]; then tail -n 1000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; fi
+} 2>/dev/null
 
 [ -n "$tips" ] && printf "Agent's Home team: a helper fits this request (use the Task tool):%s\n" "$tips"
 exit 0

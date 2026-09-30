@@ -168,6 +168,17 @@ Remove a department or garden from the same list. A garden takes its planting wi
 
 Click a session (or any of its helpers) under **On shift** and a **live map** of that session pops up beside the hospital. The session is at the top; below it, in order, is everything it has called: the skills it ran and every helper, finished ones included, each with the skills it ran itself. Whatever is running right now pulses and says **Running now** with what it is doing; finished helpers show how they finished (finished, failed, stopped), their time and tokens. A line at the top counts what is running, finished, failed and the skills used. It updates as the session works. Click the same row again, press Esc, or use the close button to hide it. Like the board, file names and commands appear only with privacy mode off; skill names and agent types always show.
 
+## System log
+
+For checking the team is working, and for debugging. The app keeps two plain-text logs in its data folder (`%APPDATA%\Agents Home\logs`), never under `~/.claude`:
+
+- **activity.log:** app start (version, team speed, whether the reminders are on, how much of the team is in Claude), each session starting and going quiet, each helper starting (agent, session, room) and finishing (how it finished, time, tokens), skills used and by whom, a summary every 5 minutes of who is working, and team changes (speed, installs, Update agents).
+- **errors.log:** everything that appears under **Needs attention**, crashes in the app, and errors in its window.
+
+Each line reads `2026-09-30 14:03:12  helper-end     agent=reviewer session=spine-seg outcome=finished time=48s tokens=38211`. A log over 2 MB moves aside to `activity.1.log` and starts again. It keeps names, rooms, statuses, times and token counts only: never prompts, task descriptions, file names or commands. errors.log can name a folder that could not be read.
+
+**Settings → System log** shows the newest lines of either log, opens the folder, and says whether the **team reminders** are running. The reminder hook keeps its own short log (`~/.claude/hooks/agents-home-router.log`: time, speed and which reminders fired, never the prompt). From that the app shows, for example: "Team reminders are working (Fast): in the last 24 hours they ran on 42 prompts and reminded Claude on 17."
+
 ## Performance report
 
 Press **Report** at the top of the map to build it for the chosen period and open it straight away. Or open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:

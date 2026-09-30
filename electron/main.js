@@ -16,6 +16,7 @@ const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
+const { SystemLog, snapshotEvents, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -24,6 +25,7 @@ const WSL_IDLE_MS = 5_000; // how often to look for a distro while none is runni
 
 let win;
 let tracker;
+let syslog; // the system log, in the app's data folder (see src/core/syslog.js)
 let watcher;
 let wslWatcher;
 let wsl = { roots: [], problems: [] };
@@ -43,6 +45,7 @@ function problem(label, detail = '') {
     return;
   }
   problems.set(key, { label, detail, count: 1, at: Date.now() });
+  syslog?.write('errors', 'problem', { what: label, detail });
   if (problems.size > PROBLEM_LIMIT) problems.delete(problems.keys().next().value);
 }
 
@@ -179,7 +182,19 @@ app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-domain-reliability');
 
+// Crashes in the main process are logged and shown under "Needs attention"
+// rather than lost.
+function crashed(kind, err) {
+  const first = String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ');
+  syslog?.write('errors', kind, { where: 'main', error: first });
+  problem(`Something went wrong inside the app (${kind}); see the system log`, String(err?.message ?? err).slice(0, 120));
+}
+process.on('uncaughtException', (err) => crashed('crash', err));
+process.on('unhandledRejection', (err) => crashed('unhandled', err));
+
 app.whenReady().then(() => {
+  syslog = new SystemLog(path.join(app.getPath('userData'), 'logs'));
+  for (const p of startupProblems) syslog.write('errors', 'problem', { what: p.label, detail: p.detail });
   // The spell checker would fetch a dictionary from Google at start; the app
   // has no text worth checking, so it is off, with no languages to fetch.
   session.defaultSession.setSpellCheckerEnabled(false);
@@ -541,6 +556,7 @@ app.whenReady().then(() => {
     if (!Array.isArray(names) || !names.length) return { ok: false, error: 'Nothing was chosen.' };
     const res = officePack.installPack(packDir, claudeDir, names.map(String));
     for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    syslog.write('activity', 'team-install', { added: res.installed.join(','), skipped: res.skipped.join(','), errors: res.errors.length || undefined });
     rosterAt = 0; // the new agents show in the hospital at the next check
     return { ok: res.errors.length === 0, ...res };
   });
@@ -548,6 +564,7 @@ app.whenReady().then(() => {
     try {
       const res = officePack.setMode(packDir, claudeDir, String(mode));
       for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+      syslog.write('activity', 'team-speed', { speed: res.errors.length ? undefined : res.mode, reminders: res.remindersAdded ? 'turned-on' : undefined, errors: res.errors.length || undefined });
       return { ok: res.errors.length === 0, ...res, error: res.errors.join('; ') };
     } catch (err) {
       return { ok: false, error: `The team speed could not be set (${err.code || err.message})` };
@@ -562,16 +579,81 @@ app.whenReady().then(() => {
     }
     const res = officePack.updatePack(packDir, claudeDir, versions);
     for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    syslog.write('activity', 'team-update', {
+      added: res.added.join(','), updated: res.updated.join(','), edited: res.edited.join(','), errors: res.errors.length || undefined,
+    });
     rosterAt = 0;
     return { ok: res.errors.length === 0, ...res };
   });
 
+  // ---- the system log ------------------------------------------------------------
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  const reminderLog = path.join(claudeDir, officePack.HOOK_FILE.replace(/\.sh$/, '.log'));
+  const teamState = () => {
+    try {
+      const st = officePack.packStatus(packDir, claudeDir);
+      return {
+        speed: st.mode,
+        reminders: st.items.find((i) => i.kind === 'hook')?.installed ? 'on' : 'off',
+        team: `${st.items.filter((i) => i.kind !== 'hook' && i.installed).length}/${st.items.filter((i) => i.kind !== 'hook').length}`,
+      };
+    } catch (err) {
+      return { team: `unreadable (${err.code || err.message})` };
+    }
+  };
+  syslog.write('activity', 'app-start', { version: app.getVersion(), ...teamState() });
+  ipcMain.handle('home:log-tail', (_event, which) => {
+    try {
+      if (which === 'reminders') {
+        const lines = tailFile(reminderLog, 1000);
+        return { ok: true, lines: lines.slice(-60), summary: reminderSummary(lines), team: teamState() };
+      }
+      if (which !== 'activity' && which !== 'errors') return { ok: false, error: 'Unknown log' };
+      return { ok: true, lines: syslog.tail(which, 80), dir: logDir };
+    } catch (err) {
+      return { ok: false, error: `The log could not be read (${err.code || err.message})` };
+    }
+  });
+  ipcMain.handle('home:log-open', () => {
+    fs.mkdirSync(logDir, { recursive: true });
+    return shell.openPath(logDir).then((error) => ({ ok: !error, error }));
+  });
+  let rendererErrors = 0;
+  ipcMain.handle('home:log-error', (_event, { message, where } = {}) => {
+    // Capped, so a renderer stuck in a loop cannot fill the disk.
+    if (++rendererErrors > 50) return { ok: false };
+    syslog.write('errors', 'renderer-error', { where: String(where ?? '').slice(0, 120), error: String(message ?? '').slice(0, 300) });
+    return { ok: true };
+  });
+
   createWindow();
 
+  let lastSnap;
+  let lastSummary = 0;
+  let lastSummaryText = '';
+  const seenProblems = new Set();
+  const SUMMARY_MS = 5 * 60_000;
   setInterval(() => {
     if (!win || win.isDestroyed()) return;
+    const snap = tracker.snapshot();
+    // What changed since the last push, then who is working (every few
+    // minutes while anyone is, and once when everyone has stopped).
+    for (const { event, fields } of snapshotEvents(lastSnap, snap)) syslog.write('activity', event, fields);
+    lastSnap = snap;
+    const now = Date.now();
+    if (now - lastSummary >= SUMMARY_MS) {
+      const u = utilisation(snap);
+      const text = JSON.stringify(u);
+      if (u.sessions || text !== lastSummaryText) syslog.write('activity', 'summary', { ...u, ...teamState() });
+      lastSummary = now;
+      lastSummaryText = text;
+    }
+    if (syslog.failed && !seenProblems.has('log')) {
+      seenProblems.add('log');
+      problem(`The system log could not be written (${syslog.failed})`, logDir);
+    }
     win.webContents.send('home:snapshot', {
-      ...tracker.snapshot(),
+      ...snap,
       watcher: (() => {
         const a = watcher.status();
         const b = wslWatcher.status();
@@ -585,6 +667,13 @@ app.whenReady().then(() => {
         ...(usageSummary?.unreadable ? [{ label: 'Lines that could not be read while counting use', detail: '', count: usageSummary.unreadable }] : []),
       ],
     });
+    // Problems that do not come through problem() go to the log once each.
+    for (const p of [...wsl.problems, ...roster.problems]) {
+      const key = `${p.label}|${p.detail ?? ''}`;
+      if (seenProblems.has(key)) continue;
+      seenProblems.add(key);
+      syslog.write('errors', 'problem', { what: p.label, detail: p.detail });
+    }
   }, PUSH_MS);
 
   app.on('activate', () => {

@@ -203,6 +203,18 @@
         <p class="hint">Update agents brings the team in Claude up to date: it adds any helpers not there yet, refreshes the ones you have not edited, and turns on reminders so Claude hands work to them. Files you changed yourself are left as they are.</p>
       </section>
 
+      <section class="settings-group" aria-labelledby="log-h">
+        <h3 id="log-h">System log</h3>
+        <p class="hint">A record for checking the team works, and for debugging: which agents worked, when, how they finished and their tokens, every few minutes who is working, and any errors. It is kept in the app's own folder, with names and times only, never your prompts or files.</p>
+        <p class="hint" id="log-reminders" aria-live="polite"></p>
+        <div class="form-actions">
+          <button type="button" class="button" id="log-activity">Show activity</button>
+          <button type="button" class="button" id="log-errors">Show errors</button>
+          <button type="button" class="link-btn" id="log-open">Open the log folder</button>
+        </div>
+        <pre class="log-view" id="log-view" tabindex="0" hidden aria-label="Log lines, newest last"></pre>
+      </section>
+
       <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
         <h3 id="layout-h">Hospital layout <span class="count" id="layout-count"></span></h3>
         <div id="layout-body"></div>

@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('agentsHome', {
   packInstall: (names) => ipcRenderer.invoke('pack:install', names),
   packUpdate: () => ipcRenderer.invoke('pack:update'),
   packMode: (mode) => ipcRenderer.invoke('pack:mode', mode),
+  logTail: (which) => ipcRenderer.invoke('home:log-tail', which),
+  logOpen: () => ipcRenderer.invoke('home:log-open'),
+  logError: (info) => ipcRenderer.invoke('home:log-error', info),
   buildReport: (days) => ipcRenderer.invoke('home:build-report', days),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
   onSnapshot: (fn) => {

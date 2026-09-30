@@ -825,3 +825,4 @@ svg.moving-agent, svg.moving-agent * { cursor: grabbing !important; }
 body.no-select, body.no-select * { user-select: none; }
 .team-speed { border: 0; margin: 0 0 var(--s-3); padding: 0; display: grid; gap: var(--s-1); }
 .team-speed legend { font-weight: 600; margin-bottom: var(--s-1); }
+.log-view { max-height: 260px; overflow: auto; margin: var(--s-2) 0 0; padding: var(--s-2); border-radius: var(--r-md, 8px); background: var(--panel-raised); color: var(--ink); font: 11px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre; }

@@ -31,6 +31,7 @@
 | **Update agents** | Settings → Updates: adds missing team items, turns reminders on, and refreshes pack files the user has not edited (matched against `office-pack/versions.json`). |
 | **Team speed (Base / Fast)** | How the team reminders steer Claude: Base reminds only when a helper fits; Fast also asks for independent parts to run on several helpers at once (more tokens, sooner done). Kept in `~/.claude/hooks/agents-home-mode`; drawn in `office-pack/PIPELINE.md`. |
 | **Move (an agent)** | An idle agent dragged to another room (or sent there from its chart): `moves` in `layout.json`, `{ agentName: roomId }`, beating a department's list; `rooms.json` still wins over both. |
+| **System log** | `activity.log` and `errors.log` in the app's data folder (`src/core/syslog.js`): agent use and errors, names and times only. With the reminder hook's own log, it shows whether the team framework is really running. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 
