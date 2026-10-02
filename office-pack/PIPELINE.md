@@ -14,9 +14,9 @@ flowchart LR
   H -- no --> C[Claude works on it]
   H -- yes --> T[Claude hands that part<br/>to the helper]
   T --> C
-  C --> R{Code changed?}
-  R -- yes --> CR[code-reviewer:<br/>PASS or FAIL]
-  CR -- FAIL --> C
+  C --> R{Code change<br/>finished?}
+  R -- yes --> CR[code-reviewer, once:<br/>PASS or FAIL]
+  CR -- FAIL: fix, then it re-checks<br/>only its findings --> C
   CR -- PASS --> D[Done]
   R -- no, text --> CK[checker, when it<br/>goes to other people]
   CK --> D
@@ -29,8 +29,8 @@ flowchart LR
 | a plan, schedule, checklist | `planner` |
 | tables, numbers, formulas | `data-helper` |
 | a second look before it goes out | `checker` |
-| a code change (fix, feature, refactor) | `code-reviewer` after the change |
-| tests, builds, long commands | `test-runner` |
+| a finished code change (feature, bug, refactor) | `code-reviewer`, once per change, not after each small fix |
+| running tests, a build or a linter | `test-runner`: the tests for the change first, the full suite only when needed |
 
 ## Worth knowing
 
