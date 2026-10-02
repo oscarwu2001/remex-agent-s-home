@@ -428,6 +428,13 @@ function totalTokens(t) {
   return t.input + t.output + t.cacheRead + t.cacheWrite;
 }
 
+// Cost weighting, in fresh-input-token equivalents. Cache reads cost about a
+// tenth of fresh input, cache writes a little more than it, output several
+// times it; the report states this, so heavy cache re-reads do not look like
+// fresh spending.
+const COST_WEIGHTS = { input: 1, cacheWrite: 1.25, cacheRead: 0.1, output: 5 };
+const weighted = (t) => Object.entries(COST_WEIGHTS).reduce((n, [k, w]) => n + (t?.[k] ?? 0) * w, 0);
+
 // Summary of a set of runs of one agent type.
 function summarise(runs) {
   const ended = runs.filter((r) => r.outcome !== 'unknown');
@@ -435,7 +442,11 @@ function summarise(runs) {
   // Times come from every run with a recorded end (a background run that
   // has no notification but whose transcript stops still has one).
   const durations = runs.map((r) => r.durationMs).filter((d) => d !== undefined).sort((a, b) => a - b);
-  const tokens = runs.filter((r) => r.linked).map((r) => totalTokens(r.tokens)).sort((a, b) => a - b);
+  const linked = runs.filter((r) => r.linked);
+  const tokens = linked.map((r) => totalTokens(r.tokens)).sort((a, b) => a - b);
+  const costs = linked.map((r) => weighted(r.tokens)).sort((a, b) => a - b);
+  const models = {};
+  for (const r of runs) if (r.model) models[r.model] = (models[r.model] || 0) + 1;
   const toolCalls = runs.reduce((k, r) => k + r.toolCalls, 0);
   const toolErrors = runs.reduce((k, r) => k + r.toolErrors, 0);
   const verdicts = {};
@@ -456,6 +467,9 @@ function summarise(runs) {
     toolErrorRate: toolCalls ? toolErrors / toolCalls : undefined,
     medianTokens: quantile(tokens, 0.5),
     totalTokens: tokens.reduce((a, b) => a + b, 0),
+    medianWeighted: quantile(costs, 0.5),
+    totalWeighted: costs.reduce((a, b) => a + b, 0),
+    models,
     verdicts,
   };
 }
@@ -466,22 +480,29 @@ function summarise(runs) {
 //   reliability 40  finished / ended
 //   right first 20  1 - re-run rate
 //   speed       20  baseline median duration / this median, capped at 1
-//   efficiency  20  baseline median tokens / this median, capped at 1
+//   efficiency  20  baseline median weighted tokens / this median, capped at 1
 //
 // A part that cannot be measured (no finished run with a time, no linked
 // token data, no baseline) is left out, never given full marks, and the
 // score is scaled over the parts that were measured.
 const WEIGHTS = { reliability: 40, rightFirst: 20, speed: 20, efficiency: 20 };
 
-function score(summary, baseline) {
+function ratio(base, now) {
+  return base > 0 && now > 0 ? Math.min(1, base / now) : undefined;
+}
+
+// `byMode`, when given, replaces the speed and efficiency fractions: a
+// period's foreground runs are judged against the agent's foreground median
+// and its background runs against its background median, then the two are
+// weighted by how many runs each fraction covers.
+function score(summary, baseline, byMode) {
   if (summary.runs < MIN_RUNS_FOR_SCORE) return { value: undefined, reason: `fewer than ${MIN_RUNS_FOR_SCORE} runs` };
   if (summary.successRate === undefined) return { value: undefined, reason: 'no run has ended yet' };
-  const ratio = (base, now) => (base > 0 && now > 0 ? Math.min(1, base / now) : undefined);
   const fraction = {
     reliability: summary.successRate,
     rightFirst: summary.rerunRate === undefined ? undefined : 1 - summary.rerunRate,
-    speed: baseline ? ratio(baseline.medianMs, summary.medianMs) : undefined,
-    efficiency: baseline ? ratio(baseline.medianTokens, summary.medianTokens) : undefined,
+    speed: byMode ? byMode.speed : baseline ? ratio(baseline.medianMs, summary.medianMs) : undefined,
+    efficiency: byMode ? byMode.efficiency : baseline ? ratio(baseline.medianWeighted, summary.medianWeighted) : undefined,
   };
   const parts = {};
   let got = 0;
@@ -528,16 +549,35 @@ function rollUp({ runs, sessions }) {
   const overall = Object.fromEntries(
     [...groupBy(runs, (r) => r.type)].map(([type, list]) => [type, summarise(list)]),
   );
+  // Foreground and background times are not comparable, so each mode has
+  // its own baseline and a period is judged mode by mode (see score).
+  const modeOf = (r) => r.mode ?? 'foreground';
+  const baselines = new Map(
+    [...groupBy(runs, (r) => `${r.type}\t${modeOf(r)}`)].map(([k, list]) => [k, summarise(list)]),
+  );
+  const byMode = (type, rs) => {
+    const acc = { speed: [0, 0], efficiency: [0, 0] };
+    for (const [mode, list] of groupBy(rs, modeOf)) {
+      const now = summarise(list);
+      const base = baselines.get(`${type}\t${mode}`);
+      const timed = list.filter((r) => r.durationMs !== undefined).length;
+      const counted = list.filter((r) => r.linked).length;
+      const speed = ratio(base.medianMs, now.medianMs);
+      const efficiency = ratio(base.medianWeighted, now.medianWeighted);
+      if (speed !== undefined) { acc.speed[0] += speed * timed; acc.speed[1] += timed; }
+      if (efficiency !== undefined) { acc.efficiency[0] += efficiency * counted; acc.efficiency[1] += counted; }
+    }
+    const mean = ([sum, n]) => (n ? sum / n : undefined);
+    return { speed: mean(acc.speed), efficiency: mean(acc.efficiency) };
+  };
   const period = (keyFn) => {
     const out = [];
     for (const [key, list] of [...groupBy(runs, (r) => keyFn(r.start))].sort()) {
       for (const [type, rs] of groupBy(list, (r) => r.type)) {
         const summary = summarise(rs);
-        // Foreground and background times are not comparable: a period that
-        // mixes them is left unscored rather than scored on a blend.
-        const mixed = new Set(rs.map((r) => r.mode ?? 'foreground')).size > 1;
-        const sc = mixed ? { value: undefined, reason: 'mixes foreground and background runs' } : score(summary, overall[type]);
-        out.push({ period: key, type, ...summary, score: sc });
+        const mixed = new Set(rs.map(modeOf)).size > 1;
+        const sc = score(summary, overall[type], byMode(type, rs));
+        out.push({ period: key, type, ...summary, mixed, score: sc });
       }
     }
     return out;
@@ -561,5 +601,5 @@ function rollUp({ runs, sessions }) {
 }
 
 module.exports = {
-  collect, rollUp, summarise, score, verdictOf, dayKey, weekKey, totalTokens, MIN_RUNS_FOR_SCORE,
+  collect, rollUp, summarise, score, verdictOf, dayKey, weekKey, totalTokens, COST_WEIGHTS, weighted, MIN_RUNS_FOR_SCORE,
 };

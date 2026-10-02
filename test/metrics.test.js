@@ -119,8 +119,8 @@ test('malformed lines are counted, not fatal', () => {
 });
 
 test('score parts: reliability, right first time, and speed/efficiency against the own baseline', () => {
-  const summary = { runs: 4, successRate: 0.75, rerunRate: 0.25, medianMs: 120_000, medianTokens: 2000 };
-  const baseline = { medianMs: 60_000, medianTokens: 4000 };
+  const summary = { runs: 4, successRate: 0.75, rerunRate: 0.25, medianMs: 120_000, medianWeighted: 2000 };
+  const baseline = { medianMs: 60_000, medianWeighted: 4000 };
   const sc = score(summary, baseline);
   assert.deepEqual(sc.parts, { reliability: 30, rightFirst: 15, speed: 10, efficiency: 20 });
   assert.equal(sc.value, 75);
@@ -161,7 +161,7 @@ test('rollUp gives daily and weekly rows per agent', () => {
 });
 
 test('a part that could not be measured is left out, not given full marks', () => {
-  const sc = score({ runs: 5, successRate: 0.5, rerunRate: 0, medianMs: 60_000, medianTokens: undefined }, { medianMs: 60_000, medianTokens: 1000 });
+  const sc = score({ runs: 5, successRate: 0.5, rerunRate: 0, medianMs: 60_000, medianWeighted: undefined }, { medianMs: 60_000, medianWeighted: 1000 });
   assert.deepEqual(sc.missing, ['efficiency']);
   // reliability 20/40 + right first 20/20 + speed 20/20 = 60 of 80 possible
   assert.equal(sc.value, 75);

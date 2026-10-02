@@ -317,6 +317,15 @@ function kpi(label, value, delta) {
   return `<div class="tile"><div class="tile-label">${label}</div><div class="tile-value">${value}</div>${delta ? `<div class="tile-delta">${delta}</div>` : ''}</div>`;
 }
 
+// The models an agent ran on, most-used first: "sonnet-5-5 ×5, opus-5-5 ×2".
+// Only names; a run with no model on record is left out.
+function modelsText(models) {
+  const list = Object.entries(models ?? {}).sort((a, b) => b[1] - a[1]);
+  if (!list.length) return '—';
+  const short = (m) => m.replace(/^claude-/, '');
+  return list.length === 1 ? short(list[0][0]) : list.map(([m, n]) => `${short(m)} ×${n}`).join(', ');
+}
+
 function deltaText(now, before, fmt, upIsGood = true) {
   if (now === undefined || before === undefined) return 'no earlier period to compare';
   const diff = now - before;
@@ -494,7 +503,7 @@ function costSections({ cost, opt, stats, days }) {
 
   <section class="card">
     <h2>Foreground and background times</h2>
-    <p class="muted">Median / p90 (runs). A background run is timed from its launch to the helper's last transcript line or its completion notice, whichever is later, not to the launch's immediate return. Runs with no recorded end are counted on their own and left out of the times; weeks that mix the two kinds are not scored.</p>
+    <p class="muted">Median / p90 (runs). A background run is timed from its launch to the helper's last transcript line or its completion notice, whichever is later, not to the launch's immediate return. Runs with no recorded end are counted on their own and left out of the times. The score compares foreground runs only with foreground runs, and background with background.</p>
     <table><thead><tr><th>Agent</th><th class="num">Foreground</th><th class="num">Background</th><th class="num">No recorded end</th></tr></thead>
       <tbody>${timingRows || '<tr><td colspan="4" class="muted">—</td></tr>'}</tbody></table>
   </section>
@@ -544,14 +553,14 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
     dailyByType.get(r.type).set(r.period, r.runs);
   }
 
-  const scoreCell = (sc) => {
+  const scoreCell = (sc, mixed) => {
     if (sc.value === undefined) return `<td class="num muted" title="Not scored: ${esc(sc.reason)}">—</td>`;
     const p = sc.parts;
     const label = { reliability: 'Reliability', rightFirst: 'Right first time', speed: 'Speed', efficiency: 'Efficiency' };
     const max = { reliability: 40, rightFirst: 20, speed: 20, efficiency: 20 };
     const title = Object.keys(label)
       .map((k) => (k in p ? `${label[k]} ${p[k].toFixed(0)}/${max[k]}` : `${label[k]} not measured`))
-      .join(' · ');
+      .join(' · ') + (mixed ? ' · foreground and background runs each judged against their own median' : '');
     return `<td class="num" title="${title}"><strong>${sc.value}</strong></td>`;
   };
 
@@ -563,13 +572,14 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
     return `<tr>
       <th scope="row"><span class="swatch s${typeSlot(t)}"></span>${esc(t)}</th>
       <td>${esc(roomName[roomFor(t, roomOverrides)] ?? '')}</td>
+      <td>${esc(modelsText(o.models))}</td>
       <td class="num">${o.runs}</td>
-      ${scoreCell(lastWeek ? lastWeek.score : o.score)}
+      ${scoreCell(lastWeek ? lastWeek.score : o.score, lastWeek?.mixed)}
       <td class="num">${pct(o.successRate)}</td>
       <td class="num">${pct(o.rerunRate)}</td>
       <td class="num">${dur(o.medianMs)}</td>
       <td class="num">${dur(o.p90Ms)}</td>
-      <td class="num">${compact(o.medianTokens)}</td>
+      <td class="num" title="${compact(o.medianTokens)} raw">${compact(o.medianWeighted)}</td>
       <td class="num">${num(o.toolCallsPerRun, 1)}</td>
       <td class="num">${pct(o.toolErrorRate)}</td>
       <td>${esc(verdicts)}</td>
@@ -580,7 +590,7 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
   const weeklyRows = roll.weekly.sort((a, b) => a.period.localeCompare(b.period) || a.type.localeCompare(b.type)).map((w) => `<tr>
       <td>${w.period}</td><th scope="row">${esc(w.type)}</th><td class="num">${w.runs}</td>
       <td class="num">${w.score.value ?? '—'}</td><td class="num">${pct(w.successRate)}</td><td class="num">${pct(w.rerunRate)}</td>
-      <td class="num">${dur(w.medianMs)}</td><td class="num">${compact(w.medianTokens)}</td></tr>`).join('');
+      <td class="num">${dur(w.medianMs)}</td><td class="num">${compact(w.medianWeighted)}</td></tr>`).join('');
 
   const notes = [
     'Counts below cover every file read, which includes the period before this one (used for the comparisons).',
@@ -671,18 +681,18 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     ? `${all.runs >= before.runs ? '▲' : '▼'} ${num(Math.abs(all.runs - before.runs))} vs the period before` : 'no earlier period to compare')}
     ${kpi('Finished successfully', pct(all.successRate), deltaText(all.successRate, before.successRate, (d) => `${Math.round(d * 100)} pts`))}
     ${kpi('Median helper time', dur(all.medianMs), deltaText(all.medianMs, before.medianMs, dur, false))}
-    ${kpi('Tokens used by helpers', compact(all.totalTokens), prevRuns.length && before.totalTokens !== undefined
-    ? `${all.totalTokens >= before.totalTokens ? '▲' : '▼'} ${compact(Math.abs(all.totalTokens - before.totalTokens))} vs the period before` : 'no earlier period to compare')}
+    ${kpi('Helper cost, weighted tokens', compact(all.totalWeighted), `${compact(all.totalTokens)} raw, mostly cache re-reads at a tenth of the price${prevRuns.length
+    ? ` · ${all.totalWeighted >= before.totalWeighted ? '▲' : '▼'} ${compact(Math.abs(all.totalWeighted - before.totalWeighted))} vs the period before` : ''}`)}
   </section>
 
   <section class="card">
     <h2>Scorecard</h2>
-    <p class="muted">Score is for each agent's latest week; hover a score to see its four parts. Times and tokens are medians over the whole period.</p>
+    <p class="muted">Score is for each agent's latest week; hover a score to see its four parts. Times and tokens are medians over the whole period. Weighted tokens count what a run costs (cache re-reads at a tenth); hover one for the raw count. Model is what the helper ran on.</p>
     <table>
-      <thead><tr><th>Agent</th><th>Room</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
-        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">p90 time</th><th class="num">Tokens / run</th>
+      <thead><tr><th>Agent</th><th>Room</th><th>Model</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
+        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">p90 time</th><th class="num">Weighted / run</th>
         <th class="num">Tool calls / run</th><th class="num">Tool errors</th><th>Verdicts</th><th>Last 14 days</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="13" class="muted">No helper runs in this period.</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="14" class="muted">No helper runs in this period.</td></tr>'}</tbody>
     </table>
   </section>
 
@@ -698,7 +708,7 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     ${weeklyScores(roll.weekly, typeSlot)}
     <details><summary>Show the weekly numbers</summary>
       <table><thead><tr><th>Week</th><th>Agent</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
-        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">Tokens / run</th></tr></thead>
+        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">Weighted / run</th></tr></thead>
       <tbody>${weeklyRows}</tbody></table>
     </details>
   </section>
@@ -717,8 +727,8 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     <dl class="score">
       <dt>Reliability, 40</dt><dd>Share of ended runs that finished (not failed, not stopped).</dd>
       <dt>Right first time, 20</dt><dd>Share of runs that were not a re-run: the same session calling the same agent again within 30 minutes of it failing or being stopped.</dd>
-      <dt>Speed, 20</dt><dd>This week's median time against the agent's own median for the period. Agents are never compared with each other.</dd>
-      <dt>Efficiency, 20</dt><dd>This week's median tokens per run against the agent's own median for the period.</dd>
+      <dt>Speed, 20</dt><dd>This week's median time against the agent's own median for the period. Foreground and background runs are each compared with their own kind, so a week that mixes them is fair. Agents are never compared with each other.</dd>
+      <dt>Efficiency, 20</dt><dd>This week's median weighted tokens per run against the agent's own median for the period, again kind by kind.</dd>
     </dl>
     <p class="muted">An agent needs at least 3 runs in a week to be scored. Treat the score as a prompt to look closer, not a verdict: a reviewer that answers FAIL is doing its job, so its verdicts never lower its score.</p>
   </section>
@@ -868,10 +878,12 @@ function run(argv) {
     median_seconds: r.medianMs === undefined ? undefined : Math.round(r.medianMs / 1000),
     p90_seconds: r.p90Ms === undefined ? undefined : Math.round(r.p90Ms / 1000),
     median_tokens: r.medianTokens === undefined ? undefined : Math.round(r.medianTokens),
+    median_weighted_tokens: r.medianWeighted === undefined ? undefined : Math.round(r.medianWeighted),
+    models: modelsText(r.models), mixed_modes: r.mixed ? 'yes' : 'no',
     tool_error_rate: r.toolErrorRate?.toFixed(3), score: r.score.value,
   });
   const periodCols = ['period', 'agent', 'runs', 'finished', 'failed', 'stopped', 'unknown', 'success_rate', 'rerun_rate',
-    'median_seconds', 'p90_seconds', 'median_tokens', 'tool_error_rate', 'score'];
+    'median_seconds', 'p90_seconds', 'median_tokens', 'median_weighted_tokens', 'models', 'mixed_modes', 'tool_error_rate', 'score'];
   fs.writeFileSync(path.join(opt.out, `runs-${stamp}.csv`), csv(runRows, runCols));
   fs.writeFileSync(path.join(opt.out, `daily-${stamp}.csv`), csv(roll.daily.map(periodRow), periodCols));
   fs.writeFileSync(path.join(opt.out, `weekly-${stamp}.csv`), csv(roll.weekly.map(periodRow), periodCols));

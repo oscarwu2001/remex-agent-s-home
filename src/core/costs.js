@@ -8,14 +8,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { totalTokens } = require('./metrics');
+const { totalTokens, COST_WEIGHTS, weighted } = require('./metrics');
 
-// Cost weighting, in fresh-input-token equivalents. Cache reads cost about a
-// tenth of fresh input, cache writes a little more than it, output several
-// times it; the report states this, so heavy cache re-reads do not look like
-// fresh spending.
-const COST_WEIGHTS = { input: 1, cacheWrite: 1.25, cacheRead: 0.1, output: 5 };
-const weighted = (t) => Object.entries(COST_WEIGHTS).reduce((n, [k, w]) => n + (t?.[k] ?? 0) * w, 0);
+// The cost weighting (COST_WEIGHTS, weighted) lives in metrics.js, which
+// scores efficiency on it; it is re-exported here for the report.
 
 function quantile(sorted, q) {
   if (!sorted.length) return undefined;

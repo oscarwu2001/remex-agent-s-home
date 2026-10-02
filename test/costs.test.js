@@ -164,10 +164,15 @@ test('skills: names without plugin prefix, sources, duplicates, and sizes for lo
   assert.equal(loads.find((l) => l.skill === 'tdd').bytesEach, 11, 'the plugin named in the load');
 });
 
-test('weeks that mix foreground and background runs are not scored', () => {
-  const mk = (i, mode) => ({ type: 'runner', start: T0 + i * 1000, mode, outcome: 'finished', durationMs: 1000, tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, linked: true, toolCalls: 0, toolErrors: 0 });
-  const roll = rollUp({ runs: [mk(1, 'foreground'), mk(2, 'background'), mk(3, 'foreground')], sessions: [] });
-  assert.match(roll.weekly[0].score.reason, /mixes foreground and background/);
+test('a week that mixes foreground and background runs is scored mode by mode', () => {
+  const mk = (i, mode, durationMs) => ({ type: 'runner', start: T0 + i * 1000, mode, outcome: 'finished', durationMs, tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, linked: true, toolCalls: 0, toolErrors: 0 });
+  // Background runs take far longer, but each is at its own mode's median,
+  // so the mix does not cost speed points.
+  const roll = rollUp({ runs: [mk(1, 'foreground', 1000), mk(2, 'background', 600_000), mk(3, 'foreground', 1000)], sessions: [] });
+  const w = roll.weekly[0];
+  assert.equal(w.mixed, true);
+  assert.equal(w.score.value, 100);
+  assert.equal(w.score.parts.speed, 20);
 });
 
 test('before and after a date', () => {

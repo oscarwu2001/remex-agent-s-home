@@ -201,6 +201,22 @@ test('a settings.json that is a symlink stays a symlink; its target gets the ent
   assert.equal(JSON.parse(fs.readFileSync(real, 'utf8')).hooks.UserPromptSubmit.length, 1);
 });
 
+test('the coding reminders fire on a finished change or a test run, not on every fix or every log', { skip: !hasBash && 'no bash here' }, () => {
+  const claude = tmp();
+  installPack(PACK, claude, ['code-reviewer', 'test-runner', 'team-reminders']);
+  const fired = (prompt) => {
+    const out = spawnSync('bash', [path.join(claude, 'hooks', 'agents-home-router.sh')], { input: JSON.stringify({ prompt }), encoding: 'utf8' }).stdout;
+    return ['code-reviewer', 'test-runner'].filter((a) => out.includes(a));
+  };
+  assert.deepEqual(fired('fix the typo on line 3'), [], 'a small fix is not a whole change');
+  assert.deepEqual(fired('check the logs from last night'), []);
+  assert.deepEqual(fired('build a new feature for the export'), ['code-reviewer']);
+  assert.deepEqual(fired('run the tests please'), ['test-runner']);
+  assert.deepEqual(fired('the build fails after the refactor'), ['code-reviewer', 'test-runner']);
+  assert.match(spawnSync('bash', [path.join(claude, 'hooks', 'agents-home-router.sh')], { input: JSON.stringify({ prompt: 'implement it' }), encoding: 'utf8' }).stdout,
+    /once/, 'the reviewer is asked for once per change');
+});
+
 test('the reminder hook exits 0 on empty or broken input, and reads past an escaped line break', { skip: !hasBash && 'no bash here' }, () => {
   const claude = tmp();
   installPack(PACK, claude, ['test-runner', 'team-reminders']);

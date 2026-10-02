@@ -23,10 +23,13 @@ fits() { printf '%s' "$prompt" | grep -Eq "$1"; }
 tip() { [ -f "$dir/agents/$1.md" ] && tips="$tips
 - $2" && fired="$fired${fired:+,}$1"; }
 
-fits '\b(implement|refactor|fix|bug|feature|endpoint|pull request|merge request|commit|change the code|add (a|an|the) (function|method|class|test))\b' \
-  && tip code-reviewer 'After you change code, give the change to the code-reviewer agent and fix what it finds before you say it is done.'
-fits '\b(tests?|pytest|jest|vitest|build|lint|ci|failing|traceback|stack trace|logs?)\b' \
-  && tip test-runner 'Run tests, builds and long commands through the test-runner agent and work from its summary.'
+# Coding reminders. "fix" alone is left out on purpose: it is in almost every
+# prompt of a debugging loop, and a review after each small fix costs a
+# review per round for the same change.
+fits '\b(implement|refactor|bug|feature|endpoint|pull request|merge request|commit|change the code|add (a|an|the) (function|method|class|test))\b' \
+  && tip code-reviewer 'When the whole code change is finished (not after each small fix), give it to the code-reviewer agent once, fix what it finds, and ask it to re-check only those findings.'
+fits '\b(run (the )?tests?|tests? (fail|fails|failing|failed|pass)|test suite|unit tests?|pytest|jest|vitest|npm (run )?test|lint(er|ing)?|eslint|ruff|mypy|tsc|(the )?build (fails|failed|failing|is broken|breaks))\b' \
+  && tip test-runner 'Run tests, builds and linters through the test-runner agent: the tests for this change first, the full suite only when needed.'
 fits '\b(e-?mails?|letter|draft|rewrite|reword|announcement|reply|translate|tone)\b' \
   && tip writer 'For writing or rewriting text, use the writer agent.'
 fits '\b(summari[sz]e|summary|key points|minutes|action items|tl;?dr)\b' \
