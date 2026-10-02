@@ -5,18 +5,25 @@
 // and writes a self-contained HTML report plus CSV files. Run from the app
 // (Settings > Performance report) or from the command line.
 //
-//   npm run report                 last 28 days
-//   npm run report -- --days 7     last 7 days
-//   npm run report -- --out dir    somewhere other than out/reports
+//   npm run report                                last 28 days
+//   npm run report -- --days 7                    last 7 days
+//   npm run report -- --since 2026-09-01 --until 2026-09-30
+//   npm run report -- --compare 2026-09-24        before / after a change
+//   npm run report -- --details                   show Agent-call descriptions
+//   npm run report -- --out dir                   somewhere other than out/reports
 //
-// The report holds counts, durations, token numbers and one-word verdicts.
-// It never holds prompts, results, file names, commands or project names
-// (add --by-project to include project names in runs.csv).
+// The report holds counts, durations, token numbers, names and one-word
+// verdicts. It never holds results, file names, commands or project names
+// (add --by-project for project names in runs.csv). Agent-call descriptions
+// and the first line of a helper's prompt appear only with --details, the
+// way privacy mode works in the app.
 
 const fs = require('fs');
 const path = require('path');
 const { collect, rollUp, summarise, dayKey, totalTokens } = require('../core/metrics');
 const { teamwork, readInventory, YOU } = require('../core/teamwork');
+const costs = require('../core/costs');
+const { execFileSync } = require('child_process');
 const { defaultRoots } = require('../core/watcher');
 const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../core/rooms');
 const os = require('os');
@@ -27,19 +34,74 @@ function args(argv) {
   const opt = { days: 28, out: path.join(process.cwd(), 'out', 'reports'), byProject: false, roots: undefined, json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--days') opt.days = Number(argv[++i]);
+    if (a === '--days') {
+      opt.days = Number(argv[++i]);
+      opt.daysGiven = true;
+    }
     else if (a === '--out') opt.out = path.resolve(argv[++i]);
     else if (a === '--by-project') opt.byProject = true;
     else if (a === '--roots') opt.roots = JSON.parse(argv[++i]); // the app passes its own (WSL included)
     else if (a === '--json') opt.json = true; // one JSON line on stdout, for the app
     else if (a === '--stats-only') opt.statsOnly = true; // numbers per agent, no files (the creature screen)
+    else if (a === '--since') opt.since = dateArg('--since', argv[++i]);
+    else if (a === '--until') opt.until = endOfDay(dateArg('--until', argv[++i]));
+    else if (a === '--compare') opt.compare = dateArg('--compare', argv[++i]);
+    else if (a === '--details') opt.details = true;
     else if (a === '--help' || a === '-h') opt.help = true;
     else throw new Error(`Unknown option ${a}. Try --help.`);
   }
   if (!Number.isInteger(opt.days) || opt.days < 1 || opt.days > 365) {
     throw new Error('--days must be a whole number from 1 to 365');
   }
+  if (opt.until !== undefined && opt.since === undefined) throw new Error('--until needs --since');
+  if (opt.since !== undefined && opt.daysGiven) throw new Error('use either --days or --since, not both');
+  if (opt.since !== undefined) {
+    const until = opt.until ?? Date.now();
+    if (until < opt.since) throw new Error('--until is before --since');
+    opt.days = Math.max(1, Math.round((new Date(until).setHours(0, 0, 0, 0) - opt.since) / 86_400_000) + 1);
+    if (opt.days > 366) throw new Error('--since and --until may be at most a year apart');
+  }
   return opt;
+}
+
+// YYYY-MM-DD, as local midnight.
+function dateArg(name, value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : undefined;
+  // 2026-02-31 must not quietly become 3 March.
+  if (!d || d.getFullYear() !== Number(m[1]) || d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3])) {
+    throw new Error(`${name} needs a real date like 2026-09-24`);
+  }
+  return d.getTime();
+}
+
+// The last moment of a day, whatever its length (summer-time changes).
+function endOfDay(t) {
+  const d = new Date(t);
+  d.setDate(d.getDate() + 1);
+  return d.getTime() - 1;
+}
+
+// Which machine and set-up a report comes from: two laptops can have the
+// same transcripts layout but different agents, skills and plugins.
+function machineInfo(claudeDirs) {
+  const dirs = claudeDirs.map((dir) => {
+    let commit;
+    try {
+      commit = execFileSync('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      commit = undefined; // not a git folder, or git is not installed: shown as such
+    }
+    let plugins = [];
+    try {
+      const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+      plugins = Object.entries(settings.enabledPlugins ?? {}).filter(([, on]) => on === true).map(([name]) => name).sort();
+    } catch {
+      plugins = []; // no settings.json, or unreadable: no plugins named
+    }
+    return { dir, commit, plugins };
+  });
+  return { host: os.hostname(), dirs };
 }
 
 // ---- formatting ----------------------------------------------------------------
@@ -339,7 +401,131 @@ function teamSection(team, opt) {
   </section>`;
 }
 
-function page({ opt, roll, runs, prevRuns, days, stats, problems, team }) {
+// ---- the cost sections ----------------------------------------------------------
+
+const k = (n) => (n === undefined ? '—' : compact(Math.round(n)));
+const bytes = (n) => (n === undefined ? '—' : n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`);
+
+// A path shown with the home folder as ~, so the report does not name the user.
+const tilde = (p) => {
+  const home = os.homedir();
+  return home && p.startsWith(home) ? `~${p.slice(home.length)}` : `…${path.sep}${path.basename(p)}`;
+};
+
+function machineLine(machine) {
+  const dirs = machine.dirs.map((d) => `${esc(tilde(d.dir))} at <code>${d.commit ? esc(d.commit) : 'not a git folder'}</code>${d.plugins.length
+    ? `, plugins: ${d.plugins.map(esc).join(', ')}` : ', no plugins enabled'}`).join(' · ');
+  return `<p class="sub">Machine <strong>${esc(machine.host)}</strong> · ${dirs}</p>`;
+}
+
+function costSections({ cost, opt, stats, days }) {
+  const gp = cost.gp;
+  const callerRows = gp.byCaller.map((c) => `<tr><th scope="row">${esc(c.caller)}</th><td class="num">${c.runs}</td>
+    <td class="num">${k(c.tokens)}</td><td class="num">${pct(c.share)}</td><td class="num">${k(c.weighted)}</td>
+    <td class="num">${dur(c.medianMs)}</td><td class="num">${dur(c.p90Ms)}</td><td class="num">${c.background || '—'}</td></tr>`).join('');
+  const flagName = { Explore: 'Explore (mostly Read/Grep/Glob, no edits)', researcher: 'researcher (mostly WebFetch/WebSearch)', runner: 'runner (mostly Bash, no edits)', none: 'needs general-purpose (mixed, or edits)' };
+  const flagRows = gp.flags.map((f) => `<tr><th scope="row">${esc(flagName[f.flag] ?? f.flag)}</th><td class="num">${f.runs}</td>
+    <td class="num">${k(f.tokens)}</td><td class="num">${pct(f.share)}</td></tr>`).join('');
+  const what = (r) => (opt.details
+    ? `${esc(r.description || '—')}${r.promptLine ? `<div class="muted small">${esc(r.promptLine)}</div>` : ''}`
+    : '<span class="muted">hidden (add --details, or turn privacy mode off in the app)</span>');
+  const topRows = gp.expensive.map((r) => `<tr><td>${what(r)}</td><td>${esc(r.caller)}</td><td>${esc(r.mode)}</td><td>${esc(r.model ?? '—')}</td>
+    <td class="num">${k(totalTokens(r.tokens))}</td><td class="num">${k(costs.weighted(r.tokens))}</td><td class="num">${dur(r.durationMs)}</td>
+    <td>${r.flag ? esc(r.flag) : '—'}</td></tr>`).join('');
+
+  const tokenRows = cost.tokens.map((t) => `<tr${t.unattributed ? ' class="muted-row"' : ''}><th scope="row">${esc(t.name)}</th><td class="num">${t.runs}</td>
+    <td class="num">${k(t.input)}</td><td class="num">${k(t.cacheWrite)}</td><td class="num">${k(t.cacheRead)}</td><td class="num">${k(t.output)}</td>
+    <td class="num">${k(t.total)}</td><td class="num"><strong>${k(t.weighted)}</strong></td></tr>`).join('');
+  const matched = stats.matchedByAgentId + stats.matchedByPrompt;
+  const reconcile = `${stats.helperTranscripts} helper transcript${stats.helperTranscripts === 1 ? '' : 's'} read in all: ${stats.matchedByAgentId} matched by agent id,
+    ${stats.matchedByPrompt} by prompt, ${stats.helperTranscripts - matched} unattributed (${cost.unattributed.length} of them in this period, in the row above).`;
+
+  const tm = (x) => (x.runs ? `${dur(x.medianMs)} / ${dur(x.p90Ms)} <span class="muted">(${x.runs})</span>` : '—');
+  const timingRows = cost.timing.map((t) => `<tr><th scope="row">${esc(t.type)}</th><td class="num">${tm(t.foreground)}</td>
+    <td class="num">${tm(t.background)}</td><td class="num">${t.noEnd || '—'}</td></tr>`).join('');
+
+  const split = opt.compare !== undefined;
+  // Big skills (20 KB or more each) stand out: they are the costly loads.
+  const loadRows = cost.loads.map((l) => `<tr${(l.bytesEach ?? 0) >= 20 * 1024 ? ' class="hl"' : ''}><th scope="row">${esc(l.agent)}</th><td>${esc(l.skill)}</td>
+    <td class="num">${l.loads}</td>${split ? `<td class="num">${l.before}</td><td class="num">${l.after}</td>` : ''}
+    <td class="num">${bytes(l.bytesEach)}</td><td class="num">${bytes(l.bytes)}</td></tr>`).join('');
+  const loadTotal = cost.loads.reduce((n, l) => n + (l.bytes ?? 0), 0);
+
+  // Project names only with --by-project, as everywhere else in the report.
+  const srcText = (s) => (s.source === 'local' ? 'local' : s.source === 'plugin' ? `plugin ${s.owner}${s.enabled ? '' : ' (disabled)'}`
+    : opt.byProject ? `project ${s.owner}` : 'project');
+  const dupes = cost.sources.filter((r) => r.duplicate);
+  const srcRow = (r) => `<tr><th scope="row">${esc(r.name)}</th><td>${r.sources.map((x) => esc(srcText(x))).join(', ')}</td>
+    <td>${r.duplicate ? '<strong>⚠ installed twice</strong>' : '—'}</td><td class="num">${bytes(r.sources[0]?.bytes)}</td></tr>`;
+
+  const cmp = cost.compare;
+  const cmpRows = cmp ? cmp.rows.map((r) => `<tr><th scope="row">${esc(r.type)}</th>
+    <td class="num">${r.before.runs}</td><td class="num">${r.after.runs}</td>
+    <td class="num">${k(r.before.weighted)}</td><td class="num">${k(r.after.weighted)}</td>
+    <td class="num">${dur(r.before.medianMs)}</td><td class="num">${dur(r.after.medianMs)}</td>
+    <td class="num">${r.before.skillLoads}</td><td class="num">${r.after.skillLoads}</td></tr>`).join('') : '';
+  const cmpDate = cmp ? dayKey(cmp.at) : '';
+
+  return `
+  <section class="card">
+    <h2>Where general-purpose goes</h2>
+    <p class="muted">${gp.runs} general-purpose run${gp.runs === 1 ? '' : 's'}, ${k(gp.tokens)} tokens. The caller is the skill running the parent's turn when the helper was launched (a typed /command, or a skill Claude loaded in that turn), else "direct".</p>
+    <table><thead><tr><th>Caller</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Share</th><th class="num">Weighted</th>
+      <th class="num">Median time</th><th class="num">p90 time</th><th class="num">Background</th></tr></thead>
+      <tbody>${callerRows || '<tr><td colspan="8" class="muted">No general-purpose runs in this period.</td></tr>'}</tbody></table>
+    <h3>Could have been a typed agent</h3>
+    <p class="muted">From each run's tool mix (70% or more of its calls). A typed agent has a narrower prompt and tool set, and usually a smaller model.</p>
+    <table><thead><tr><th>Looks like</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Share of general-purpose</th></tr></thead>
+      <tbody>${flagRows || '<tr><td colspan="4" class="muted">—</td></tr>'}</tbody></table>
+    <h3>The ${gp.expensive.length || 10} most expensive runs</h3>
+    <table><thead><tr><th>Description and first line</th><th>Caller</th><th>Mode</th><th>Model</th><th class="num">Tokens</th><th class="num">Weighted</th>
+      <th class="num">Time</th><th>Could be</th></tr></thead>
+      <tbody>${topRows || '<tr><td colspan="8" class="muted">—</td></tr>'}</tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Tokens by type</h2>
+    <p class="muted">Weighted = fresh input × ${costs.COST_WEIGHTS.input} + cache write × ${costs.COST_WEIGHTS.cacheWrite} + cache read × ${costs.COST_WEIGHTS.cacheRead} + output × ${costs.COST_WEIGHTS.output}, in fresh-input-token equivalents. Cache reads cost about a tenth of fresh input, so heavy cache re-reading does not look like fresh spending. Each run's own figures are in runs.csv.</p>
+    <table><thead><tr><th>Agent</th><th class="num">Runs</th><th class="num">Fresh input</th><th class="num">Cache write</th><th class="num">Cache read</th>
+      <th class="num">Output</th><th class="num">Total</th><th class="num">Weighted</th></tr></thead>
+      <tbody>${tokenRows || '<tr><td colspan="8" class="muted">—</td></tr>'}</tbody></table>
+    <p class="muted">${reconcile}</p>
+  </section>
+
+  <section class="card">
+    <h2>Foreground and background times</h2>
+    <p class="muted">Median / p90 (runs). A background run is timed from its launch to the helper's last transcript line or its completion notice, whichever is later, not to the launch's immediate return. Runs with no recorded end are counted on their own and left out of the times; weeks that mix the two kinds are not scored.</p>
+    <table><thead><tr><th>Agent</th><th class="num">Foreground</th><th class="num">Background</th><th class="num">No recorded end</th></tr></thead>
+      <tbody>${timingRows || '<tr><td colspan="4" class="muted">—</td></tr>'}</tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Skills loaded inside helpers</h2>
+    <p class="muted">Each load reads the skill's SKILL.md into the helper's context; the size is that file's, and skills of 20 KB or more are highlighted. ${bytes(loadTotal)} loaded in all.${split ? ` Before and after ${cmpDate}.` : ''}</p>
+    <table><thead><tr><th>Agent</th><th>Skill</th><th class="num">Loads</th>${split ? `<th class="num">Before ${cmpDate}</th><th class="num">From ${cmpDate}</th>` : ''}
+      <th class="num">Size each</th><th class="num">Total</th></tr></thead>
+      <tbody>${loadRows || `<tr><td colspan="${split ? 7 : 5}" class="muted">No skill was loaded inside a helper in this period.</td></tr>`}</tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Where skills come from</h2>
+    <p class="muted">Names are matched without their plugin prefix (mattpocock-skills:tdd and tdd are one skill). ${dupes.length ? `${dupes.length} skill${dupes.length === 1 ? ' is' : 's are'} installed from more than one place.` : 'No skill is installed twice.'}</p>
+    ${dupes.length ? `<table><thead><tr><th>Skill</th><th>Sources</th><th>Duplicate</th><th class="num">Size</th></tr></thead><tbody>${dupes.map(srcRow).join('')}</tbody></table>` : ''}
+    <details><summary>Every installed skill (${cost.sources.length})</summary>
+      <table><thead><tr><th>Skill</th><th>Sources</th><th>Duplicate</th><th class="num">Size</th></tr></thead><tbody>${cost.sources.map(srcRow).join('')}</tbody></table>
+    </details>
+  </section>
+  ${cmp ? `
+  <section class="card">
+    <h2>Before and after ${cmpDate}</h2>
+    <p class="muted">The period split at ${cmpDate}. Unattributed helper transcripts: ${cmp.unattributed.before} before, ${cmp.unattributed.after} after.</p>
+    <table><thead><tr><th>Agent</th><th class="num">Runs before</th><th class="num">Runs after</th><th class="num">Weighted before</th><th class="num">Weighted after</th>
+      <th class="num">Median before</th><th class="num">Median after</th><th class="num">Skill loads before</th><th class="num">Skill loads after</th></tr></thead>
+      <tbody>${cmpRows}</tbody></table>
+  </section>` : ''}`;
+}
+
+function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, machine }) {
   const all = summarise(runs);
   const before = summarise(prevRuns);
   const typeOrder = [...roll.types].sort((a, b) => roll.overall[b].runs - roll.overall[a].runs);
@@ -459,6 +645,10 @@ tbody th { font-weight: 600; }
 .spark polyline { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
 details summary { cursor: pointer; color: var(--ink-2); margin-top: 12px; }
 .notes li { color: var(--ink-2); }
+.small { font-size: 12px; }
+tr.hl th, tr.hl td { background: rgba(179, 38, 30, 0.08); }
+tr.muted-row th, tr.muted-row td { color: var(--ink-2); font-style: italic; }
+code { font-size: 12px; }
 h3 { font-size: 14px; font-weight: 600; margin: 20px 0 4px; }
 .flow { fill: none; stroke: var(--s0); stroke-opacity: 0.35; stroke-linecap: round; }
 .flow:hover { stroke-opacity: 0.7; }
@@ -473,7 +663,8 @@ dl.score dd { margin: 0; color: var(--ink-2); }
 <body>
 <main>
   <h1>Agent performance</h1>
-  <p class="sub">Last ${opt.days} day${opt.days === 1 ? '' : 's'} · ${days[0]} to ${days.at(-1)} · generated ${generated.toLocaleString()} from ${stats.files} transcript file${stats.files === 1 ? '' : 's'}</p>
+  <p class="sub">${opt.since !== undefined ? 'Period' : `Last ${opt.days} day${opt.days === 1 ? '' : 's'}`} · ${days[0]} to ${days.at(-1)} · generated ${generated.toLocaleString()} from ${stats.files} transcript file${stats.files === 1 ? '' : 's'}</p>
+  ${machine ? machineLine(machine) : ''}
 
   <section class="kpis" aria-label="Headline numbers">
     ${kpi('Helper runs', num(all.runs), prevRuns.length
@@ -519,6 +710,7 @@ dl.score dd { margin: 0; color: var(--ink-2); }
   </section>
 
   ${teamSection(team, opt)}
+  ${cost ? costSections({ cost, opt, stats, days }) : ''}
 
   <section class="card">
     <h2>How the score works</h2>
@@ -556,16 +748,19 @@ function run(argv) {
     console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 13).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
     return;
   }
-  const now = Date.now();
+  const now = opt.until ?? Date.now();
   const start = new Date(now - (opt.days - 1) * 86_400_000);
   start.setHours(0, 0, 0, 0);
-  const since = start.getTime();
+  const since = opt.since ?? start.getTime();
   const prevSince = since - opt.days * 86_400_000;
+  if (opt.compare !== undefined && (opt.compare <= since || opt.compare > now)) {
+    throw new Error(`--compare ${dayKey(opt.compare)} is not inside the period (${dayKey(since)} to ${dayKey(now)})`);
+  }
 
   const setupProblems = [];
   ({ names: roomName, overrides: roomOverrides } = roomSetup(setupProblems));
   const roots = Array.isArray(opt.roots) && opt.roots.length ? opt.roots : defaultRoots();
-  const data = collect(roots, { since: prevSince, until: now });
+  const data = collect(roots, { since: prevSince, until: now, details: Boolean(opt.details) });
   data.problems.push(...setupProblems);
   const runs = data.runs.filter((r) => r.start >= since);
   const prevRuns = data.runs.filter((r) => r.start < since);
@@ -613,7 +808,22 @@ function run(argv) {
     sessions: sessions.map((x) => ({ ...x, steps: (x.steps ?? []).filter((st) => st.ts >= since) })),
     skills: (data.skills ?? []).filter((u) => u.ts >= since),
   }, inventory);
-  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems, team }));
+  // The cost picture: this period's runs and unattributed helper transcripts.
+  const claudeDirs = [...new Set(roots.map((r) => path.dirname(r)))];
+  const machine = machineInfo(claudeDirs);
+  const unattributed = (data.unattributed ?? []).filter((u) => (u.start ?? 0) >= since);
+  const sources = costs.readSkillSources({ claudeDirs, cwds: data.cwds ?? [], enabledPlugins: machine.dirs.flatMap((d) => d.plugins) });
+  data.problems.push(...sources.problems);
+  const cost = {
+    gp: costs.generalPurpose(runs),
+    tokens: costs.tokensByAgent(runs, unattributed),
+    timing: costs.timingByMode(runs),
+    loads: costs.skillLoadsInHelpers(runs, unattributed, sources.skills, opt.compare),
+    sources: costs.skillSourceRows(sources.skills),
+    compare: opt.compare !== undefined ? costs.compareAt(runs, unattributed, opt.compare) : undefined,
+    unattributed,
+  };
+  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems, team, cost, machine }));
 
   // Sessions get anonymous handles; project names only on request.
   const handle = new Map([...new Set(runs.map((r) => r.sessionId))].map((id, i) => [id, `s${i + 1}`]));
@@ -635,9 +845,23 @@ function run(argv) {
     input_tokens: r.linked ? r.tokens.input : undefined,
     output_tokens: r.linked ? r.tokens.output : undefined,
     cache_read_tokens: r.linked ? r.tokens.cacheRead : undefined,
+    cache_write_tokens: r.linked ? r.tokens.cacheWrite : undefined,
+    weighted_tokens: r.linked ? Math.round(costs.weighted(r.tokens)) : undefined,
+    mode: r.mode,
+    caller: r.caller,
+    model: r.model,
+    matched_by: r.linkedBy ?? 'unmatched',
+    ...Object.fromEntries(['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'Edit', 'Write', 'other'].map((k) => [`tool_${k.toLowerCase()}`, r.tools?.[k] ?? 0])),
+    could_be: r.type === 'general-purpose' ? costs.typedAgentFor(r.tools) : undefined,
+    skill_loads: (r.skillLoads ?? []).map(costs.baseSkill).join(';'),
+    description: opt.details ? r.description : undefined,
+    prompt_first_line: opt.details ? r.promptLine : undefined,
   }));
   const runCols = ['session', ...(opt.byProject ? ['project'] : []), 'agent', 'room', 'started', 'seconds', 'outcome', 'verdict',
-    'rerun', 'background', 'tool_calls', 'tool_errors', 'tokens', 'input_tokens', 'output_tokens', 'cache_read_tokens'];
+    'rerun', 'background', 'mode', 'caller', 'model', 'matched_by', 'tool_calls', 'tool_errors',
+    'tool_read', 'tool_grep', 'tool_glob', 'tool_bash', 'tool_webfetch', 'tool_websearch', 'tool_edit', 'tool_write', 'tool_other',
+    'could_be', 'skill_loads', 'tokens', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'weighted_tokens',
+    ...(opt.details ? ['description', 'prompt_first_line'] : [])];
   const periodRow = (r) => ({
     period: r.period, agent: r.type, runs: r.runs, finished: r.finished, failed: r.failed, stopped: r.stopped, unknown: r.unknown,
     success_rate: r.successRate?.toFixed(3), rerun_rate: r.rerunRate?.toFixed(3),

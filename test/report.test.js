@@ -32,3 +32,13 @@ test('the stats for the Meadow name every agent called in both windows read', ()
   assert.deepEqual(Object.keys(res.tokensByDay).sort(), ['planner', 'writer'], 'tokens per day for both, for the Meadow\'s running total');
   for (const byDay of Object.values(res.tokensByDay)) assert.equal(Object.keys(byDay).length, 1);
 });
+
+test('report dates: impossible days, --until without --since, --days with --since and --compare outside the period are refused', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-report-'));
+  const r = (...a) => () => run([...a, '--stats-only', '--roots', JSON.stringify([root])]);
+  assert.throws(r('--since', '2026-02-31'), /real date/);
+  assert.throws(r('--until', '2026-09-30'), /needs --since/);
+  assert.throws(r('--days', '7', '--since', '2026-09-01'), /either --days or --since/);
+  assert.throws(r('--since', '2026-09-01', '--until', '2026-09-30', '--compare', '2026-10-05'), /not inside the period/);
+  assert.equal(r('--since', '2026-09-01', '--until', '2026-09-30', '--compare', '2026-09-24')().ok, true);
+});

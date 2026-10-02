@@ -31,6 +31,10 @@
 | **Update agents** | Settings → Updates: adds missing team items, turns reminders on, and refreshes pack files the user has not edited (matched against `office-pack/versions.json`). |
 | **Move (an agent)** | An idle agent dragged to another room (or sent there from its chart): `moves` in `layout.json`, `{ agentName: roomId }`, beating a department's list; `rooms.json` still wins over both. |
 | **System log** | `activity.log` and `errors.log` in the app's data folder (`src/core/syslog.js`): agent use and errors, names and times only. With the reminder hook's own log, it shows whether the team framework is really running. |
+| **Caller** | For a helper run in the report: the skill running the parent's turn when it was launched (a typed /command, or a skill Claude loaded in that turn), else "direct". |
+| **Weighted tokens** | Token cost in fresh-input equivalents: input × 1, cache write × 1.25, cache read × 0.1, output × 5 (`COST_WEIGHTS` in `src/core/costs.js`). |
+| **Unattributed** | A helper transcript the report could not match to the call that started it (by agent id, then by prompt). Kept as its own row with its tokens, never dropped. |
+| **Foreground / background run** | Whether the parent waited for the helper. A background run is timed to its own last transcript line or its completion notice. |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |
 

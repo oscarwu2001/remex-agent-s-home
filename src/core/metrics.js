@@ -4,9 +4,11 @@
 // in a date range, what it cost, how long it took and how it ended, rolled up
 // per agent type by day and by week. Read-only, like the rest of the app.
 //
-// Only counts, durations, token numbers and one-word verdicts (PASS/FAIL,
-// Approve/Block) leave this module. No prompt, result text, file name or
-// command is kept.
+// Only counts, durations, token numbers, names (agents, skills, models) and
+// one-word verdicts (PASS/FAIL, Approve/Block) leave this module. No result
+// text, file name or command is kept. A helper's Agent-call description and
+// the first line of its prompt are kept only when asked for (`details`),
+// because privacy mode hides them.
 
 const fs = require('fs');
 const path = require('path');
@@ -86,11 +88,17 @@ function skillName(ev) {
   return name || undefined;
 }
 
-function collect(roots, { since, until = Date.now() } = {}) {
+// The tools whose use is counted per helper run (the rest count as other).
+const TOOL_KINDS = { Read: 'Read', Grep: 'Grep', Glob: 'Glob', Bash: 'Bash', WebFetch: 'WebFetch', WebSearch: 'WebSearch',
+  Edit: 'Edit', MultiEdit: 'Edit', NotebookEdit: 'Edit', Write: 'Write' };
+const firstLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 140) ?? '';
+
+function collect(roots, { since, until = Date.now(), details = false } = {}) {
   const problems = [];
   const stats = {
     files: 0, lines: 0, malformedLines: 0, unlinkedHelpers: 0, ambiguousHelpers: 0,
     unknownNotifications: 0, untimedSessions: 0,
+    helperTranscripts: 0, matchedByAgentId: 0, matchedByPrompt: 0,
   };
   const sessions = new Map(); // sessionId -> session
   const runs = new Map(); // task tool_use id -> run
@@ -107,10 +115,16 @@ function collect(roots, { since, until = Date.now() } = {}) {
   const session = (id, meta) => {
     let s = sessions.get(id);
     if (!s) {
-      s = { id, project: undefined, start: meta.ts, end: meta.ts, prompts: 0, toolCalls: 0, tokens: emptyTokens(), runs: [], steps: [] };
+      s = {
+        id, project: undefined, cwd: undefined, start: meta.ts, end: meta.ts, prompts: 0, toolCalls: 0, tokens: emptyTokens(), runs: [], steps: [],
+        activeSkill: undefined, // the skill running the current turn, for a helper's caller
+      };
       sessions.set(id, s);
     }
-    if (meta.cwd && !s.project) s.project = path.basename(meta.cwd.replace(/\\/g, '/'));
+    if (meta.cwd && !s.project) {
+      s.cwd = meta.cwd;
+      s.project = path.basename(meta.cwd.replace(/\\/g, '/'));
+    }
     if (meta.ts !== undefined) {
       s.start = s.start === undefined ? meta.ts : Math.min(s.start, meta.ts);
       s.end = s.end === undefined ? meta.ts : Math.max(s.end, meta.ts);
@@ -160,16 +174,32 @@ function collect(roots, { since, until = Date.now() } = {}) {
       };
 
       if (meta.isSidechain) {
-        const key = `${file}#${meta.agentId || 'sidechain'}`;
+        // One stream per helper: by its agent id when known (a helper can
+        // show up both inline and in its own subagents/ file), else per file.
+        const fromName = /agent-([A-Za-z0-9_-]+)\.jsonl$/.exec(file);
+        const agentId = meta.agentId || (fromName && fromName[1]) || undefined;
+        const key = agentId ? `agent:${agentId}` : `${file}#sidechain`;
         let st = streams.get(key);
         if (!st) {
-          st = { sessionId: sid, prompt: undefined, toolCalls: 0, toolErrors: 0, tokens: emptyTokens(), skills: [] };
+          st = {
+            sessionId: sid, agentId, prompt: undefined, toolCalls: 0, toolErrors: 0,
+            tokens: emptyTokens(), skills: [], tools: {}, model: undefined, firstTs: undefined, lastTs: undefined, linked: false,
+          };
           streams.set(key, st);
         }
         noteUsage(st.tokens);
+        if (meta.ts !== undefined) {
+          st.firstTs = st.firstTs === undefined ? meta.ts : Math.min(st.firstTs, meta.ts);
+          st.lastTs = st.lastTs === undefined ? meta.ts : Math.max(st.lastTs, meta.ts);
+        }
+        if (meta.model && !st.model && meta.model !== '<synthetic>') st.model = meta.model;
         for (const ev of events) {
           if (ev.kind === 'user-prompt' && st.prompt === undefined) st.prompt = ev.text;
-          if (ev.kind === 'tool-start' || ev.kind === 'task-start') st.toolCalls += 1;
+          if (ev.kind === 'tool-start' || ev.kind === 'task-start') {
+            st.toolCalls += 1;
+            const kind = TOOL_KINDS[ev.name] ?? 'other';
+            st.tools[kind] = (st.tools[kind] ?? 0) + 1;
+          }
           if (ev.kind === 'tool-end' && ev.isError) st.toolErrors += 1;
           const name = ev.kind === 'tool-start' && skillName(ev);
           if (name && !skillById.has(ev.id)) {
@@ -200,6 +230,9 @@ function collect(roots, { since, until = Date.now() } = {}) {
               id: ev.id, type: ev.subagentType, sessionId: sid, start: ev.ts, end: undefined,
               outcome: undefined, verdict: undefined, background: ev.background, prompt: ev.prompt,
               toolCalls: 0, toolErrors: 0, relayCalls: 0, relayErrors: 0, tokens: emptyTokens(), linked: false,
+              agentId: undefined, model: ev.model, caller: sess.activeSkill ? `/${sess.activeSkill}` : 'direct',
+              tools: {}, skillLoads: [], notifiedAt: undefined, lastSeen: undefined, linkedBy: undefined,
+              ...(details ? { description: ev.description || '', promptLine: firstLine(ev.prompt) } : {}),
             };
             runs.set(ev.id, run);
             sess.runs.push(run);
@@ -210,6 +243,7 @@ function collect(roots, { since, until = Date.now() } = {}) {
           case 'tool-start': {
             sess.toolCalls += 1;
             const name = skillName(ev);
+            if (name) sess.activeSkill = name;
             if (name && !skillById.has(ev.id)) { // a resumed transcript repeats earlier lines
               const use = { name, source: 'claude', by: 'you', sessionId: sid, ts: ev.ts, isError: false };
               skillUses.push(use);
@@ -221,11 +255,16 @@ function collect(roots, { since, until = Date.now() } = {}) {
           case 'tool-end': {
             if (skillById.has(ev.id)) skillById.get(ev.id).isError = ev.isError;
             const run = runs.get(ev.id);
+            if (run && ev.agentId) run.agentId = ev.agentId;
+            // A launch that went to the background returns at once: its end
+            // is the helper's own last line or its notification, not this.
+            if (run && ev.async) run.background = true;
             if (run && !run.background) endRun(run, ev.ts, ev.isError ? 'failed' : 'finished', ev.text);
             break;
           }
           case 'task-notification': {
             const run = runs.get(ev.toolUseId);
+            if (run) run.notifiedAt = ev.ts;
             const outcome = { completed: 'finished', failed: 'failed', killed: 'stopped', stopped: 'stopped' }[ev.status];
             if (!outcome) {
               // An end we cannot read: the run stays unknown, and is counted.
@@ -238,6 +277,9 @@ function collect(roots, { since, until = Date.now() } = {}) {
           case 'user-prompt': {
             const typed = /<command-name>\/?([^<\s]+)<\/command-name>/.exec(ev.text ?? '');
             const key = typed && `${sid}|${ev.ts}|${typed[1]}`;
+            // A typed /command starts a turn run by that skill; any other
+            // prompt starts a turn run by no skill.
+            sess.activeSkill = typed ? typed[1] : undefined;
             if (typed && !skillById.has(key)) {
               skillById.set(key, true);
               const use = { name: typed[1], source: 'typed', by: 'you', sessionId: sid, ts: ev.ts, isError: false };
@@ -258,22 +300,45 @@ function collect(roots, { since, until = Date.now() } = {}) {
   for (const { usage, owner } of usageById.values()) addUsage(owner, usage);
   for (const [owner, usage] of orphanUsage) addUsage(owner, usage);
 
-  // Attach helper transcripts to their runs by exact prompt, never by guess.
-  // Two unlinked runs with the same prompt cannot be told apart: counted.
+  // Attach helper transcripts to their runs: by the helper's agent id when
+  // the call's result names it, else by exact prompt in the same session,
+  // never by guess. Two unlinked runs with the same prompt cannot be told
+  // apart; what stays unmatched is reported as unattributed, with its tokens.
+  const byAgentId = new Map([...runs.values()].filter((r) => r.agentId).map((r) => [r.agentId, r]));
+  const link = (st, run, how) => {
+    for (const use of st.skills) use.by = run.type;
+    st.linked = true;
+    run.linked = true;
+    run.linkedBy = how;
+    run.toolCalls = st.toolCalls;
+    run.toolErrors = st.toolErrors;
+    run.tools = { ...st.tools };
+    run.model = st.model ?? run.model;
+    run.lastSeen = st.lastTs;
+    run.skillLoads = st.skills.map((u) => u.name);
+    for (const k of Object.keys(run.tokens)) run.tokens[k] += st.tokens[k];
+  };
+  stats.helperTranscripts = streams.size;
   for (const st of streams.values()) {
+    const run = st.agentId && byAgentId.get(st.agentId);
+    if (run && !run.linked) {
+      link(st, run, 'agent id');
+      stats.matchedByAgentId += 1;
+    }
+  }
+  for (const st of streams.values()) {
+    if (st.linked) continue;
     const sess = sessions.get(st.sessionId);
-    const candidates = (sess ? sess.runs : []).filter((r) => !r.linked && samePrompt(r.prompt, st.prompt));
+    // Never across agent ids: a run that names a different helper is not this one.
+    const candidates = (sess ? sess.runs : []).filter((r) => !r.linked && !(r.agentId && st.agentId && r.agentId !== st.agentId)
+      && samePrompt(r.prompt, st.prompt));
     if (candidates.length !== 1) {
       if (candidates.length > 1) stats.ambiguousHelpers += 1;
       else stats.unlinkedHelpers += 1;
       continue;
     }
-    const [run] = candidates;
-    for (const use of st.skills) use.by = run.type;
-    run.linked = true;
-    run.toolCalls = st.toolCalls;
-    run.toolErrors = st.toolErrors;
-    for (const k of Object.keys(run.tokens)) run.tokens[k] += st.tokens[k];
+    link(st, candidates[0], 'prompt');
+    stats.matchedByPrompt += 1;
   }
   // Runs with no transcript of their own fall back to relayed counts.
   for (const run of runs.values()) {
@@ -289,6 +354,13 @@ function collect(roots, { since, until = Date.now() } = {}) {
   const allRuns = [...runs.values()].filter((r) => inRange(r.start));
   markReruns(allRuns);
   for (const r of allRuns) {
+    r.mode = r.background ? 'background' : 'foreground';
+    // A background helper runs on after its launch returns: it ends with its
+    // own last transcript line or its completion notice, whichever is later.
+    if (r.background) {
+      const ends = [r.notifiedAt, r.lastSeen].filter((t) => t !== undefined && t >= r.start);
+      r.end = ends.length ? Math.max(...ends) : undefined;
+    }
     r.durationMs = r.end !== undefined ? Math.max(0, r.end - r.start) : undefined;
     if (r.outcome === undefined) r.outcome = 'unknown';
     delete r.prompt; // content never leaves this module
@@ -307,7 +379,16 @@ function collect(roots, { since, until = Date.now() } = {}) {
         : { kind: 'skill', ts: st.ts, name: st.use.name, source: st.use.source }));
   }
 
-  return { runs: allRuns, sessions: allSessions, skills, stats, problems: [...new Set(problems)] };
+  // Helper transcripts that match no call: kept, with their tokens.
+  const unattributed = [...streams.values()].filter((st) => !st.linked && inRange(st.firstTs ?? st.lastTs)).map((st) => ({
+    sessionId: st.sessionId, agentId: st.agentId, model: st.model, start: st.firstTs, end: st.lastTs,
+    tokens: st.tokens, toolCalls: st.toolCalls, tools: { ...st.tools }, skillLoads: st.skills.map((u) => u.name),
+  }));
+  // Working folders, only to find project skills; the report never prints them.
+  const cwds = [...new Set(allSessions.map((x) => x.cwd).filter(Boolean))];
+  for (const x of allSessions) delete x.activeSkill;
+
+  return { runs: allRuns, sessions: allSessions, skills, unattributed, cwds, stats, problems: [...new Set(problems)] };
 }
 
 // A run is a re-run when the same session calls the same agent type again
@@ -351,7 +432,9 @@ function totalTokens(t) {
 function summarise(runs) {
   const ended = runs.filter((r) => r.outcome !== 'unknown');
   const finished = ended.filter((r) => r.outcome === 'finished').length;
-  const durations = ended.map((r) => r.durationMs).filter((d) => d !== undefined).sort((a, b) => a - b);
+  // Times come from every run with a recorded end (a background run that
+  // has no notification but whose transcript stops still has one).
+  const durations = runs.map((r) => r.durationMs).filter((d) => d !== undefined).sort((a, b) => a - b);
   const tokens = runs.filter((r) => r.linked).map((r) => totalTokens(r.tokens)).sort((a, b) => a - b);
   const toolCalls = runs.reduce((k, r) => k + r.toolCalls, 0);
   const toolErrors = runs.reduce((k, r) => k + r.toolErrors, 0);
@@ -364,6 +447,7 @@ function summarise(runs) {
     failed: ended.filter((r) => r.outcome === 'failed').length,
     stopped: ended.filter((r) => r.outcome === 'stopped').length,
     unknown: runs.length - ended.length,
+    noEnd: runs.filter((r) => r.durationMs === undefined).length,
     successRate: ended.length ? finished / ended.length : undefined,
     rerunRate: runs.length ? runs.filter((r) => r.rerun).length / runs.length : undefined,
     medianMs: quantile(durations, 0.5),
@@ -449,7 +533,11 @@ function rollUp({ runs, sessions }) {
     for (const [key, list] of [...groupBy(runs, (r) => keyFn(r.start))].sort()) {
       for (const [type, rs] of groupBy(list, (r) => r.type)) {
         const summary = summarise(rs);
-        out.push({ period: key, type, ...summary, score: score(summary, overall[type]) });
+        // Foreground and background times are not comparable: a period that
+        // mixes them is left unscored rather than scored on a blend.
+        const mixed = new Set(rs.map((r) => r.mode ?? 'foreground')).size > 1;
+        const sc = mixed ? { value: undefined, reason: 'mixes foreground and background runs' } : score(summary, overall[type]);
+        out.push({ period: key, type, ...summary, score: sc });
       }
     }
     return out;

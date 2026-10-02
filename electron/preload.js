@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('agentsHome', {
   logTail: (which) => ipcRenderer.invoke('home:log-tail', which),
   logOpen: () => ipcRenderer.invoke('home:log-open'),
   logError: (info) => ipcRenderer.invoke('home:log-error', info),
-  buildReport: (days) => ipcRenderer.invoke('home:build-report', days),
+  buildReport: (days, details) => ipcRenderer.invoke('home:build-report', days, details),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
   onSnapshot: (fn) => {
     const handler = (_event, snapshot) => fn(snapshot);

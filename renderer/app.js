@@ -2178,7 +2178,7 @@ $('report-open').addEventListener('click', async () => {
   const status = $('report-status');
   status.textContent = 'Reading your transcripts…';
   try {
-    const res = await bridge.buildReport(Number($('report-days').value));
+    const res = await bridge.buildReport(Number($('report-days').value), !prefs.private);
     if (!res.ok) {
       status.textContent = res.error;
       return;
@@ -2499,7 +2499,7 @@ if (!meadowOn) {
     }
     button.disabled = true;
     button.textContent = 'Building report…';
-    const res = await bridge.buildReport(Number($('report-days').value)).catch((err) => ({ ok: false, error: `The report could not be built: ${err.message}` }));
+    const res = await bridge.buildReport(Number($('report-days').value), !prefs.private).catch((err) => ({ ok: false, error: `The report could not be built: ${err.message}` }));
     button.disabled = false;
     button.textContent = 'Report';
     if (!res.ok) {

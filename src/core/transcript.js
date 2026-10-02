@@ -39,6 +39,15 @@ function contentBlocks(message) {
   return [];
 }
 
+// What an Agent call's result says about the helper, only when it says it.
+function agentFields(result, text, idInText) {
+  const out = {};
+  const agentId = typeof result.agentId === 'string' ? result.agentId : idInText ? idInText[1] : undefined;
+  if (agentId) out.agentId = agentId;
+  if (result.isAsync === true || result.status === 'async_launched' || /^\s*Async agent launched/i.test(text)) out.async = true;
+  return out;
+}
+
 function toolResultText(block) {
   if (typeof block.content === 'string') return block.content;
   if (Array.isArray(block.content)) {
@@ -73,6 +82,7 @@ function messageEvents(entry, ts, via) {
           ev.description = typeof input.description === 'string' ? input.description : '';
           ev.prompt = typeof input.prompt === 'string' ? input.prompt : '';
           ev.background = input.run_in_background === true;
+          if (typeof input.model === 'string') ev.model = input.model;
         }
         events.push(ev);
       }
@@ -86,16 +96,23 @@ function messageEvents(entry, ts, via) {
 
   if (entry.type === 'user') {
     let sawResult = false;
+    // Claude Code adds a structured copy of a tool's result; for an Agent
+    // call it names the helper (agentId) and says when it went to the
+    // background ("Async agent launched").
+    const result = entry.toolUseResult && typeof entry.toolUseResult === 'object' ? entry.toolUseResult : {};
     for (const block of blocks) {
       if (block && block.type === 'tool_result') {
         sawResult = true;
+        const text = toolResultText(block);
+        const idInText = /\bagentId:\s*([A-Za-z0-9_-]{4,})/.exec(text);
         events.push({
           kind: 'tool-end',
           id: block.tool_use_id,
           isError: block.is_error === true,
-          text: toolResultText(block),
+          text,
           ts,
           via,
+          ...agentFields(result, text, idInText),
         });
       }
     }

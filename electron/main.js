@@ -285,7 +285,8 @@ app.whenReady().then(() => {
   const reportsDir = path.join(app.getPath('userData'), 'reports');
   let lastReport;
   let reportWin;
-  ipcMain.handle('home:build-report', (_event, days) => new Promise((resolve) => {
+  // `details`: privacy mode is off, so Agent-call descriptions may show.
+  ipcMain.handle('home:build-report', (_event, days, details) => new Promise((resolve) => {
     const n = Number(days);
     if (![7, 28, 90].includes(n)) {
       resolve({ ok: false, error: 'Choose 7, 28 or 90 days.' });
@@ -293,7 +294,7 @@ app.whenReady().then(() => {
     }
     const roots = [...watcher.roots, ...wslWatcher.roots];
     const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
-      ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots)], { stdio: 'pipe' });
+      ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots), ...(details === true ? ['--details'] : [])], { stdio: 'pipe' });
     let err = '';
     let answered = false;
     child.stderr.on('data', (d) => { err += d; });

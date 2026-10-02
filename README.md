@@ -179,8 +179,11 @@ Each line reads `2026-09-30 14:03:12  helper-end     agent=reviewer session=spin
 Press **Report** at the top of the map to build it for the chosen period and open it straight away. Or open **Settings** (the gear), go to **Performance report**, pick a period (7, 28 or 90 days) and choose **Open report**. The report is built in the background from the same folders the app watches, WSL included, and opens in its own window. **Show the files** takes you to the saved HTML and CSV files. You can also build it from a terminal:
 
 ```powershell
-npm run report                 # last 28 days
-npm run report -- --days 7     # last week
+npm run report                                         # last 28 days
+npm run report -- --days 7                             # last week
+npm run report -- --since 2026-09-01 --until 2026-09-30
+npm run report -- --compare 2026-09-24                 # before / after a change
+npm run report -- --details                            # show Agent-call descriptions
 ```
 
 This reads your transcripts (read-only) and writes `out/reports/agent-report-<date>.html`, a self-contained page that opens offline. It also writes `runs`, `daily` and `weekly` CSV files for your own analysis. The page shows:
@@ -188,9 +191,16 @@ This reads your transcripts (read-only) and writes `out/reports/agent-report-<da
 - **Headline numbers:** helper runs, the share that finished, median helper time and tokens used, each compared with the period before.
 - **Scorecard per agent:** runs, a score out of 100, finished %, re-runs, median and p90 time, tokens per run, tool calls per run, tool error rate, PASS/FAIL or Approve/Block verdicts, and a 14-day sparkline.
 - **Charts:** runs per day, weekly score per agent, and how long each agent takes.
+- **Machine and config:** the hostname, the git commit of each `.claude` folder read, and the enabled plugins, so reports from two laptops can be told apart.
+- **Where general-purpose goes:** general-purpose runs grouped by **caller**, meaning the skill running the parent's turn when the helper was launched (`/grilling`, `/code-review`…) or "direct". Each caller gets runs, tokens, share, weighted cost, and median and p90 time. A **could have been typed** table flags runs whose tool mix (70% or more of the working tools) looks like `Explore` (Read/Grep/Glob, no edits), `researcher` (WebFetch/WebSearch) or `runner` (Bash, no edits), with their share of general-purpose tokens. It also lists the 10 most expensive runs with caller, mode, model, tokens and time.
+- **Tokens by type:** fresh input, cache write, cache read and output per agent, plus a **weighted** column in fresh-input-token equivalents (input × 1, cache write × 1.25, cache read × 0.1, output × 5), so cache re-reads don't look like fresh spending. Helper transcripts that match no call are an **unattributed** row with their tokens. A line accounts for every helper transcript: how many were matched by agent id, by prompt, or left unattributed.
+- **Foreground and background times:** each run is labelled. A background run is timed from its launch to the helper's last transcript line or its completion notice, not to the launch's immediate "Async agent launched" return. Runs with no recorded end are counted apart and left out of the times. Weeks that mix the two kinds aren't scored.
+- **Skills loaded inside helpers:** loads per agent and skill, with the SKILL.md size of each load, split before and after `--compare`.
+- **Where skills come from:** local, plugin or project, with names matched without their plugin prefix (`mattpocock-skills:tdd` is `tdd`). A skill installed from two places (an enabled plugin and your own folder, say) is flagged as a duplicate.
+- **Before and after** (with `--compare`): runs, weighted tokens, median time and skill loads per agent on each side of the date.
 - **How your team works together:** a flow from you to the agents and skills you (or Claude for you) called, and on to the skills those agents ran, with the number of calls on every line. It also lists the usual hand-off chains within a session (for example `/implement → /tdd → reviewer (FAIL) → reviewer (PASS)`), a table of skills (typed by you, picked by Claude, run inside an agent, error rate), and the agents and skills that are installed but were not used in the period. It is built only from what the transcripts show happened, not from anyone's routing rules, so it fits any set-up. It reads skill names only, never their arguments. It also reads the names in the `agents` and `skills` folders beside each `projects` folder.
 
-The **score** is reliability (40), right first time (20), speed (20) and efficiency (20). Speed and efficiency are measured against the same agent's own history, never against other agents. A reviewer answering FAIL is doing its job and is never marked down for it. The report keeps no prompts, results, file names or commands. Sessions appear as `s1`, `s2`…, and project names appear only if you ask with `--by-project`.
+The **score** is reliability (40), right first time (20), speed (20) and efficiency (20). Speed and efficiency are measured against the same agent's own history, never against other agents. A reviewer answering FAIL is doing its job and is never marked down for it. The report keeps no results, file names or commands. An Agent call's description and the first line of its prompt appear only with `--details`; from the app, only when privacy mode is off. `runs.csv` also gets each run's mode, caller, model, tool counts, skill loads, all four token types, weighted cost and could-be flag. Sessions appear as `s1`, `s2`…, and project names appear only if you ask with `--by-project`.
 
 ## How it works
 
