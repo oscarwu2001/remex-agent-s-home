@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { listPack, packStatus, installPack, updatePack, fingerprint, packFiles } = require('../src/core/officepack');
+const { listPack, packStatus, installPack, updatePack, ownItems, fingerprint, packFiles } = require('../src/core/officepack');
 const { spawnSync } = require('child_process');
 
 const PACK = path.join(__dirname, '..', 'office-pack');
@@ -116,6 +116,60 @@ test('update agents: refreshes untouched files, leaves edited ones, adds what is
   assert.ok(packStatus(PACK, claude).items.every((i) => i.installed));
   const again = updatePack(PACK, claude, old);
   assert.deepEqual([again.updated, again.added], [[], []], 'a second update has nothing to do');
+});
+
+// Every file under a folder, as path -> bytes.
+function snapshot(dir) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else out[path.relative(dir, full).split(path.sep).join('/')] = fs.readFileSync(full).toString('base64');
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+test('update agents never touches the user\'s own agents, skills or hooks, even one with a pack name', () => {
+  const claude = tmp();
+  installPack(PACK, claude, ['writer', 'handover']);
+  const own = {
+    'agents/rca-skeptic.md': '---\nname: rca-skeptic\nmodel: opus\n---\nmine',
+    'agents/team/nested.md': 'mine, in a subfolder',
+    'agents/planner.md': '---\nname: planner\n---\nmy own planner, same name as the pack one',
+    'skills/my-skill/SKILL.md': '---\nname: my-skill\n---\nmine',
+    'skills/my-skill/notes.md': 'mine',
+    'skills/handover/my-notes.md': 'my file inside a pack skill folder',
+    'hooks/my-hook.sh': 'echo mine',
+    'CLAUDE.md': 'my rules',
+  };
+  for (const [rel, text] of Object.entries(own)) {
+    fs.mkdirSync(path.dirname(path.join(claude, rel)), { recursive: true });
+    fs.writeFileSync(path.join(claude, rel), text);
+  }
+  // writer as an older pack version shipped it, so it gets refreshed.
+  fs.writeFileSync(path.join(claude, 'agents', 'writer.md'), 'an old writer');
+  const versions = { ...VERSIONS, 'agents/writer.md': [...VERSIONS['agents/writer.md'], fingerprint('an old writer')] };
+  const before = snapshot(claude);
+  const res = updatePack(PACK, claude, versions);
+  const after = snapshot(claude);
+
+  for (const rel of Object.keys(own)) assert.equal(after[rel], before[rel], `${rel} unchanged`);
+  assert.deepEqual(res.edited, ['planner'], 'the same-name agent is reported, not replaced');
+  assert.deepEqual(res.own, { agents: ['rca-skeptic'], skills: ['my-skill'] });
+  // Whatever changed or appeared is the pack's own, or the one hook entry
+  // in settings.json (and its backup).
+  const pack = new Set([...packFiles(PACK), 'settings.json', 'settings.json.agents-home-backup', 'hooks/agents-home-router.log']);
+  const touched = Object.keys(after).filter((rel) => after[rel] !== before[rel]);
+  assert.ok(touched.includes('agents/writer.md'));
+  assert.deepEqual(touched.filter((rel) => !pack.has(rel)), [], 'nothing outside the pack');
+  assert.deepEqual(Object.keys(before).filter((rel) => !(rel in after)), [], 'nothing removed');
+});
+
+test('own items: none when the folders are missing', () => {
+  assert.deepEqual(ownItems(PACK, tmp()), { agents: [], skills: [] });
 });
 
 const hasBash = spawnSync('bash', ['-c', 'exit 0']).status === 0;

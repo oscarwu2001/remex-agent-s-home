@@ -2287,6 +2287,14 @@ $('update-run').addEventListener('click', async () => {
 
 // Update agents: the team in Claude, up to date and switched on.
 if (!bridge.packUpdate) $('update-agents').disabled = true;
+// "Your own 3 agents and 2 skills were not touched." Only the counts: the
+// names are the user's and Settings already lists the team's own.
+function ownText(own) {
+  const n = (k, one) => (own?.[k]?.length ? `${own[k].length} ${one}${own[k].length === 1 ? '' : 's'}` : '');
+  const what = [n('agents', 'agent'), n('skills', 'skill')].filter(Boolean).join(' and ');
+  return what ? `Your own ${what} ${own.agents.length + own.skills.length === 1 ? 'was' : 'were'} not touched.` : '';
+}
+
 $('update-agents').addEventListener('click', async () => {
   const button = $('update-agents');
   const status = $('update-status');
@@ -2304,8 +2312,9 @@ $('update-agents').addEventListener('click', async () => {
     const parts = [
       res.added.length ? `Added: ${list(res.added)}.` : '',
       res.updated.length ? `Updated: ${list(res.updated)}.` : '',
-      res.edited.length ? `Left as you edited them: ${list(res.edited)}.` : '',
+      res.edited.length ? `Left alone, because you changed them or they are your own with the same name: ${list(res.edited)}.` : '',
       !res.added.length && !res.updated.length ? 'The team was already up to date.' : 'Start a new Claude session to use the changes.',
+      ownText(res.own),
       res.errors.length ? `Problems: ${res.errors.join('; ')}` : '',
     ].filter(Boolean);
     status.textContent = parts.join(' ');

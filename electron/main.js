@@ -571,7 +571,8 @@ app.whenReady().then(() => {
     const res = officePack.updatePack(packDir, claudeDir, versions);
     for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
     syslog.write('activity', 'team-update', {
-      added: res.added.join(','), updated: res.updated.join(','), edited: res.edited.join(','), errors: res.errors.length || undefined,
+      added: res.added.join(','), updated: res.updated.join(','), edited: res.edited.join(','),
+      ownAgents: res.own.agents.length, ownSkills: res.own.skills.length, errors: res.errors.length || undefined,
     });
     rosterAt = 0;
     return { ok: res.errors.length === 0, ...res };

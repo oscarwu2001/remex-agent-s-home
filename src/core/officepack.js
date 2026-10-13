@@ -216,8 +216,34 @@ function installPack(packDir, claudeDir, names) {
 // it is and reported. A file new to an installed skill is added. Anything
 // in the pack not yet in Claude is added (never over a file that is there),
 // and the reminder hook is turned on.
+// The user's own agents and skills: everything in ~/.claude/agents and
+// skills whose name the pack does not use. Update agents only ever reads and
+// writes the pack's own files, so these are never opened; they are counted
+// so the app can say so.
+function ownItems(packDir, claudeDir) {
+  const pack = new Set(listPack(packDir).map((i) => i.to));
+  const own = { agents: [], skills: [] };
+  const names = (dir) => {
+    try {
+      return fs.readdirSync(path.join(claudeDir, dir), { withFileTypes: true });
+    } catch (err) {
+      // No such folder yet: nothing of the user's own there.
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+  };
+  for (const e of names('agents')) if (e.name.endsWith('.md') && !pack.has(path.join('agents', e.name))) own.agents.push(e.name.slice(0, -3));
+  for (const e of names('skills')) if (!e.name.startsWith('.') && !pack.has(path.join('skills', e.name))) own.skills.push(e.name);
+  return own;
+}
+
 function updatePack(packDir, claudeDir, versions) {
-  const result = { updated: [], added: [], edited: [], upToDate: [], errors: [] };
+  const result = { updated: [], added: [], edited: [], upToDate: [], errors: [], own: { agents: [], skills: [] } };
+  try {
+    result.own = ownItems(packDir, claudeDir);
+  } catch (err) {
+    result.errors.push(`your own agents and skills could not be counted (${err.code || err.message}); they were still not touched`);
+  }
   const known = (rel, text) => (versions[rel] ?? []).includes(fingerprint(text));
   const files = packFiles(packDir);
   const missing = [];
@@ -274,4 +300,4 @@ function updatePack(packDir, claudeDir, versions) {
   return result;
 }
 
-module.exports = { listPack, packStatus, installPack, updatePack, fingerprint, packFiles, HOOK_FILE };
+module.exports = { listPack, packStatus, installPack, updatePack, ownItems, fingerprint, packFiles, HOOK_FILE };

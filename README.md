@@ -144,7 +144,10 @@ the list. The files are in `office-pack/` if you'd rather copy them by hand.
 **Settings → Updates → Update agents** brings the team up to date in one go.
 It adds any helpers not there yet and turns on the reminders. It also refreshes
 files that are exactly as some earlier version of the app shipped them. A file
-you edited is left as it is, and listed. Press **Update and restart** first to
+you edited is left as it is, and listed. Your own agents, skills and hooks are
+never opened: it only reads and writes the pack's own files, and an agent of
+yours that happens to share a pack name is left alone and listed too. When it
+finishes it says how many of your own it left untouched. Press **Update and restart** first to
 get the newest team, then **Update agents**, then start a new Claude session.
 
 ## Grow the hospital
