@@ -147,6 +147,26 @@ a **Confirm** button. With privacy mode on, to-dos show as *To-do 1, To-do
 The app rewrites the file only for your own changes, always as a whole file,
 and leaves a file it can't read alone (it says so under **Needs attention**).
 
+### Your assistant's questions
+
+The personal assistant can also run on its own: a quick scan every 15
+minutes on weekdays, 08:30 to 18:30, set up from your Claude configuration
+(`~/.claude/assistant/`, see that repo's README). It logs your day in
+`~/.agents-home/log/` and, when only you can decide something (a paused
+project with new commits, copies on the list that are gone, a project folder
+it found), it asks. Each question shows here twice: in **Your assistant asks**
+at the top of Projects, with when it last looked, and as a to-do on that
+project marked with the small robot. Tick the to-do to close the question,
+or say *answer the assistant* in Claude to answer it.
+
+The app only reads the assistant's folder (`~/.agents-home/assistant/`,
+or `$AGENTS_HOME_ASSISTANT`). With privacy mode on, questions show as
+*Question 1, Question 2…*, like to-dos. If its scans fail, or Windows
+notifications don't work, the list says so. Nothing shows until the scan
+has run once. **To turn it off**, run
+`powershell -File ~/.claude/assistant/install.ps1 -Remove`; the list stays
+as it was last left until you remove `~/.agents-home/assistant/`.
+
 ## The Report button
 
 The **Report** button at the top of the map builds the performance report
@@ -279,7 +299,8 @@ recent tool calls and its tokens split into input, output, cache read and cache 
 writes to `.claude`. It writes only its own files: its settings and logs,
 your project list (`~/.agents-home/projects.json`) when you change a to-do,
 and, if you turn on **Other computers**, one status file in the folder you
-picked. There are two exceptions, and both happen only when you ask:
+picked. It reads the personal assistant's questions (`~/.agents-home/assistant/`)
+but never writes there. There are two exceptions, and both happen only when you ask:
 - **Use the real weather**, switched on in Settings, asks
   [Open-Meteo](https://open-meteo.com) for the weather and temperature every
   30 minutes. It sends only the place you chose, never anything from your

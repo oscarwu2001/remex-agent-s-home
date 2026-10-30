@@ -50,6 +50,22 @@
 }
 .confirm .ico { width: 14px; height: 14px; }
 .confirm:active { transform: scale(0.94); }
+/* The personal assistant's questions, above the cards. */
+.asst { margin: 0 0 var(--s-3); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel); }
+.asst-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 24px; }
+.asst-top .ico { color: var(--accent); }
+.asst-head { margin: 0; font: 400 13px var(--font); color: var(--ink); }
+.asst-when { margin-left: auto; font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.asst-when.warn { color: var(--warn); }
+.asst-q { list-style: none; margin: var(--s-1) 0 var(--s-2); padding: 0; display: grid; gap: 6px; }
+.asst-q li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); font-size: 13px; line-height: 1.4; }
+.asst-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.asst-q .asst-more { color: var(--ink-muted); }
+.asst-q .badge { flex: none; max-width: 40%; height: 22px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.asst .hint { margin: 0; }
+.asst .asst-check { margin-top: var(--s-1); }
+.asst .asst-note { margin-top: var(--s-1); color: var(--warn); overflow-wrap: anywhere; }
+.hidden-text { color: var(--ink-muted); }
 .proj-check { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 var(--s-2); font-size: 12.5px; color: var(--ink-muted); }
 .proj-check .ico { color: var(--accent); margin-top: 1px; }
 .ptodos { list-style: none; margin: var(--s-2) 0 0; padding: 0; }

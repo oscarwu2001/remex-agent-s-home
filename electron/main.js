@@ -13,6 +13,7 @@ const { wslRoots, rootKey } = require('../src/core/wsl');
 const { coworkRoots } = require('../src/core/cowork');
 const fleet = require('../src/core/fleet');
 const projectList = require('../src/core/projects');
+const assistantFiles = require('../src/core/assistant');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
@@ -773,8 +774,15 @@ app.whenReady().then(() => {
     projectsStamp = stamp;
     projects = projectList.loadProjects(projectsPath);
   }
+  // The personal assistant's open questions and last scan, shown above the
+  // project list. Read only: the assistant writes these files.
+  const assistantPath = assistantFiles.assistantDir();
+  let assistant = assistantFiles.loadAssistant(assistantPath);
   readProjects(true);
-  setInterval(() => readProjects(), 2_000);
+  setInterval(() => {
+    readProjects();
+    assistant = assistantFiles.loadAssistant(assistantPath);
+  }, 2_000);
   ipcMain.handle('home:project-change', (_event, change) => {
     readProjects(true);
     if (!projects.raw) return { ok: false, error: `The project list cannot be changed: ${projects.problems[0]}` };
@@ -914,6 +922,7 @@ app.whenReady().then(() => {
       projects: {
         file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
         list: projects.data?.projects ?? [],
+        assistant,
       },
       sources: { cowork: coworkWatcher.roots.length },
       watcher: (() => {
@@ -928,6 +937,7 @@ app.whenReady().then(() => {
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
         ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems,
         ...projects.problems.map((label) => ({ label: `Project list: ${label}`, detail: projectsPath, count: 1 })),
+        ...assistant.problems.map((label) => ({ label: `Personal assistant: ${label}`, detail: assistantPath, count: 1 })),
         ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),
         ...(usageSummary?.unreadable ? [{ label: 'Lines that could not be read while counting use', detail: '', count: usageSummary.unreadable }] : []),
       ],

@@ -4,8 +4,9 @@ A desktop app (Electron) that shows Claude Code sessions and their sub-agents
 as figures in an isometric hospital drawn in a Monument Valley style, with a
 mini window and a project list with to-dos. It reads the local transcript
 files (`~/.claude/projects/**/*.jsonl`, WSL homes and the Claude app's Cowork
-task folders), the project list and, when turned on, the shared status
-folder; nothing else.
+task folders), the project list, the personal assistant's questions
+(`~/.agents-home/assistant/`, read only) and, when turned on, the shared
+status folder; nothing else.
 Vocabulary is in `CONTEXT.md`.
 
 ## Commands
@@ -31,7 +32,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 
 ## Layout
 
-- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report, `costs.js` the report's cost picture (general-purpose callers, could-be-typed flags, weighted tokens, skill loads and sources, before/after), `teamwork.js` the report's team picture (flows, hand-off chains, unused agents and skills), `weather.js` the opt-in real weather, `cowork.js` the Claude app's Cowork task folders, `fleet.js` the shared status file for other computers, `projects.js` the project list and its to-dos, `officepack.js` offers and installs the Office pack, `usage.js` Claude Code use and context windows, `syslog.js` the system log: agent activity and errors).
+- `src/core/`: pure Node, no Electron (`transcript.js` parse, `tracker.js` state, `watcher.js` tail, `wsl.js` WSL transcript folders, `rooms.js`, `decor.js` floors, decorations and garden catalogue, `roster.js`, `activity.js`, `metrics.js` for the report, `costs.js` the report's cost picture (general-purpose callers, could-be-typed flags, weighted tokens, skill loads and sources, before/after), `teamwork.js` the report's team picture (flows, hand-off chains, unused agents and skills), `weather.js` the opt-in real weather, `cowork.js` the Claude app's Cowork task folders, `fleet.js` the shared status file for other computers, `projects.js` the project list and its to-dos, `assistant.js` the personal assistant's questions and last scan (read only), `officepack.js` offers and installs the Office pack, `usage.js` Claude Code use and context windows, `syslog.js` the system log: agent activity and errors).
 - `office-pack/`: a small team of Claude Code agents and skills, offered to the user by the app: office helpers, coding helpers (`builder`, `code-reviewer`, `test-runner`) and the two managers (`project-manager`, `personal-assistant` with the `scan-projects` skill).
 - `electron/`: main process and preload. The only bridge is `window.agentsHome` (`config()`, `onSnapshot()`).
 - `renderer/`: plain ES modules, no bundler. `iso.js` primitives, `themes.js` colourways, `scene.js` hospital, `furniture.js` every room item in both room styles (simple and detailed), `decor.js` (floors, decorations, garden plants), `people.js` figures, `app.js` glue and board, `demo.js`, `overview.js` the "Running now" numbers, icons and to-do pips, `status.js` status words, `projects-view.js` the project list (board and mini), `mini.html`/`mini.js`/`mini.css` the mini window. Colour tokens are `tokens.css` (both windows), shared badges and pips `icons.css`.

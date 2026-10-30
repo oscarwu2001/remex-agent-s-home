@@ -18,24 +18,60 @@ function addForm({ op, project, id, label, placeholder, max, error }) {
       <button type="submit" class="icon-act" data-op="${op}"${project ? ` data-project="${esc(project)}"` : ''} title="${esc(label)}">${icon('plus')}<span class="visually-hidden">${esc(label)}</span></button></form>${err}`;
 }
 
+const hhmm = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toDateString() === new Date().toDateString() ? t : `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${t}`;
+};
+
+// The personal assistant's question queue and its last scan
+// (src/core/assistant.js), with `check` (projects it found for the user to
+// confirm) in the same group. Nothing shows until its scan has run once.
+// Questions are hidden like to-dos in privacy mode, as they can name a
+// folder; the project badge is then the only context, so it shows only then.
+function assistantHtml(a, list, privacy, check = '') {
+  if (!a?.on) return '';
+  const names = new Map(list.map((p) => [p.id, p.name]));
+  const when = a.lastRun ? `Last scan ${hhmm(a.lastRun)}` : 'No scan yet';
+  const status = a.failures ? `${when} · the last ${a.failures === 1 ? 'scan' : `${a.failures} scans`} failed` : when;
+  const head = `<div class="asst-top">${icon('agent')}<h3 class="asst-head" id="asst-head">${a.questions.length ? 'Your assistant asks' : 'Your assistant has no questions'}</h3><span class="asst-when${a.failures ? ' warn' : ''}">${esc(status)}</span></div>`;
+  const notes = [
+    ...(a.failures && a.lastError && !privacy ? [`Last error: ${a.lastError}. Details are in scan.log in the assistant’s folder.`] : []),
+    ...(a.failures && (!a.lastError || privacy) ? ['Details are in scan.log in the assistant’s folder.'] : []),
+    ...(a.notes ?? []),
+  ].map((n) => `<p class="hint asst-note">${esc(n)}</p>`).join('');
+  const checkLine = check ? `<p class="hint asst-check">${check}</p>` : '';
+  if (!a.questions.length) return `<section class="asst" aria-labelledby="asst-head">${head}${checkLine}${notes}</section>`;
+  const items = a.questions.map((q, i) => {
+    const project = privacy && q.project && names.get(q.project);
+    return `<li><span class="asst-text${privacy ? ' hidden-text' : ''}">${esc(privacy ? `Question ${i + 1}` : q.text)}</span>${project ? `<span class="badge quiet" title="${esc(project)}">${esc(project)}</span>` : ''}</li>`;
+  }).join('');
+  const more = a.more ? `<li class="asst-more">${a.more} more question${a.more === 1 ? '' : 's'}</li>` : '';
+  return `<section class="asst" aria-labelledby="asst-head">${head}<ul class="asst-q">${items}${more}</ul>
+    <p class="hint">Answer in Claude by saying “answer the assistant”. Ticking a question’s to-do dismisses it.</p>${checkLine}${notes}</section>`;
+}
+
 // opts: { privacy, open: Set of project ids shown in full, error: { where, text } }
 // With privacy mode on, to-do wording is hidden like everything else that
 // could name a file, a dataset or a case: items show as "To-do 3".
 export function projectsHtml(projects, sessions, opts) {
   const list = [...(projects?.list ?? [])].sort((a, b) => (ORDER[a.status] - ORDER[b.status]) || a.name.localeCompare(b.name));
+  const unconfirmed = list.filter((p) => !p.confirmed).length;
+  const checkText = unconfirmed ? `Your assistant found ${unconfirmed} project${unconfirmed === 1 ? '' : 's'} to check. Confirm the ones you are working on.` : '';
+  const asks = assistantHtml(projects?.assistant, list, opts.privacy, checkText);
   if (projects && projects.ok === false) {
-    return '<p class="hint">The project list could not be read. See “Needs attention”.</p>';
+    return `${asks}<p class="hint">The project list could not be read. See “Needs attention”.</p>`;
   }
   const errFor = (where) => (opts.error?.where === where ? opts.error.text : '');
   const newProject = addForm({ op: 'add-project', id: 'proj-new', label: 'Add a project', placeholder: list.length ? 'Add a project' : 'Or add a project by name', max: 120, error: errFor('new') });
   if (!list.length) {
-    return `<p class="hint">No projects yet. In Claude, ask your personal assistant to <strong>scan my computer for projects</strong>: it finds them, puts branch copies under their main project, and asks you to check the list before saving it.</p>${newProject}`;
+    return `${asks}<p class="hint">No projects yet. In Claude, ask your personal assistant to <strong>scan my computer for projects</strong>: it finds them, puts branch copies under their main project, and asks you to check the list before saving it.</p>${newProject}`;
   }
-  const unconfirmed = list.filter((p) => !p.confirmed).length;
-  const head = unconfirmed
-    ? `<p class="proj-check">${icon('agent')}<span>Your assistant found ${unconfirmed} project${unconfirmed === 1 ? '' : 's'} to check. Confirm the ones you are working on.</span></p>` : '';
-  const privacyNote = opts.privacy && list.some((p) => p.todos.length)
-    ? '<p class="hint">To-do wording is hidden while “Hide file names and commands” is on.</p>' : '';
+  // With the assistant's list showing, its "found N to check" line sits in it.
+  const head = checkText && !asks ? `<p class="proj-check">${icon('agent')}<span>${checkText}</span></p>` : '';
+  const privacyNote = opts.privacy && (list.some((p) => p.todos.length) || projects?.assistant?.questions?.length)
+    ? '<p class="hint">Question and to-do wording is hidden while “Hide file names and commands” is on.</p>' : '';
   const cards = list.map((p) => {
     const live = sessions.filter((s) => s.projectId === p.id);
     const running = live.filter((s) => isRunning(s.status)).length;
@@ -67,7 +103,7 @@ export function projectsHtml(projects, sessions, opts) {
       ${errFor(`card:${p.id}`) ? `<p class="form-error" role="alert">${esc(errFor(`card:${p.id}`))}</p>` : ''}
       ${items}</li>`;
   }).join('');
-  return `${head}${privacyNote}<ul class="pcards">${cards}</ul>${newProject}`;
+  return `${asks}${head}${privacyNote}<ul class="pcards">${cards}</ul>${newProject}`;
 }
 
 // Clicks and typing in a project list. `change(op)` saves (the app's
@@ -115,6 +151,14 @@ export function demoProjects() {
     { id: 'weekly-report', name: 'weekly-report', confirmed: true, status: 'active', copies: [], todos: [] },
     { id: 'garden-planner', name: 'garden-planner', confirmed: false, status: 'active', copies: [{ path: 'garden-planner-old' }, { path: 'garden-planner-v2' }], todos: [] },
   ];
+  list[2].todos.push({ id: 'q', text: 'Assistant asks: weekly-report has had no commits for 16 days. Mark it paused?', done: false, by: 'agent' });
+  const assistant = {
+    on: true, lastRun: new Date(Date.now() - 6 * 60_000).toISOString(), failures: 0, more: 0, problems: [],
+    questions: [
+      { key: 'pause', project: 'weekly-report', text: 'weekly-report has had no commits for 16 days. Mark it paused?' },
+      { key: 'new', text: 'I found a project folder that is not on your list: tide-tables (in Documents). Add it?' },
+    ],
+  };
   let n = 0;
   const change = (c) => {
     const p = list.find((x) => x.id === c.project);
@@ -134,7 +178,7 @@ export function demoProjects() {
     else if (c.op === 'confirm') p.confirmed = true;
     return { ok: true };
   };
-  return { snapshot: () => ({ ok: true, list: list.map((p) => ({ ...p, todos: p.todos.map((t) => ({ ...t })) })) }), change };
+  return { snapshot: () => ({ ok: true, list: list.map((p) => ({ ...p, todos: p.todos.map((t) => ({ ...t })) })), assistant }), change };
 }
 
 // A way to find the same control again after a redraw: its id, or the
