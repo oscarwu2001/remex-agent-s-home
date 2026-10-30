@@ -12,6 +12,9 @@ git clone -b agents-status --single-branch https://github.com/oscarwu2001/remex-
 powershell -ExecutionPolicy Bypass -File "$HOME\.agents-home\status-repo\install-task.ps1"
 ```
 
+Remove the hourly task with
+`Unregister-ScheduledTask -TaskName 'Agents Home status' -Confirm:$false`.
+
 **On the main workstation** (pulls only): clone the same way, without the
 second line, then in Agent's Home open Settings → Other computers →
 **Use a git status folder** and pick `.agents-home\status-repo`.
