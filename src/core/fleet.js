@@ -87,7 +87,7 @@ function cleanSession(s) {
     const [done, doing, total] = [count(s.todos.done), count(s.todos.doing) ?? 0, count(s.todos.total)];
     if (done !== undefined && total !== undefined && done + doing <= total) todos = { done, doing, total };
   }
-  return { project, source: SOURCES.has(s.source) ? s.source : 'code', status: s.status, agents, todos };
+  return { project, source: SOURCES.has(s.source) ? s.source : 'code', where: nameOf(s.where, 80), status: s.status, agents, todos };
 }
 
 // The other computers' files. A file that cannot be read or makes no sense

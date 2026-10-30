@@ -61,7 +61,7 @@ test('a status file from the shared folder is rebuilt from checked values, never
   ] }));
   const { computers, problems } = fleet.readShares(dir, 'me.json', now);
   const [a, b] = computers[0].sessions;
-  assert.deepEqual(a, { project: 'ok', source: 'code', status: 'working', agents: [], todos: undefined });
+  assert.deepEqual(a, { project: 'ok', source: 'code', where: undefined, status: 'working', agents: [], todos: undefined });
   assert.deepEqual(b.agents, [{ type: 'a', status: 'thinking' }]);
   assert.equal(b.source, 'code');
   assert.equal(b.todos, undefined);

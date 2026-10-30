@@ -191,6 +191,8 @@ details > summary h2 { margin: 0; }
 }
 .row .what.warn { color: var(--warn); font-weight: 500; }
 .row .what.turn { color: var(--accent); font-weight: 500; }
+/* The status is the board's text label: two lines before it is cut. */
+.row:not(.sub) .what { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.35; }
 #projects-file-status:empty { display: none; }
 .tag {
   display: inline-block; margin-right: 6px; padding: 0 7px; vertical-align: 1px;

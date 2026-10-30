@@ -72,6 +72,7 @@
 .proj-add input:focus { border-color: var(--accent); background: var(--panel-raised); }
 .proj-add input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .proj-add input[aria-invalid="true"] { border-color: var(--warn); }
+.proj-add input[aria-invalid="true"]:focus-visible { outline-color: var(--warn); }
 .ptext.hidden-text { color: var(--ink-muted); }
 
 /* Small controls keep their small look but get a 36px hit area. */

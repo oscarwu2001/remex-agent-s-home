@@ -37,7 +37,15 @@ export function overview(localSessions, here, others = []) {
     byWhere.set(where, [...(byWhere.get(where) ?? []), s]);
   }
   for (const [where, sessions] of byWhere) if (sessions.length || where === here) add(where, sessions, { local: true });
-  for (const o of others) add(o.computer, o.sessions ?? [], { online: o.online, at: o.at });
+  // Another computer's WSL sessions keep their own label there too.
+  for (const o of others) {
+    const byPlace = new Map([[o.computer, []]]);
+    for (const s of o.sessions ?? []) {
+      const where = s.where && s.where.startsWith(o.computer) ? s.where : o.computer;
+      byPlace.set(where, [...(byPlace.get(where) ?? []), s]);
+    }
+    for (const [where, sessions] of byPlace) if (sessions.length || where === o.computer) add(where, sessions, { online: o.online, at: o.at });
+  }
   return {
     computers: groups,
     sessions: groups.reduce((n, g) => n + g.sessions, 0),

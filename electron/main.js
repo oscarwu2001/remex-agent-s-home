@@ -652,7 +652,17 @@ app.whenReady().then(() => {
   } catch (err) {
     if (err.code !== 'ENOENT') problem('fleet.json could not be read; sharing with other computers is off', fleetFile);
   }
-  fleetId ??= require('crypto').randomBytes(5).toString('hex');
+  if (!fleetId) {
+    fleetId = require('crypto').randomBytes(5).toString('hex');
+    // Kept straight away when sharing is on, so a restart writes the same file.
+    if (fleetDir) {
+      try {
+        fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir, id: fleetId }, null, 2)}\n`);
+      } catch (err) {
+        problem(`fleet.json could not be saved (${err.code || err.message})`, fleetFile);
+      }
+    }
+  }
   let fleetState = { computers: [], problems: [] };
   const saveFleet = () => {
     fs.mkdirSync(path.dirname(fleetFile), { recursive: true });
