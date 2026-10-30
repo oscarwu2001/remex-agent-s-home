@@ -1,12 +1,9 @@
-# Remex-RD · 2026-10-30 14:00
+# Remex-RD · 2026-10-30 15:00
 
-**1 running · 19 session(s) in the last hour**
+**0 running · 4 session(s) in the last hour**
 
-- · scratch-2026-10-29-78f1b6
-- · spine-ct
-- ▶ spine-sim · 17 sessions
+- · spine-sim · 4 sessions
 
 | Project | Branch | Last commit | Uncommitted |
 |---|---|---|---|
-| spine-ct | handle-map-model | 4 min ago | – |
-| spine-sim | handle-map-model | 47 min ago | – |
+| spine-sim | handle-map-model | 59 min ago | – |
