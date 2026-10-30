@@ -124,3 +124,34 @@
 .next-due { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--panel-sunk); color: var(--ink-muted); font-size: 11.5px; white-space: nowrap; }
 .next-due .ico { width: 12px; height: 12px; }
 @media (hover: none) { .date-btn { opacity: 1; } }
+
+/* ---- long jobs and the machine line, both windows ---------------------------- */
+
+.jobs { list-style: none; margin: 4px 0 var(--s-2); padding: 0; display: grid; gap: 6px; }
+.job {
+  display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start;
+  padding: 10px 12px; background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-soft);
+}
+.job-mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-sunk); color: var(--ink-muted); }
+.job-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.job.running .job-mark { background: var(--accent-soft); color: var(--accent); }
+.job.failed .job-mark, .job.stalled .job-mark { background: var(--warn-soft); color: var(--warn); }
+.job.stalled .job-mark { border-radius: 4px; }
+.job-body { min-width: 0; }
+.job-top { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 13.5px; }
+.job-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-proj { color: var(--ink-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.job-pct { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; color: var(--ink-muted); font-size: 12px; }
+.job.running .job-pct { color: var(--accent); font-weight: 500; }
+.job-bar { height: 5px; margin: 6px 0 4px; border-radius: 999px; background: var(--panel-sunk); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.job-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.8s var(--spring); }
+.job:not(.running) .job-bar span { background: var(--ink-muted); }
+.job.failed .job-bar span, .job.stalled .job-bar span { background: var(--warn); }
+.job-line { margin: 0; font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.metrics { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; margin-left: 8px; }
+.metric .k { color: var(--ink-muted); }
+.metric { color: var(--ink); }
+.machine { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 var(--s-2); }
+.load { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--panel-sunk); color: var(--ink-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.load .ico { width: 13px; height: 13px; }
+.load.busy { background: var(--accent-soft); color: var(--accent); }

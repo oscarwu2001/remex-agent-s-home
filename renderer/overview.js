@@ -9,9 +9,9 @@ export const isRunning = (status) => RUNNING.has(status);
 
 export const SOURCE_NAMES = { code: 'Claude Code', cowork: 'Cowork', wsl: 'WSL' };
 
-export function overview(localSessions, here, others = []) {
+export function overview(localSessions, here, others = [], { jobs = [], machine } = {}) {
   const groups = [];
-  const add = (computer, sessions, { local = false, online = true, at, every, repos = [] } = {}) => {
+  const add = (computer, sessions, { local = false, online = true, at, every, repos = [], jobs: jobList = [], machine: load } = {}) => {
     const byProject = new Map();
     for (const s of sessions) {
       const p = byProject.get(s.project) ?? { project: s.project, sessions: [], running: 0, helpers: 0 };
@@ -22,7 +22,8 @@ export function overview(localSessions, here, others = []) {
     }
     const projects = [...byProject.values()].sort((a, b) => b.running - a.running || a.project.localeCompare(b.project));
     groups.push({
-      computer, local, online, at, every, repos,
+      computer, local, online, at, every, repos, jobs: jobList, machine: load,
+      jobsRunning: jobList.filter((j) => j.state === 'running').length,
       sessions: sessions.length,
       running: sessions.filter((s) => isRunning(s.status)).length,
       helpers: projects.reduce((n, p) => n + p.helpers, 0),
@@ -36,7 +37,7 @@ export function overview(localSessions, here, others = []) {
     const where = s.computer ?? here;
     byWhere.set(where, [...(byWhere.get(where) ?? []), s]);
   }
-  for (const [where, sessions] of byWhere) if (sessions.length || where === here) add(where, sessions, { local: true });
+  for (const [where, sessions] of byWhere) if (sessions.length || where === here) add(where, sessions, { local: true, ...(where === here ? { jobs, machine } : {}) });
   // Another computer's WSL sessions keep their own label there too.
   for (const o of others) {
     const byPlace = new Map([[o.computer, []]]);
@@ -46,10 +47,11 @@ export function overview(localSessions, here, others = []) {
     }
     for (const [where, sessions] of byPlace) {
       const main = where === o.computer;
-      if (sessions.length || main) add(where, sessions, { online: o.online, at: o.at, every: o.every, repos: main ? o.repos ?? [] : [] });
+      if (sessions.length || main) add(where, sessions, { online: o.online, at: o.at, every: o.every, ...(main ? { repos: o.repos ?? [], jobs: o.jobs ?? [], machine: o.machine } : {}) });
     }
   }
   return {
+    jobs: groups.reduce((n, g) => n + g.jobsRunning, 0),
     computers: groups,
     sessions: groups.reduce((n, g) => n + g.sessions, 0),
     running: groups.reduce((n, g) => n + g.running, 0),
@@ -81,6 +83,8 @@ const PATHS = {
   branch: '<circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="8" r="2.2"/><path d="M7 8.2v7.6M17 10.2c0 3.5-4 3.2-8.6 6.4"/>',
   agent: '<rect x="5" y="8" width="14" height="10" rx="3"/><path d="M12 4.5V8M9.5 12.5h.01M14.5 12.5h.01" stroke-width="2.2"/>',
   check: '<path d="M5 12.5l4.2 4L19 7"/>',
+  job: '<path d="M4 19V9M9.3 19V5M14.6 19v-7M20 19v-11"/>',
+  chip: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/>',
   calendar: '<rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   close: '<path d="M7 7l10 10M17 7L7 17"/>',
@@ -110,6 +114,7 @@ export function headlineBadges(o) {
     badge('session', o.sessions, plural(o.sessions, 'session'), { quiet: true }),
     badge('live', o.projects, `${plural(o.projects, 'project')} with sessions`, { quiet: true }),
     computers > 1 ? badge('computer', computers, plural(computers, 'computer'), { quiet: true }) : '',
+    o.jobs ? badge('job', o.jobs, `${plural(o.jobs, 'job')} running (training and other long runs)`) : '',
   ].join('');
 }
 

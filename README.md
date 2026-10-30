@@ -107,6 +107,17 @@ workstation, clone that branch and pick it in **Settings → Other computers
 → Use a git status folder**: the app pulls it every 10 minutes and writes
 nothing. A computer counts as online until a quarter past its next post.
 
+**Training and other long jobs.** A script that reports with
+`agents_progress.py` (in the `agents-status` branch; one import and
+`p.update(step, epoch=..., loss=...)` in the loop) writes
+`~/.agents-home/jobs/<name>.json`. Running now then shows the job under its
+computer with a progress bar, epoch and step, time left and its latest
+metrics, plus a GPU and CPU line for the machine (from `nvidia-smi`). Jobs
+on this computer update every 2 seconds; other computers' jobs come with
+their status posts, every 15 minutes while a job runs. A job whose process
+has ended without saying so shows as *Stopped*, one silent for 30 minutes as
+*No news for 30 min*.
+
 ## Mini window
 
 **Mini window** (top of the map) opens a small window that stays on top of

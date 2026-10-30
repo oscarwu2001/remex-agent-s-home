@@ -12,6 +12,7 @@ import { overview as runningOverview, headline, headlineBadges, badge, runningBa
 import { statusText, glyphKey, elapsed } from './status.js';
 import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
 import { installTips } from './tip.js';
+import { jobsHtml, machineHtml } from './jobs-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1135,9 +1136,9 @@ function rowHtml(key, x, name, sub) {
 // "Running now": this computer's sessions as cards (each with its helpers),
 // grouped by where they run, then the other computers' projects as rows.
 function renderSessions(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? []);
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine });
   const others = o.computers.filter((c) => !c.local);
-  if (!s.sessions.length && !others.length) {
+  if (!s.sessions.length && !others.length && !(s.jobs ?? []).length) {
     const watching = s.watcher.roots.find((r) => r.state === 'ok');
     return `<p class="empty">Nobody is on shift. Agents appear here within a second of a Claude Code
       session writing to its transcript${watching ? '' : ' (no transcript folder found yet)'}.
@@ -1150,9 +1151,10 @@ function renderSessions(s) {
   };
   const many = o.computers.length > 1;
   const local = o.computers.filter((c) => c.local).map((c) => {
-    const cards = c.projects.flatMap((p) => p.sessions).map(card).join('');
-    if (!cards) return '';
-    return many ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${cards}` : cards;
+    const cards = c.projects.flatMap((p) => p.sessions).map(card).join('') + jobsHtml(c.jobs);
+    const load = machineHtml(c.machine);
+    if (!cards && !load) return '';
+    return many || load ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${load}${cards}` : cards;
   }).join('');
   const hm = (t) => new Date(t).toTimeString().slice(0, 5);
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
@@ -1170,7 +1172,8 @@ function renderSessions(s) {
     }).join('');
     return `<div class="computer${c.online ? '' : ' offline'}">
         <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
-        ${projects ? `<ul class="projects">${projects}</ul>` : '<p class="hint">No sessions.</p>'}</div>`;
+        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}
+        ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
   }).join('');
   const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
   return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
@@ -1234,8 +1237,9 @@ function todoListHtml(todos) {
 
 // The headline badges of "Running now", and what makes them change.
 function renderRunning(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? []);
-  const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers])])]);
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine });
+  const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers]),
+    (c.jobs ?? []).map((j) => [j.name, j.state, j.step, j.epoch, j.updatedAt]), c.machine])]);
   return { head: headline(o), badges: headlineBadges(o), key };
 }
 

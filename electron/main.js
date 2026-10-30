@@ -13,6 +13,7 @@ const { wslRoots, rootKey } = require('../src/core/wsl');
 const { coworkRoots } = require('../src/core/cowork');
 const fleet = require('../src/core/fleet');
 const projectList = require('../src/core/projects');
+const jobFiles = require('../src/core/jobs');
 const assistantFiles = require('../src/core/assistant');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
@@ -813,6 +814,49 @@ app.whenReady().then(() => {
     return error ? { ok: false, file: projectsPath, error: `The folder could not be opened: ${error}` } : { ok: true, file: projectsPath };
   });
 
+  // ---- long jobs and the machine ------------------------------------------------
+  // Jobs report with agents_progress.py into ~/.agents-home/jobs (read every
+  // 2 s). The machine line: CPU from the system's own counters, GPU from
+  // nvidia-smi every 30 s when it is installed. Local, read only.
+  let jobs = { jobs: [], problems: [] };
+  setInterval(() => { jobs = jobFiles.readJobs(); }, 2_000);
+  jobs = jobFiles.readJobs();
+  let machine;
+  let cpuPrev = os.cpus();
+  let noGpu = false;
+  function sampleMachine() {
+    const cpus = os.cpus();
+    let total = 0;
+    let idle = 0;
+    cpus.forEach((c, i) => {
+      const p = cpuPrev[i]?.times ?? c.times;
+      const t = c.times;
+      total += Object.keys(t).reduce((n, k) => n + t[k] - (p[k] ?? 0), 0);
+      idle += t.idle - p.idle;
+    });
+    cpuPrev = cpus;
+    const base = { cpu: total > 0 ? Math.round(100 * (1 - idle / total)) : undefined, memUsed: Math.round((os.totalmem() - os.freemem()) / 2 ** 20), memTotal: Math.round(os.totalmem() / 2 ** 20) };
+    if (noGpu) {
+      machine = { ...base, gpus: [] };
+      return;
+    }
+    execFile('nvidia-smi', ['--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu', '--format=csv,noheader,nounits'], { timeout: 5_000, windowsHide: true },
+      (err, out) => {
+        if (err) {
+          // No NVIDIA GPU or driver: stop asking, show CPU only.
+          noGpu = err.code === 'ENOENT';
+          machine = { ...base, gpus: [] };
+          return;
+        }
+        machine = jobFiles.cleanMachine({ ...base, gpus: String(out).trim().split('\n').filter(Boolean).map((l) => {
+          const [name, util, used, totalMem, temp] = l.split(',').map((x) => x.trim());
+          return { name: name.replace(/^NVIDIA\s+/, ''), util: Number(util), memUsed: Number(used), memTotal: Number(totalMem), temp: Number(temp) };
+        }) });
+      });
+  }
+  setInterval(sampleMachine, 30_000);
+  setTimeout(sampleMachine, 3_000);
+
   // ---- the mini window ------------------------------------------------------
   // A small window that stays on top, like a music player's mini mode: what
   // runs now, per computer and project, and each session's to-do list.
@@ -929,6 +973,8 @@ app.whenReady().then(() => {
       ...snap,
       here: HERE,
       fleet: { on: Boolean(fleetDir), dir: fleetDir, mode: fleetMode, lastPull, computers: fleetState.computers },
+      jobs: jobs.jobs,
+      machine,
       projects: {
         file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
         list: projects.data?.projects ?? [],
@@ -945,7 +991,7 @@ app.whenReady().then(() => {
       usage: usageSummary,
       problems: [
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
-        ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems,
+        ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems, ...jobs.problems,
         ...projects.problems.map((label) => ({ label: `Project list: ${label}`, detail: projectsPath, count: 1 })),
         ...assistant.problems.map((label) => ({ label: `Personal assistant: ${label}`, detail: assistantPath, count: 1 })),
         ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),

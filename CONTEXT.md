@@ -37,6 +37,8 @@
 | **To-do list** | The list a session keeps with TodoWrite or TaskCreate/TaskUpdate, followed by the tracker. Wording shows only with privacy mode off. |
 | **Project list** | `~/.agents-home/projects.json`: the user's projects, each with `copies` (branch copies, worktrees, clones) and its own `todos`. Written by the personal-assistant (`scan-projects`), the project-manager and the app. Unconfirmed projects wait for the user's Confirm. |
 | **Assistant's questions** | What the personal assistant's 15-minute scan (`~/.claude/assistant/scan.py`, outside this repo) needs the user to settle, shown above the Projects as "Your assistant asks". Read only from `~/.agents-home/assistant/questions.json` and `state.json` (`src/core/assistant.js`); a question tied to a project is also an agent to-do on it, and ticking that closes it. |
+| **Job** | A long run (training, evaluation, export) that reports with `agents_progress.py` into `~/.agents-home/jobs/<name>.json`: step, total, epoch, metrics. States: running, done, failed, stopped (its process ended), stalled (silent 30 min). |
+| **Machine line** | GPU use and memory (`nvidia-smi`) and CPU use of a computer, shown under it in Running now. |
 | **Pips** | A to-do list drawn as one mark per item: ring (to do), half-filled ring (doing), ticked square (done). |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts) and Task descriptions. On by default. |

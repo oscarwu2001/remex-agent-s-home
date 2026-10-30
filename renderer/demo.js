@@ -58,6 +58,9 @@ function coworkSession(nowMs, epochMs, t) {
 }
 const OTHER_COMPUTERS = (nowMs) => [
   { computer: 'LAB-LAPTOP', online: true, at: nowMs - 14 * 60_000, every: 3_600_000,
+    jobs: [{ name: 'eval-sweep', project: 'garden-planner', state: 'running', step: 12, total: 40, note: 'validating', metrics: { acc: 0.912 }, updatedAt: nowMs - 14 * 60_000, eta: 2_700_000 },
+      { name: 'export-onnx', state: 'done', step: 1, total: 1, updatedAt: nowMs - 50 * 60_000 }],
+    machine: { gpus: [{ name: 'RTX 4090', util: 88, memUsed: 20100, memTotal: 24564, temp: 66 }], cpu: 22 },
     repos: [{ project: 'garden-planner', branch: 'main', lastCommit: nowMs - 2 * 3_600_000, changed: 3 }, { project: 'recipe-book', branch: 'draft', lastCommit: nowMs - 26 * 3_600_000, changed: 0 }],
     sessions: [
     { project: 'garden-planner', source: 'code', status: 'working', agents: [{ type: 'code-reviewer', status: 'working' }], todos: { done: 2, doing: 1, total: 6 } },
@@ -173,6 +176,10 @@ export function demoSnapshot(nowMs, epochMs) {
     generatedAt: nowMs,
     demo: true,
     here: HERE,
+    // A training run on this computer and its machine line.
+    jobs: [{ name: 'train-seg', project: 'spine-seg', state: 'running', step: 3400 + Math.floor(t * 20), total: 10000, epoch: 17, epochs: 50,
+      metrics: { loss: 0.1234, val_dice: 0.871 }, startedAt: nowMs - 3_600_000, updatedAt: nowMs - 20_000, eta: 6_960_000 }],
+    machine: { gpus: [{ name: 'RTX 2000 Ada', util: 96, memUsed: 12400, memTotal: 16380, temp: 71 }], cpu: 34, memUsed: 11200, memTotal: 16000 },
     fleet: { on: true, computers: OTHER_COMPUTERS(nowMs) },
     sources: { cowork: 1 },
     sessions,
