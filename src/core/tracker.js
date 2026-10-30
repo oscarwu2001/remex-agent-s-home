@@ -129,6 +129,15 @@ function pushHistory(actor, item) {
   if (actor.history.length > HISTORY_LIMIT) actor.history.shift();
 }
 
+// A session's project from its folder. The Claude app runs each Code
+// session in a worktree with a made-up name, <repo>/.claude/worktrees/<name>;
+// the project is the repository that holds it.
+function projectName(cwd) {
+  const p = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+  const m = /^(.*?)\/\.claude\/worktrees\/[^/]+(?:\/|$)/.exec(p);
+  return path.posix.basename(m ? m[1] : p);
+}
+
 class Tracker {
   // `sourceOf(fileKey)` says where a transcript came from:
   // { source: 'code' | 'cowork' | 'wsl', computer, title?, project? }.
@@ -178,7 +187,7 @@ class Tracker {
       session.cwd = meta.cwd;
       // A Cowork task's working folder is the app's own scratch folder; its
       // project comes from the task's details instead.
-      if (session.origin?.source !== 'cowork') session.project = path.basename(meta.cwd.replace(/\\/g, '/')) || session.project;
+      if (session.origin?.source !== 'cowork') session.project = projectName(meta.cwd) || session.project;
       else if (!session.origin.project) session.project = 'Cowork task';
     }
 
@@ -532,4 +541,4 @@ function samePrompt(a, b) {
   return n >= 40 && x.slice(0, n) === y.slice(0, n);
 }
 
-module.exports = { Tracker, TIMING };
+module.exports = { Tracker, TIMING, projectName };
