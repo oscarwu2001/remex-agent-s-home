@@ -27,7 +27,6 @@ p { margin: 0; }
   padding: var(--s-4) var(--s-4) var(--s-3);
   background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--line);
 }
 .mascot {
   width: 44px; height: 44px; padding: 4px 6px 0; overflow: visible; border-radius: 50%;
@@ -127,3 +126,5 @@ h1 { margin: 0; font: 400 19px/1.15 var(--font-display); letter-spacing: -0.015e
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes blink { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
 
+.glyph-quiet { width: 20px; height: 20px; display: grid; place-items: center; color: var(--ink-muted); }
+.glyph-quiet .ico { width: 15px; height: 15px; }

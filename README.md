@@ -241,7 +241,7 @@ figure is doing:
 | Bubble | Board says | Meaning |
 | --- | --- | --- |
 | spinner | *Reading a file*, *Running a command*… | working |
-| three dots | Thinking | waiting on the model |
+| no bubble | Thinking | waiting on the model: the figure stands quietly |
 | sheet of notes | Writing up findings | a helper is writing its report |
 | red **?** | Needs approval, or a long tool is running | a Bash/Edit/Write/Web call has been pending for 7 s. The app can't tell which of the two it is, so it says both |
 | hourglass | With *reviewer* | the session is waiting on a helper |

@@ -3,7 +3,8 @@
 // session's to-do list, so work can be followed while prompting elsewhere.
 // It only reads: the same snapshots the hospital gets, nothing more.
 
-import { overview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES, isRunning } from './overview.js';
+import { overview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES, isRunning, icon } from './overview.js';
+import { installTips } from './tip.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup, personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -65,7 +66,9 @@ function sessionCard(s, local) {
   const tag = s.source && s.source !== 'code' ? `<span class="tag">${esc(SOURCE_NAMES[s.source] ?? s.source)}</span>` : '';
   const helpers = (s.agents ?? []).filter((a) => a.status !== 'done');
   // Helpers as their status glyphs; the name is on hover and for screen readers.
-  const helperLine = helpers.length ? `<span class="helpers">${helpers.slice(0, 5).map((a) => `<span class="helper" title="${esc(`${a.type}: ${statusText(a)}`)}">${glyph(a)}<span class="visually-hidden">${esc(`${a.type}: ${statusText(a)}`)}</span></span>`).join('')}${helpers.length > 5 ? `<span class="more">+${helpers.length - 5}</span>` : ''}</span>` : '';
+  // A thinking helper has no bubble: it shows as a plain person mark.
+  const helperMark = (a) => (a.status === 'thinking' ? `<span class="glyph-quiet">${icon('helper')}</span>` : glyph(a));
+  const helperLine = helpers.length ? `<span class="helpers">${helpers.slice(0, 5).map((a) => `<span class="helper" title="${esc(`${a.type}: ${statusText(a)}`)}">${helperMark(a)}<span class="visually-hidden">${esc(`${a.type}: ${statusText(a)}`)}</span></span>`).join('')}${helpers.length > 5 ? `<span class="more">+${helpers.length - 5}</span>` : ''}</span>` : '';
   const since = local && s.startedAt ? `<span class="since" data-since="${s.startedAt}">${elapsed(s.startedAt, Date.now())}</span>` : '';
   const full = local ? statusText(s) : statusText({ status: s.status });
   return `<li class="sess${isRunning(s.status) ? ' running' : ''}" title="${esc(full)}">
@@ -147,6 +150,7 @@ $('mascot').parentElement.addEventListener('keydown', (e) => {
   showTab(next === 'tab-now' ? 'now' : 'projects');
 });
 
+installTips();
 setInterval(() => { render(); renderProjects(); }, 500);
 render();
 

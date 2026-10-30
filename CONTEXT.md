@@ -47,7 +47,7 @@ Every status has its own glyph silhouette in the scene and its own words on the 
 | Status | Glyph | Board says | Meaning |
 | --- | --- | --- | --- |
 | `working` | spinner | the tool label ("Reading a file") | A tool call is running. |
-| `thinking` | pill, three dots | Thinking | Waiting on the model. |
+| `thinking` | none: the figure stands still, no bubble | Thinking | Waiting on the model. The absence is the sign, so nothing pops while it thinks. |
 | `reporting` | sheet of notes | Writing up findings | A helper wrote text and has not returned yet. |
 | `blocked` | red disc `?` | Needs approval, or a long tool is running | An approval-type tool (Bash, Edit, Write, WebFetch…) has been pending with the file quiet for 7 s. The app cannot tell which, and says so. |
 | `delegating` | hourglass | With *type* | The session is waiting on a helper. |

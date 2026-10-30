@@ -80,3 +80,12 @@
 .tick::before, .icon-act::before, .confirm::before, .todo-toggle::before { content: ""; position: absolute; inset: -5px; }
 .proj-add input::placeholder { color: var(--ink-muted); }
 @media (hover: none) { .icon-act.subtle { opacity: 1; } }
+
+/* Hover labels (renderer/tip.js). */
+.tip {
+  position: fixed; z-index: 50; max-width: 240px; padding: 5px 9px; border-radius: 8px;
+  background: var(--ink); color: var(--panel); font: 400 12px/1.3 var(--font);
+  box-shadow: var(--shadow-float); pointer-events: none; opacity: 0; transform: translateY(2px);
+  transition: opacity 0.12s var(--ease-out), transform 0.2s var(--spring);
+}
+.tip.on { opacity: 1; transform: none; }

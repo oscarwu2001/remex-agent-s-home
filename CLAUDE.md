@@ -26,7 +26,7 @@ There are no `needs_data`, `slow` or GPU markers here. Every test is fast and us
 3. **Privacy mode is the default.** File names, commands, patterns, URLs and Task descriptions appear only when the user turns privacy mode off. Tool *labels* ("Reading a file"), agent types and skill names (checked to be plain names, never a skill's arguments) are always safe to show.
 4. **No real transcript content in the repo.** Tests build entries with `test/helpers.js`. Never paste lines from a real session into a test, fixture, issue or commit. A transcript may hold patient identifiers, dataset names or case paths.
 5. **Nothing fails silently.** Malformed lines, unreadable folders, invalid `rooms.json` and unmatched sub-agent transcripts are counted and shown under "Needs attention". A catch block either surfaces the problem or has a comment saying why ignoring it is safe.
-6. **Status is never colour alone.** Every status has its own glyph shape in the scene and a text label on the board.
+6. **Status is never colour alone.** Every status has its own glyph shape in the scene (thinking is the one shown by no bubble at all) and a text label on the board. Icon-only controls carry their words as a `title`, which `renderer/tip.js` shows as a quick hover label.
 7. **One source for rooms.** Room ids, names and agent assignment live in `src/core/rooms.js`. Room geometry lives in `renderer/scene.js`, keyed by those ids. Do not add a second list. The same split holds for decor: which floors, room items and plants exist, their sizes and each room's starting layout are `src/core/decor.js`; how they look is `renderer/furniture.js` and `renderer/decor.js`.
 
 ## Layout

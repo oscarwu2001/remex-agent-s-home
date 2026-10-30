@@ -11,6 +11,9 @@ import { demoSnapshot } from './demo.js';
 import { overview as runningOverview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
+import { installTips } from './tip.js';
+
+installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;

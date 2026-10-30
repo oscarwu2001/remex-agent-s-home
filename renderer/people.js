@@ -128,11 +128,8 @@ export function bubbleMarkup(status) {
   switch (status) {
     case 'working': // spinner
       return `${BG}<path class="spin" d="M0,-5 A5,5 0 1 1 -5,0" fill="none" stroke="#2f6f6b" stroke-width="2.2" stroke-linecap="round"/>`;
-    case 'thinking': // pill with three pulsing dots
-      return (
-        '<rect x="-13" y="-7" width="26" height="14" rx="7" class="b-bg"/>' +
-        '<circle class="dot d1" cx="-6" cy="0" r="2"/><circle class="dot d2" cx="0" cy="0" r="2"/><circle class="dot d3" cx="6" cy="0" r="2"/>'
-      );
+    case 'thinking': // no bubble at all: a quiet figure is a thinking one
+      return '';
     case 'reporting': // a sheet of notes
       return (
         `${BG}<rect x="-4.5" y="-6" width="9" height="12" rx="1.2" fill="#ffffff" stroke="${INK}" stroke-width="1.4"/>` +
@@ -274,7 +271,8 @@ export class Person {
     this.figure.setAttribute('transform', `translate(0 ${bob.toFixed(2)}) rotate(${lean.toFixed(2)})`);
   }
 
-  // Body language by state: walk bounce, busy jiggle, slow thinking sway,
+  // Body language by state: walk bounce, busy jiggle, stillness while
+  // thinking or standing by, a sway while writing up,
   // an impatient hop while blocked, and a hop of relief when done.
   motion(t) {
     const ph = this.phase;
@@ -288,6 +286,7 @@ export class Person {
       case 'working':
         return { bob: -Math.abs(Math.sin(t * 12 + ph)) * 1.1, lean: -3 + Math.sin(t * 3 + ph) * 1.5 };
       case 'thinking':
+        return { bob: 0, lean: 0 }; // still: nothing pops while it thinks
       case 'reporting':
         return { bob: -Math.max(0, Math.sin(t * 1.4 + ph)) * 1, lean: Math.sin(t * 0.9 + ph) * 4 };
       case 'blocked': {
@@ -297,7 +296,7 @@ export class Person {
       case 'delegating':
         return { bob: 0, lean: Math.sin(t * 0.7 + ph) * 2.5 };
       default:
-        return { bob: -Math.max(0, Math.sin(t * 1.6 + ph)) * 0.8, lean: 0 };
+        return { bob: 0, lean: 0 }; // idle and standby stand still
     }
   }
 
