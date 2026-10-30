@@ -109,12 +109,27 @@ function projectOf(cwd, projects) {
   return projects.find((p) => [p.path, ...(p.copies ?? []).map((x) => x.path ?? x)].filter(Boolean).some((d) => c.startsWith(`${norm(d)}/`)));
 }
 
+// The repository a folder belongs to. The Claude app runs each Code session
+// in a worktree with a made-up name (<repo>/.claude/worktrees/<name>), and
+// other worktrees live anywhere, so the name comes from the main checkout.
+function repoRoot(cwd) {
+  if (!cwd) return undefined;
+  const p = cwd.replace(/\\/g, '/');
+  const m = /^(.*?)\/\.claude\/worktrees\/[^/]+/.exec(p);
+  if (m) return m[1];
+  const common = tryGit(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+  if (common) return path.dirname(common.replace(/\\/g, '/').replace(/\/\.git\/?$/, '/.git'));
+  return p;
+}
+
 const projects = projectList().filter((p) => p.path && fs.existsSync(p.path));
 const sessions = transcriptRoots().flatMap(recentFiles).map(({ file, at, cowork }) => {
   const { cwd, todos } = readSession(file);
-  const p = projectOf(cwd, projects);
+  const root = repoRoot(cwd);
+  const p = projectOf(cwd, projects) ?? projectOf(root, projects);
   return {
-    project: p?.name ?? (cwd ? path.basename(cwd.replace(/\\/g, '/')) : 'session'),
+    root,
+    project: p?.name ?? (root ? path.basename(root) : 'session'),
     source: cowork ? 'cowork' : 'code',
     status: now - at <= LIVE_MS ? 'working' : 'idle',
     lastAt: at,
@@ -123,7 +138,13 @@ const sessions = transcriptRoots().flatMap(recentFiles).map(({ file, at, cowork 
   };
 });
 
-const repos = projects.filter((p) => p.status !== 'done').map((p) => {
+// Repositories to report: the project list's, or (with no list on this
+// computer) the ones the last hour's sessions worked in.
+const repoList = projects.length
+  ? projects.filter((p) => p.status !== 'done').map((p) => ({ name: p.name, path: p.path }))
+  : [...new Set(sessions.map((s) => s.root).filter((r) => r && fs.existsSync(r)))].map((r) => ({ name: path.basename(r), path: r }));
+for (const s of sessions) delete s.root; // the folder itself never leaves this computer
+const repos = repoList.map((p) => {
   const last = Number(tryGit(p.path, 'log', '-1', '--format=%ct')) * 1000 || undefined;
   const changed = tryGit(p.path, 'status', '--porcelain').split('\n').filter(Boolean).length;
   return { project: p.name, branch: tryGit(p.path, 'branch', '--show-current') || undefined, lastCommit: last, changed };
@@ -138,7 +159,12 @@ const md = [
   '',
   sessions.length ? `**${sessions.filter((s) => s.status === 'working').length} running · ${sessions.length} session(s) in the last hour**` : '**No Claude sessions in the last hour**',
   '',
-  ...sessions.map((s) => `- ${s.status === 'working' ? '▶' : '·'} ${s.project}${s.source === 'cowork' ? ' (Cowork)' : ''}${s.todos ? ` — to-dos ${s.todos.done}/${s.todos.total}` : ''}`),
+  ...[...new Set(sessions.map((s) => s.project))].map((name) => {
+    const mine = sessions.filter((s) => s.project === name);
+    const live = mine.filter((s) => s.status === 'working').length;
+    const todos = mine.filter((s) => s.todos).reduce((t, s) => ({ done: t.done + s.todos.done, total: t.total + s.todos.total }), { done: 0, total: 0 });
+    return `- ${live ? '▶' : '·'} ${name}${mine.length > 1 ? ` · ${mine.length} sessions` : ''}${mine.some((s) => s.source === 'cowork') ? ' (Cowork)' : ''}${todos.total ? ` · to-dos ${todos.done}/${todos.total}` : ''}`;
+  }),
   ...(repos.length ? ['', '| Project | Branch | Last commit | Uncommitted |', '|---|---|---|---|',
     ...repos.sort((a, b) => (b.lastCommit ?? 0) - (a.lastCommit ?? 0)).map((r) => `| ${r.project} | ${r.branch ?? '–'} | ${r.lastCommit ? ago(r.lastCommit) : '–'} | ${r.changed || '–'} |`)] : []),
   '',
