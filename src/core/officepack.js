@@ -161,6 +161,14 @@ function packStatus(packDir, claudeDir) {
   return { claudeDir, hasOwnAgents, items };
 }
 
+// A pack file's text as it should be installed. Shell scripts always get
+// Unix line endings: a Windows checkout may hold them with CRLF, and bash
+// (Git Bash included) cannot run a script with a carriage return on every line.
+function packText(packDir, rel) {
+  const text = fs.readFileSync(path.join(packDir, rel), 'utf8');
+  return rel.endsWith('.sh') ? text.replace(/\r\n/g, '\n') : text;
+}
+
 // File by file, never replacing: the packaged app reads the pack from its
 // asar archive, where plain reads work but folder copies may not.
 function copyDir(from, to) {
@@ -186,7 +194,7 @@ function installPack(packDir, claudeDir, names) {
     if (item.kind === 'hook') {
       try {
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        if (!fs.existsSync(target)) fs.writeFileSync(target, fs.readFileSync(path.join(packDir, item.from)), { flag: 'wx' });
+        if (!fs.existsSync(target)) fs.writeFileSync(target, packText(packDir, item.from), { flag: 'wx' });
         if (turnOnHook(claudeDir)) result.installed.push(name);
         else result.skipped.push(name);
       } catch (err) {
@@ -261,13 +269,15 @@ function updatePack(packDir, claudeDir, versions) {
     try {
       for (const rel of mine) {
         const dest = path.join(claudeDir, rel);
-        const fresh = fs.readFileSync(path.join(packDir, rel), 'utf8');
+        const fresh = packText(packDir, rel);
         if (!fs.existsSync(dest)) {
           writes.push([dest, fresh]);
           continue;
         }
         const now = fs.readFileSync(dest, 'utf8');
-        if (fingerprint(now) === fingerprint(fresh)) continue;
+        // The same text, unless it is a script installed with CRLF (which
+        // bash cannot run): that one is rewritten with Unix line endings.
+        if (fingerprint(now) === fingerprint(fresh) && !(rel.endsWith('.sh') && now.includes('\r'))) continue;
         if (!known(rel, now)) edited = true;
         else writes.push([dest, fresh]);
       }

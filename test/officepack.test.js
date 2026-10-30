@@ -282,3 +282,18 @@ test('the reminder hook exits 0 on empty or broken input, and reads past an esca
   const r = spawnSync('bash', [hook], { input: JSON.stringify({ prompt: 'fix it\ntests fail' }), encoding: 'utf8' });
   assert.match(r.stdout, /test-runner/);
 });
+
+test('the reminder script is installed with Unix line endings even from a Windows checkout, and a CRLF copy is mended', () => {
+  const pack = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pack-'));
+  fs.cpSync(PACK, pack, { recursive: true });
+  const hook = path.join(pack, 'hooks', 'agents-home-router.sh');
+  fs.writeFileSync(hook, fs.readFileSync(hook, 'utf8').replace(/\n/g, '\r\n'));
+  const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-claude-'));
+  installPack(pack, claude, ['team-reminders']);
+  const installed = path.join(claude, 'hooks', 'agents-home-router.sh');
+  assert.ok(!fs.readFileSync(installed, 'utf8').includes('\r'));
+  // An older install that was copied with CRLF gets fixed by Update agents.
+  fs.writeFileSync(installed, fs.readFileSync(installed, 'utf8').replace(/\n/g, '\r\n'));
+  updatePack(pack, claude, VERSIONS);
+  assert.ok(!fs.readFileSync(installed, 'utf8').includes('\r'));
+});
