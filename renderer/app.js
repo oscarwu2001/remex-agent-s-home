@@ -1132,22 +1132,38 @@ function rowHtml(key, x, name, sub) {
     </button>`;
 }
 
+// "Running now": this computer's sessions as cards (each with its helpers),
+// grouped by where they run, then the other computers' projects as rows.
 function renderSessions(s) {
-  if (!s.sessions.length) {
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? []);
+  const others = o.computers.filter((c) => !c.local);
+  if (!s.sessions.length && !others.length) {
     const watching = s.watcher.roots.find((r) => r.state === 'ok');
     return `<p class="empty">Nobody is on shift. Agents appear here within a second of a Claude Code
       session writing to its transcript${watching ? '' : ' (no transcript folder found yet)'}.
       Start <code>claude</code> in a terminal, or look around with the demo.</p>
       <button class="button" id="start-demo" type="button">Show demo patients</button>`;
   }
-  return s.sessions
-    .map((sess) => {
-      const helpers = sess.agents
-        .map((a) => rowHtml(`a:${a.id}`, a, a.type, true))
-        .join('');
-      return `<div class="card">${rowHtml(`s:${sess.id}`, sess, sess.project, false)}${helpers}</div>`;
-    })
-    .join('');
+  const card = (sess) => {
+    const helpers = sess.agents.map((a) => rowHtml(`a:${a.id}`, a, a.type, true)).join('');
+    return `<div class="card">${rowHtml(`s:${sess.id}`, sess, sess.project, false)}${helpers}</div>`;
+  };
+  const many = o.computers.length > 1;
+  const local = o.computers.filter((c) => c.local).map((c) => {
+    const cards = c.projects.flatMap((p) => p.sessions).map(card).join('');
+    if (!cards) return '';
+    return many ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${cards}` : cards;
+  }).join('');
+  const remote = others.map((c) => {
+    const state = c.online ? 'Online' : `Offline since ${clock(c.at)}`;
+    const projects = c.projects.map((p) => `<li class="proj"><span class="proj-name">${escapeXml(p.project)}</span>
+        <span class="badges">${p.running ? runningBadge(p.running) : '<span class="idle" title="Nothing running"><span aria-hidden="true">–</span><span class="visually-hidden">Nothing running</span></span>'}${p.helpers ? helperBadge(p.helpers) : ''}</span></li>`).join('');
+    return `<div class="computer${c.online ? '' : ' offline'}">
+        <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
+        ${projects ? `<ul class="projects">${projects}</ul>` : '<p class="hint">No sessions.</p>'}</div>`;
+  }).join('');
+  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
+  return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
 }
 
 function findSelected(s) {
@@ -1206,21 +1222,11 @@ function todoListHtml(todos) {
   return `${head}<ol class="todos">${items}</ol>`;
 }
 
-// "Running now": every live session here and on the computers sharing a
-// folder, by computer and then by project.
+// The headline badges of "Running now", and what makes them change.
 function renderRunning(s) {
   const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? []);
-  const groups = o.computers.map((c) => {
-    const state = c.local ? 'This computer' : c.online ? 'Online' : `Offline since ${clock(c.at)}`;
-    const projects = c.projects.map((p) => `<li class="proj"><span class="proj-name">${escapeXml(p.project)}</span>
-        <span class="badges">${p.running ? runningBadge(p.running) : '<span class="idle" title="Nothing running"><span aria-hidden="true">–</span><span class="visually-hidden">Nothing running</span></span>'}${p.helpers ? helperBadge(p.helpers) : ''}</span></li>`).join('');
-    return `<li class="computer${c.online ? '' : ' offline'}">
-        <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
-        ${projects ? `<ul class="projects">${projects}</ul>` : '<p class="hint">No sessions.</p>'}</li>`;
-  }).join('');
-  const share = s.fleet?.on ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
   const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers])])]);
-  return { head: headline(o), badges: headlineBadges(o), body: `<ul class="computers">${groups}</ul>${share}`, key };
+  return { head: headline(o), badges: headlineBadges(o), key };
 }
 
 function renderCensus(s) {
@@ -1326,7 +1332,6 @@ function render(force = false) {
   $('census').textContent = renderCensus(snapshot);
   renderProjects();
   $('running-head').innerHTML = `<span class="badges">${running.badges}</span>`;
-  $('running-body').innerHTML = running.body;
   renderUsage(snapshot);
   $('source').textContent = renderSource(snapshot);
   $('chart').hidden = !chart;

@@ -229,9 +229,9 @@ details > summary h2 { margin: 0; }
 .proj .badge { height: 22px; font-size: 12px; }
 .proj .idle { color: var(--ink-muted); padding: 0 6px; }
 .computers, .projects { list-style: none; margin: 0; padding: 0; }
-.computer { padding: var(--s-2) 0; }
-.computer + .computer { border-top: 1px solid var(--line); }
-.computer-head { display: flex; justify-content: space-between; gap: var(--s-2); margin: 0 0 var(--s-1); font-size: 13px; }
+.computer { padding: var(--s-1) 0; border-top: 1px solid var(--line); margin-top: var(--s-2); }
+.computer-head { display: flex; justify-content: space-between; gap: var(--s-2); margin: var(--s-3) 0 var(--s-2); font-size: 13px; }
+#sessions > .computer-head:first-child { margin-top: 0; }
 .computer-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .computer-state { color: var(--ink-muted); font-size: 12px; white-space: nowrap; }
 .computer.offline .computer-name::after { content: " (offline)"; color: var(--ink-muted); font-weight: 400; }

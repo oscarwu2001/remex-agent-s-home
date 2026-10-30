@@ -67,11 +67,13 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 
 ## Running now, on every computer
 
-The **Running now** card at the top of the board counts what is live, with
+The **Running now** card at the top of the board (it replaces the old *On
+shift* list) counts what is live, with
 icons instead of words: a play mark for running, a terminal for sessions, a
 grid for projects with sessions, a screen for computers.
-Below it, every computer is listed with its projects, and each project with
-how many sessions run in it and how many helpers are at work. Hover any icon
+Below it are this computer's sessions as cards, each with its helpers
+(click one for its live map), then every other computer with its projects
+and how many sessions and helpers run in each. Hover any icon
 for its words.
 
 The app reads three kinds of session on this computer:
@@ -185,7 +187,7 @@ Remove a department or garden from the same list. A garden takes its planting wi
 
 ## Live map
 
-Click a session (or any of its helpers) under **On shift** and a **live map** of that session pops up beside the hospital. The session is at the top; below it, in order, is everything it has called: the skills it ran and every helper, finished ones included, each with the skills it ran itself. Whatever is running right now pulses and says **Running now** with what it is doing; finished helpers show how they finished (finished, failed, stopped), their time and tokens. A line at the top counts what is running, finished, failed and the skills used. It updates as the session works. Click the same row again, press Esc, or use the close button to hide it. Like the board, file names and commands appear only with privacy mode off; skill names and agent types always show.
+Click a session (or any of its helpers) under **Running now** and a **live map** of that session pops up beside the hospital. The session is at the top; below it, in order, is everything it has called: the skills it ran and every helper, finished ones included, each with the skills it ran itself. Whatever is running right now pulses and says **Running now** with what it is doing; finished helpers show how they finished (finished, failed, stopped), their time and tokens. A line at the top counts what is running, finished, failed and the skills used. It updates as the session works. Click the same row again, press Esc, or use the close button to hide it. Like the board, file names and commands appear only with privacy mode off; skill names and agent types always show.
 
 ## System log
 
