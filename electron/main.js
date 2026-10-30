@@ -680,7 +680,10 @@ app.whenReady().then(() => {
   // online this mode makes, and only once the user has picked the folder.
   function pullStatus() {
     if (fleetMode !== 'git' || !fleetDir) return;
-    execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+    // Never a sign-in window for a background pull (Git Credential
+    // Manager would ask which account to use): a failure shows under
+    // "Needs attention" instead.
+    execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } },
       (err, _out, stderr) => {
         lastPull = err
           ? { at: Date.now(), ok: false, error: err.code === 'ENOENT' ? 'git was not found' : String(stderr || err.message).trim().split('\n').pop() }
@@ -833,6 +836,9 @@ app.whenReady().then(() => {
       minWidth: 280,
       minHeight: 200,
       alwaysOnTop: true,
+      // No system title bar: the window's own header moves it, and has a close button.
+      frame: false,
+      roundedCorners: true,
       title: "Agent's Home · mini",
       backgroundColor: '#fbfaf8',
       autoHideMenuBar: true,
@@ -861,6 +867,10 @@ app.whenReady().then(() => {
   }
   ipcMain.handle('home:mini-open', () => {
     openMini();
+    return { ok: true };
+  });
+  ipcMain.handle('home:mini-close', () => {
+    if (mini && !mini.isDestroyed()) mini.close();
     return { ok: true };
   });
   ipcMain.handle('home:mini-pin', (_event, on) => {

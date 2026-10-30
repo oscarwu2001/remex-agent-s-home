@@ -38,6 +38,10 @@ p { margin: 0; }
 h1 { margin: 0; font: 400 19px/1.15 var(--font-display); letter-spacing: -0.015em; }
 .headline { margin-top: 2px; color: var(--ink-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .mini-actions { display: flex; gap: 2px; }
+/* The window has no system title bar: drag it by its header. */
+.mini-head { -webkit-app-region: drag; user-select: none; }
+.mini-head button, .mini-head .badge, .mini-head [title] { -webkit-app-region: no-drag; }
+body { min-height: 100vh; overflow-x: hidden; }
 .tabs {
   grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px;
   border-radius: 999px; background: var(--panel-sunk); border: 1px solid var(--line);
@@ -49,7 +53,7 @@ h1 { margin: 0; font: 400 19px/1.15 var(--font-display); letter-spacing: -0.015e
 .tabs button[aria-selected="true"] { background: var(--panel-raised); color: var(--ink); box-shadow: 0 1px 3px rgba(20, 20, 30, 0.08); }
 #projects { padding-top: var(--s-3); }
 .mini-btn {
-  width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 999px;
+  width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 999px;
   background: transparent; color: var(--ink-muted); cursor: pointer;
   transition: background-color 0.2s var(--ease-out), transform 0.35s var(--spring);
 }

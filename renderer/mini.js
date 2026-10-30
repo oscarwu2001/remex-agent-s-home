@@ -170,6 +170,10 @@ $('pin').addEventListener('click', () => {
   $('pin').title = on ? 'Keep this window on top' : 'Let other windows cover this one';
   bridge.miniPin?.(on);
 });
+$('close').addEventListener('click', () => {
+  if (bridge.miniClose) bridge.miniClose();
+  else window.close();
+});
 $('open-main').addEventListener('click', () => {
   if (bridge.showMain) bridge.showMain();
   else window.open('index.html', '_blank');

@@ -277,7 +277,7 @@ figure is doing:
 | hourglass | With *reviewer* | the session is waiting on a helper |
 | speech bubble | Your turn | the session has finished its answer |
 | tick | Finished | a helper returned and is walking home |
-| dashed tick | Presumed finished | a background helper went quiet for 2 minutes |
+| no bubble | Presumed finished | a background helper went quiet for 2 minutes (said in words only) |
 | red diamond | Failed | a helper returned an error |
 | dark square | Stopped | a helper was interrupted |
 
