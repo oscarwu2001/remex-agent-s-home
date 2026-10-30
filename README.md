@@ -19,7 +19,13 @@ Remove the hourly task with
 second line, then in Agent's Home open Settings → Other computers →
 **Use a git status folder** and pick `.agents-home\status-repo`.
 
-**Training and other long jobs.** Copy `agents_progress.py` next to your
+**Running work, found by itself.** Every post lists Python scripts that are
+on the GPU, or have kept a CPU core half busy for 5 minutes: the script's
+name, its project, and how long it has run (e.g. `train.py · spine-seg ·
+running for 2 h 10 · GPU 11 GB`). Nothing to add to your scripts. While
+anything runs, the post goes out every 15 minutes.
+
+**Optional: steps and epochs.** Copy `agents_progress.py` next to your
 script (or add this folder to `sys.path`) and report progress:
 
 ```python

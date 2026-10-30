@@ -159,6 +159,13 @@ const alive = (pid) => {
   try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; } // EPERM: alive, not ours
 };
 const num = (v) => (Number.isFinite(v) ? v : undefined);
+function readJobPids() {
+  try {
+    return fs.readdirSync(JOBS_DIR).filter((n) => n.endsWith('.json'))
+      .map((n) => { try { return JSON.parse(fs.readFileSync(path.join(JOBS_DIR, n), 'utf8')).pid; } catch { return undefined; } }) // unreadable: no pid to skip
+      .filter(Number.isInteger);
+  } catch { return []; } // no jobs folder
+}
 function readJobs() {
   let names = [];
   try { names = fs.readdirSync(JOBS_DIR).filter((n) => n.endsWith('.json')); } catch { return []; } // no jobs folder: nothing reports progress here
@@ -185,7 +192,14 @@ function readJobs() {
   return jobs.sort((a, b) => (a.state === 'running' ? 0 : 1) - (b.state === 'running' ? 0 : 1) || b.updatedAt - a.updatedAt).slice(0, 12);
 }
 const jobs = readJobs();
-const anyRunning = jobs.some((j) => j.state === 'running');
+
+// Work found running without the helper: Python on the GPU, or keeping a
+// CPU core busy (work-detect.js). A process that reports as a job is kept once.
+const { detectWorkSync } = require('./work-detect');
+const jobPids = new Set(readJobPids());
+const found = detectWorkSync({ projects: projectList() });
+const work = found.work.filter((w) => !jobPids.has(w.pid)).map(({ pid, ...w }) => w); // the process id stays home
+const anyRunning = jobs.some((j) => j.state === 'running') || work.length > 0;
 
 // Posts go out on the first run of each hour, and every run (15 minutes)
 // while a job is running, so its steps can be followed.
@@ -237,7 +251,9 @@ const md = [
   '',
   sessions.length ? `**${sessions.filter((s) => s.status === 'working').length} running · ${sessions.length} session(s) in the last hour**` : '**No Claude sessions in the last hour**',
   machineLine ? `\n${machineLine}` : '',
-  ...(jobs.length ? ['', '**Jobs**', ...jobs.map(jobLine)] : []),
+  ...(jobs.length || work.length ? ['', '**Running work**', ...jobs.map(jobLine),
+    ...work.map((w) => `- ▶ **${w.name}**${w.project ? ` (${w.project})` : ''} · running for ${dur(now - w.startedAt)} · ${w.on === 'gpu' ? `GPU${w.gpuMem ? ` ${(w.gpuMem / 1024).toFixed(1)} GB` : ''}` : 'CPU'}`)] : []),
+  ...(found.problem ? ['', `_${found.problem}_`] : []),
   '',
   ...[...new Set(sessions.map((s) => s.project))].map((name) => {
     const mine = sessions.filter((s) => s.project === name);
@@ -251,7 +267,7 @@ const md = [
 ].join('\n');
 
 const safe = computer.replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 40) || 'computer';
-const json = { app: 'agents-home', version: 1, id: safe, computer, at: now, every: (anyRunning ? 15 : 60) * 60_000, sessions, repos, jobs, machine };
+const json = { app: 'agents-home', version: 1, id: safe, computer, at: now, every: (anyRunning ? 15 : 60) * 60_000, sessions, repos, jobs, work, machine };
 
 if (args.has('--dry')) { process.stdout.write(md); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'status'), { recursive: true });
