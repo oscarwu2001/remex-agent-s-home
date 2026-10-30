@@ -166,8 +166,10 @@
         <p class="hint" id="fleet-status" aria-live="polite"></p>
         <div class="form-actions">
           <button type="button" class="button" id="fleet-choose">Choose shared folder</button>
+          <button type="button" class="button" id="fleet-git">Use a git status folder</button>
           <button type="button" class="link-btn" id="fleet-off" hidden>Stop sharing</button>
         </div>
+        <p class="hint"><strong>Git status folder</strong> (pull only): your other computers post a short status every hour, 9:00–19:00, to the <code>agents-status</code> branch, with no Claude tokens. Clone that branch here and pick the clone; the app pulls it every 10 minutes and writes nothing.</p>
         <p class="hint">Sessions in the cloud (claude.ai, or the Claude app's cloud tasks) keep no files on your computers, so they can't be shown here. Code-tab sessions and Cowork tasks that run on a computer are shown.</p>
       </section>
 

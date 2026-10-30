@@ -2560,9 +2560,13 @@ function showFleet() {
   $('fleet-off').hidden = !on || snapshot.demo;
   $('fleet-choose').textContent = on ? 'Choose another folder' : 'Choose shared folder';
   const others = (snapshot.fleet?.computers ?? []).length;
+  const f = snapshot.fleet ?? {};
+  const where = prefs.private || !f.dir ? '' : ` (${f.dir})`;
+  const pulled = f.lastPull ? (f.lastPull.ok ? ` Last pull ${clock(f.lastPull.at)}.` : ` Last pull failed: ${f.lastPull.error}.`) : '';
   $('fleet-status').textContent = snapshot.demo ? 'The demo shows a made-up second computer.'
-    : on ? `Sharing${prefs.private || !snapshot.fleet.dir ? '' : ` in ${snapshot.fleet.dir}`}. ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No other computer has written there yet.'}`
-      : 'Off.';
+    : !on ? 'Off.'
+      : f.mode === 'git' ? `Pulling the status branch${where}.${pulled} ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No computer has posted yet.'}`
+        : `Sharing${where}. ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No other computer has written there yet.'}`;
 }
 $('fleet-choose').addEventListener('click', async () => {
   if (!bridge.fleetChoose) {
@@ -2570,6 +2574,14 @@ $('fleet-choose').addEventListener('click', async () => {
     return;
   }
   const res = await bridge.fleetChoose();
+  if (!res.ok && !res.canceled) $('fleet-status').textContent = res.error;
+});
+$('fleet-git').addEventListener('click', async () => {
+  if (!bridge.fleetGitChoose) {
+    $('fleet-status').textContent = 'The browser preview cannot pick folders; this works in the app.';
+    return;
+  }
+  const res = await bridge.fleetGitChoose();
   if (!res.ok && !res.canceled) $('fleet-status').textContent = res.error;
 });
 $('fleet-off').addEventListener('click', async () => {

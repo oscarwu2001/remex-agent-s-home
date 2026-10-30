@@ -73,3 +73,13 @@ test('a shared folder that cannot be read is a problem, not an empty list', () =
   const res = fleet.readShares(path.join(os.tmpdir(), 'no-such-agents-folder-xyz'), 'pc', Date.now());
   assert.match(res.problems[0].label, /could not be read/);
 });
+
+test('a computer that posts hourly stays online until a quarter past its next post is due', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fleet-'));
+  const now = Date.now();
+  const post = (name, ago) => fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ app: 'agents-home', computer: name, at: now - ago, every: 3_600_000, sessions: [{ project: 'cad', status: 'idle', agents: [] }] }));
+  post('fresh', 70 * 60_000);
+  post('late', 80 * 60_000);
+  const { computers } = fleet.readShares(dir, 'me.json', now);
+  assert.deepEqual(computers.map((c) => [c.computer, c.online]), [['fresh', true], ['late', false]]);
+});

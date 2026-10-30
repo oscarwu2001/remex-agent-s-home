@@ -119,7 +119,11 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
       continue;
     }
     if (now - data.at > KEEP_MS) continue;
-    const online = now - data.at <= FRESH_MS;
+    // A computer that posts every hour (the git status branch) is online
+    // until a quarter past its next post is due; one in a synced folder
+    // writes every few seconds, so three minutes of silence is offline.
+    const every = Number.isFinite(data.every) && data.every > 0 ? Math.min(data.every, 6 * 3_600_000) : 0;
+    const online = now - data.at <= Math.max(FRESH_MS, every * 1.25);
     const sessions = online ? data.sessions.slice(0, 100).map(cleanSession) : [];
     const kept = sessions.filter(Boolean);
     if (kept.length < sessions.length) problems.push({ label: `${sessions.length - kept.length} session${sessions.length - kept.length === 1 ? '' : 's'} in a computer's status file did not make sense and ${sessions.length - kept.length === 1 ? 'is' : 'are'} not shown`, detail: file });

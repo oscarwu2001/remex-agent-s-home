@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('agentsHome', {
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
   fleetChoose: () => ipcRenderer.invoke('home:fleet-choose'),
   fleetOff: () => ipcRenderer.invoke('home:fleet-off'),
+  fleetGitChoose: () => ipcRenderer.invoke('home:fleet-git-choose'),
   openMini: () => ipcRenderer.invoke('home:mini-open'),
   miniPin: (on) => ipcRenderer.invoke('home:mini-pin', on),
   showMain: () => ipcRenderer.invoke('home:show-main'),

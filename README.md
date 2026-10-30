@@ -99,6 +99,14 @@ helper types and to-do counts, never file names, commands, prompts or to-do
 wording. The app itself never goes online for this; the folder's own sync
 does. A computer not heard from for three minutes shows as offline.
 
+**Or through git, pull only.** For a main workstation that only watches:
+your other computers post a short status every hour from 9:00 to 19:00 to
+the `agents-status` branch of this repo (plain Node and git, no Claude
+tokens; see that branch's README for the two-line setup). On the main
+workstation, clone that branch and pick it in **Settings → Other computers
+→ Use a git status folder**: the app pulls it every 10 minutes and writes
+nothing. A computer counts as online until a quarter past its next post.
+
 ## Mini window
 
 **Mini window** (top of the map) opens a small window that stays on top of

@@ -643,11 +643,17 @@ app.whenReady().then(() => {
   // the status file holds (never more than privacy mode shows).
   const fleetFile = path.join(app.getPath('userData'), 'fleet.json');
   let fleetDir;
+  // 'folder': write this computer's file and read the others (a synced
+  // folder). 'git': pull only, from a clone of the agents-status branch that
+  // the other computers post to every hour (see that branch's README).
+  let fleetMode = 'folder';
+  let lastPull;
   // This copy's own id, so computers with the same name keep apart.
   let fleetId;
   try {
     const saved = JSON.parse(fs.readFileSync(fleetFile, 'utf8'));
     if (typeof saved.dir === 'string' && saved.dir) fleetDir = saved.dir;
+    if (saved.mode === 'git') fleetMode = 'git';
     if (typeof saved.id === 'string' && /^[a-f0-9]{8,16}$/.test(saved.id)) fleetId = saved.id;
   } catch (err) {
     if (err.code !== 'ENOENT') problem('fleet.json could not be read; sharing with other computers is off', fleetFile);
@@ -657,7 +663,7 @@ app.whenReady().then(() => {
     // Kept straight away when sharing is on, so a restart writes the same file.
     if (fleetDir) {
       try {
-        fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir, id: fleetId }, null, 2)}\n`);
+        fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir, id: fleetId, mode: fleetMode }, null, 2)}\n`);
       } catch (err) {
         problem(`fleet.json could not be saved (${err.code || err.message})`, fleetFile);
       }
@@ -666,8 +672,42 @@ app.whenReady().then(() => {
   let fleetState = { computers: [], problems: [] };
   const saveFleet = () => {
     fs.mkdirSync(path.dirname(fleetFile), { recursive: true });
-    fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir ?? null, id: fleetId }, null, 2)}\n`);
+    fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir ?? null, id: fleetId, mode: fleetMode }, null, 2)}\n`);
   };
+  const statusDir = () => (fleetMode === 'git' ? path.join(fleetDir, 'status') : fleetDir);
+  // Pull only: fast-forward, quietly, at most every 10 minutes. The one trip
+  // online this mode makes, and only once the user has picked the folder.
+  function pullStatus() {
+    if (fleetMode !== 'git' || !fleetDir) return;
+    execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (err, _out, stderr) => {
+        lastPull = err
+          ? { at: Date.now(), ok: false, error: err.code === 'ENOENT' ? 'git was not found' : String(stderr || err.message).trim().split('\n').pop() }
+          : { at: Date.now(), ok: true };
+      });
+  }
+  setInterval(pullStatus, 10 * 60_000);
+  pullStatus();
+  ipcMain.handle('home:fleet-git-choose', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Pick your clone of the agents-status branch',
+      properties: ['openDirectory'],
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    const dir = res.filePaths[0];
+    if (!fs.existsSync(path.join(dir, '.git')) || !fs.existsSync(path.join(dir, 'post-status.js'))) {
+      return { ok: false, error: 'That is not a clone of the agents-status branch (see its README for the one-line clone).' };
+    }
+    fleetDir = dir;
+    fleetMode = 'git';
+    try {
+      saveFleet();
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+    pullStatus();
+    return { ok: true, dir };
+  });
   ipcMain.handle('home:fleet-choose', async () => {
     const res = await dialog.showOpenDialog(win, {
       title: 'Pick a folder your computers share (OneDrive, Dropbox, a network drive)',
@@ -676,6 +716,7 @@ app.whenReady().then(() => {
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     try {
       fleetDir = path.join(res.filePaths[0], 'agents-home-status');
+      fleetMode = 'folder';
       fs.mkdirSync(fleetDir, { recursive: true });
       saveFleet();
       return { ok: true, dir: fleetDir };
@@ -699,12 +740,16 @@ app.whenReady().then(() => {
     if (!fleetDir) return;
     const now = Date.now();
     const problemsNow = [];
-    try {
-      fleet.writeShare(fleetDir, fleet.summaryOf(tracker.snapshot(now), HERE, now, fleetId));
-    } catch (err) {
-      problemsNow.push({ label: `This computer's status could not be written to the shared folder (${err.code || 'error'})`, detail: fleetDir, count: 1 });
+    if (fleetMode === 'folder') {
+      try {
+        fleet.writeShare(fleetDir, fleet.summaryOf(tracker.snapshot(now), HERE, now, fleetId));
+      } catch (err) {
+        problemsNow.push({ label: `This computer's status could not be written to the shared folder (${err.code || 'error'})`, detail: fleetDir, count: 1 });
+      }
+    } else if (lastPull && !lastPull.ok) {
+      problemsNow.push({ label: `The status branch could not be pulled (${lastPull.error})`, detail: fleetDir, count: 1 });
     }
-    const read = fleet.readShares(fleetDir, fleet.fileFor(HERE, fleetId), now);
+    const read = fleet.readShares(statusDir(), fleet.fileFor(HERE, fleetId), now);
     fleetState = { computers: read.computers, problems: [...problemsNow, ...read.problems.map((p) => ({ ...p, count: 1 }))] };
   }, FLEET_MS);
 
@@ -865,7 +910,7 @@ app.whenReady().then(() => {
     const payload = {
       ...snap,
       here: HERE,
-      fleet: { on: Boolean(fleetDir), dir: fleetDir, computers: fleetState.computers },
+      fleet: { on: Boolean(fleetDir), dir: fleetDir, mode: fleetMode, lastPull, computers: fleetState.computers },
       projects: {
         file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
         list: projects.data?.projects ?? [],
