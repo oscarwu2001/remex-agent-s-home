@@ -3,23 +3,37 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793332801085,
+ "at": 1793336400976,
  "every": 3600000,
  "sessions": [
   {
-   "project": "stoic-morse-54a28d",
+   "project": "spine-sim",
    "source": "code",
    "status": "working",
-   "lastAt": 1793332626297.9072,
+   "lastAt": 1793336398592.8032,
    "agents": []
   },
   {
-   "project": "stoic-morse-54a28d",
+   "project": "spine-sim",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1793336314598.6118,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1793331069062.4421,
+   "lastAt": 1793335045465.784,
    "agents": []
   }
  ],
- "repos": []
+ "repos": [
+  {
+   "project": "spine-sim",
+   "branch": "handle-map-model",
+   "lastCommit": 1793331549000,
+   "changed": 0
+  }
+ ]
 }
