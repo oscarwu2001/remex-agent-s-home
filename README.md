@@ -18,3 +18,24 @@ Remove the hourly task with
 **On the main workstation** (pulls only): clone the same way, without the
 second line, then in Agent's Home open Settings → Other computers →
 **Use a git status folder** and pick `.agents-home\status-repo`.
+
+**Training and other long jobs.** Copy `agents_progress.py` next to your
+script (or add this folder to `sys.path`) and report progress:
+
+```python
+from agents_progress import Progress
+
+with Progress("train-seg", project="spine-seg", total=epochs * len(loader), epochs=epochs) as p:
+    for epoch in range(epochs):
+        for batch in loader:
+            ...
+            p.update(step, epoch=epoch + 1, loss=float(loss))
+```
+
+The post then shows each job's epoch, step, percentage, ETA and up to six
+metrics, and goes out every 15 minutes while a job runs. Jobs without the
+helper still show up as a busy GPU or CPU on the machine line. Only job and
+metric names and numbers are posted.
+
+If you set this up before 30 Oct, run `install-task.ps1` once more to switch
+the task to every 15 minutes.
