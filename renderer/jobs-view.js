@@ -59,3 +59,18 @@ export function machineHtml(m) {
   ].filter(Boolean).join('');
   return chips ? `<p class="machine">${chips}</p>` : '';
 }
+
+// Work found running without the helper: just what it is and for how long.
+export function workHtml(work = [], now = Date.now()) {
+  if (!work.length) return '';
+  return `<ul class="jobs work">${work.map((w) => {
+    const ran = `running for ${duration(now - w.startedAt)}`;
+    const where = w.on === 'gpu' ? `GPU${w.gpuMem ? ` · ${(w.gpuMem / 1024).toFixed(1)} GB` : ''}` : 'CPU';
+    return `<li class="job running" title="${esc(`${w.name}${w.project ? ` (${w.project})` : ''}: ${ran}, on the ${where}`)}">
+      <span class="job-mark" aria-hidden="true"><svg viewBox="0 0 24 24">${JOB_STATES.running.mark}</svg></span>
+      <div class="job-body">
+        <p class="job-top"><span class="job-name">${esc(w.name)}</span>${w.project ? `<span class="job-proj">${esc(w.project)}</span>` : ''}<span class="job-pct">${esc(duration(now - w.startedAt))}</span></p>
+        <p class="job-line">${esc(ran)} · ${esc(where)}</p>
+      </div></li>`;
+  }).join('')}</ul>`;
+}

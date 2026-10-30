@@ -5,7 +5,7 @@
 
 import { overview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES, isRunning, icon } from './overview.js';
 import { installTips } from './tip.js';
-import { jobsHtml, machineHtml } from './jobs-view.js';
+import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup, personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
@@ -83,13 +83,13 @@ function sessionCard(s, local) {
 let last = '';
 function render() {
   const snap = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : live;
-  const o = overview(snap.sessions ?? [], snap.here ?? 'This computer', snap.fleet?.computers ?? [], { jobs: snap.jobs ?? [], machine: snap.machine });
-  const groups = o.computers.filter((c) => c.sessions || c.local || (c.jobs ?? []).length).map((c) => {
+  const o = overview(snap.sessions ?? [], snap.here ?? 'This computer', snap.fleet?.computers ?? [], { jobs: snap.jobs ?? [], machine: snap.machine, work: snap.work ?? [] });
+  const groups = o.computers.filter((c) => c.sessions || c.local || (c.jobs ?? []).length || (c.work ?? []).length).map((c) => {
     const projects = c.projects.map((p) => `<li class="proj"><p class="proj-head"><span class="proj-name">${esc(p.project)}</span><span class="badges">${p.running ? runningBadge(p.running) : ''}${p.helpers ? helperBadge(p.helpers) : ''}</span></p>
         <ul class="sessions">${p.sessions.map((s) => sessionCard(s, c.local)).join('')}</ul></li>`).join('');
     const state = c.local ? '' : c.online ? 'online' : 'offline';
     return `<section class="computer${c.online ? '' : ' offline'}"><h2>${esc(c.computer)}${state ? ` <span class="state">${state}</span>` : ''}</h2>
-        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length ? '' : '<p class="empty">Nothing running here.</p>'}</section>`;
+        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="empty">Nothing running here.</p>'}</section>`;
   }).join('');
   const html = groups || '<p class="empty">No sessions yet.</p>';
   // Redraw only on change, so an open list and the scroll position stay put.

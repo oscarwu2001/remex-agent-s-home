@@ -14,7 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { cleanJob, cleanMachine, sortJobs } = require('./jobs');
+const { cleanJob, cleanMachine, cleanWork, sortJobs } = require('./jobs');
 
 const FRESH_MS = 3 * 60_000; // a computer not heard from in this long is offline
 const KEEP_MS = 7 * 86_400_000; // offline computers are listed for a week
@@ -157,6 +157,7 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
       jobs: sortJobs((Array.isArray(data.jobs) ? data.jobs.slice(0, 12) : []).map(cleanJob).filter(Boolean)
         .map((j) => (!online && j.state === 'running' ? { ...j, state: 'stalled' } : j))),
       machine: online ? cleanMachine(data.machine) : undefined,
+      work: online ? (Array.isArray(data.work) ? data.work.slice(0, 12) : []).map(cleanWork).filter(Boolean) : [],
     });
   }
   computers.sort((a, b) => a.computer.localeCompare(b.computer));

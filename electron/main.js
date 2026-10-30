@@ -14,6 +14,7 @@ const { coworkRoots } = require('../src/core/cowork');
 const fleet = require('../src/core/fleet');
 const projectList = require('../src/core/projects');
 const jobFiles = require('../src/core/jobs');
+const workFinder = require('../src/core/work');
 const assistantFiles = require('../src/core/assistant');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
@@ -857,6 +858,21 @@ app.whenReady().then(() => {
   setInterval(sampleMachine, 30_000);
   setTimeout(sampleMachine, 3_000);
 
+  // Running work found without any help from the scripts (src/core/work.js),
+  // every 30 s. A process that reports as a job is shown once, as the job.
+  let work = { work: [] };
+  let looking = false;
+  function findWork() {
+    if (looking) return;
+    looking = true;
+    workFinder.detectWork({ projects: projects.data?.projects ?? [] }, (res) => {
+      looking = false;
+      work = res;
+    });
+  }
+  setInterval(findWork, 30_000);
+  setTimeout(findWork, 4_000);
+
   // ---- the mini window ------------------------------------------------------
   // A small window that stays on top, like a music player's mini mode: what
   // runs now, per computer and project, and each session's to-do list.
@@ -975,6 +991,7 @@ app.whenReady().then(() => {
       fleet: { on: Boolean(fleetDir), dir: fleetDir, mode: fleetMode, lastPull, computers: fleetState.computers },
       jobs: jobs.jobs,
       machine,
+      work: work.work.filter((w) => !jobs.jobs.some((j) => j.pid === w.pid)),
       projects: {
         file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
         list: projects.data?.projects ?? [],
@@ -992,6 +1009,7 @@ app.whenReady().then(() => {
       problems: [
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
         ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems, ...jobs.problems,
+        ...(work.problem ? [{ label: work.problem, detail: '', count: 1 }] : []),
         ...projects.problems.map((label) => ({ label: `Project list: ${label}`, detail: projectsPath, count: 1 })),
         ...assistant.problems.map((label) => ({ label: `Personal assistant: ${label}`, detail: assistantPath, count: 1 })),
         ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),

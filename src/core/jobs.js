@@ -86,6 +86,8 @@ function readJobs(dir = jobsDir(), now = Date.now(), { fsys = fs, alive = realAl
     }
     const job = cleanJob(raw);
     if (!job || now - job.updatedAt > KEEP_MS) continue;
+    // Kept on this computer only, so its process is not listed twice.
+    if (Number.isInteger(raw.pid)) Object.defineProperty(job, 'pid', { value: raw.pid, enumerable: false });
     if (job.state === 'running') {
       if (alive(raw.pid) === false) job.state = 'stopped';
       else if (now - job.updatedAt > STALL_MS) job.state = 'stalled';
@@ -111,4 +113,14 @@ function cleanMachine(m) {
   return gpus.length || out.cpu !== undefined ? out : undefined;
 }
 
-module.exports = { jobsDir, readJobs, cleanJob, cleanMachine, sortJobs, STALL_MS };
+// One piece of running work from a post (src/core/work.js): script name,
+// project, CPU or GPU, start time, GPU memory. The process id stays home.
+function cleanWork(w) {
+  if (!w || typeof w !== 'object') return undefined;
+  const workName = name(w.name, 64);
+  const startedAt = num(w.startedAt, 1e14);
+  if (!workName || !startedAt) return undefined;
+  return { name: workName, project: name(w.project, 80), on: w.on === 'gpu' ? 'gpu' : 'cpu', startedAt, gpuMem: num(w.gpuMem, 1e7) };
+}
+
+module.exports = { jobsDir, readJobs, cleanJob, cleanMachine, cleanWork, sortJobs, STALL_MS };

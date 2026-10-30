@@ -107,7 +107,14 @@ workstation, clone that branch and pick it in **Settings → Other computers
 → Use a git status folder**: the app pulls it every 10 minutes and writes
 nothing. A computer counts as online until a quarter past its next post.
 
-**Training and other long jobs.** A script that reports with
+**Running work.** Without any change to your scripts, the app finds Python
+work that is on the GPU, or has kept a CPU core half busy for 5 minutes, and
+shows it under its computer as *train.py · spine-seg · running for 2 h 10 ·
+GPU 11 GB* (checked every 30 seconds here; other computers send theirs with
+their posts). Only the script's name and project are shown, never its
+arguments or paths.
+
+**Steps and epochs (optional).** A script that reports with
 `agents_progress.py` (in the `agents-status` branch; one import and
 `p.update(step, epoch=..., loss=...)` in the loop) writes
 `~/.agents-home/jobs/<name>.json`. Running now then shows the job under its

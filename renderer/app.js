@@ -12,7 +12,7 @@ import { overview as runningOverview, headline, headlineBadges, badge, runningBa
 import { statusText, glyphKey, elapsed } from './status.js';
 import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
 import { installTips } from './tip.js';
-import { jobsHtml, machineHtml } from './jobs-view.js';
+import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1136,9 +1136,9 @@ function rowHtml(key, x, name, sub) {
 // "Running now": this computer's sessions as cards (each with its helpers),
 // grouped by where they run, then the other computers' projects as rows.
 function renderSessions(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine });
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
   const others = o.computers.filter((c) => !c.local);
-  if (!s.sessions.length && !others.length && !(s.jobs ?? []).length) {
+  if (!s.sessions.length && !others.length && !(s.jobs ?? []).length && !(s.work ?? []).length) {
     const watching = s.watcher.roots.find((r) => r.state === 'ok');
     return `<p class="empty">Nobody is on shift. Agents appear here within a second of a Claude Code
       session writing to its transcript${watching ? '' : ' (no transcript folder found yet)'}.
@@ -1151,7 +1151,7 @@ function renderSessions(s) {
   };
   const many = o.computers.length > 1;
   const local = o.computers.filter((c) => c.local).map((c) => {
-    const cards = c.projects.flatMap((p) => p.sessions).map(card).join('') + jobsHtml(c.jobs);
+    const cards = c.projects.flatMap((p) => p.sessions).map(card).join('') + jobsHtml(c.jobs) + workHtml(c.work);
     const load = machineHtml(c.machine);
     if (!cards && !load) return '';
     return many || load ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${load}${cards}` : cards;
@@ -1172,8 +1172,8 @@ function renderSessions(s) {
     }).join('');
     return `<div class="computer${c.online ? '' : ' offline'}">
         <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
-        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}
-        ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
+        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}
+        ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
   }).join('');
   const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
   return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
@@ -1237,9 +1237,9 @@ function todoListHtml(todos) {
 
 // The headline badges of "Running now", and what makes them change.
 function renderRunning(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine });
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
   const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers]),
-    (c.jobs ?? []).map((j) => [j.name, j.state, j.step, j.epoch, j.updatedAt]), c.machine])]);
+    (c.jobs ?? []).map((j) => [j.name, j.state, j.step, j.epoch, j.updatedAt]), c.machine, (c.work ?? []).map((w) => [w.name, Math.floor((Date.now() - w.startedAt) / 60_000)])])]);
   return { head: headline(o), badges: headlineBadges(o), key };
 }
 

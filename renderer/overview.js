@@ -9,9 +9,9 @@ export const isRunning = (status) => RUNNING.has(status);
 
 export const SOURCE_NAMES = { code: 'Claude Code', cowork: 'Cowork', wsl: 'WSL' };
 
-export function overview(localSessions, here, others = [], { jobs = [], machine } = {}) {
+export function overview(localSessions, here, others = [], { jobs = [], machine, work = [] } = {}) {
   const groups = [];
-  const add = (computer, sessions, { local = false, online = true, at, every, repos = [], jobs: jobList = [], machine: load } = {}) => {
+  const add = (computer, sessions, { local = false, online = true, at, every, repos = [], jobs: jobList = [], machine: load, work: workList = [] } = {}) => {
     const byProject = new Map();
     for (const s of sessions) {
       const p = byProject.get(s.project) ?? { project: s.project, sessions: [], running: 0, helpers: 0 };
@@ -23,7 +23,8 @@ export function overview(localSessions, here, others = [], { jobs = [], machine 
     const projects = [...byProject.values()].sort((a, b) => b.running - a.running || a.project.localeCompare(b.project));
     groups.push({
       computer, local, online, at, every, repos, jobs: jobList, machine: load,
-      jobsRunning: jobList.filter((j) => j.state === 'running').length,
+      work: workList,
+      jobsRunning: jobList.filter((j) => j.state === 'running').length + workList.length,
       sessions: sessions.length,
       running: sessions.filter((s) => isRunning(s.status)).length,
       helpers: projects.reduce((n, p) => n + p.helpers, 0),
@@ -37,7 +38,7 @@ export function overview(localSessions, here, others = [], { jobs = [], machine 
     const where = s.computer ?? here;
     byWhere.set(where, [...(byWhere.get(where) ?? []), s]);
   }
-  for (const [where, sessions] of byWhere) if (sessions.length || where === here) add(where, sessions, { local: true, ...(where === here ? { jobs, machine } : {}) });
+  for (const [where, sessions] of byWhere) if (sessions.length || where === here) add(where, sessions, { local: true, ...(where === here ? { jobs, machine, work } : {}) });
   // Another computer's WSL sessions keep their own label there too.
   for (const o of others) {
     const byPlace = new Map([[o.computer, []]]);
@@ -47,7 +48,7 @@ export function overview(localSessions, here, others = [], { jobs = [], machine 
     }
     for (const [where, sessions] of byPlace) {
       const main = where === o.computer;
-      if (sessions.length || main) add(where, sessions, { online: o.online, at: o.at, every: o.every, ...(main ? { repos: o.repos ?? [], jobs: o.jobs ?? [], machine: o.machine } : {}) });
+      if (sessions.length || main) add(where, sessions, { online: o.online, at: o.at, every: o.every, ...(main ? { repos: o.repos ?? [], jobs: o.jobs ?? [], machine: o.machine, work: o.work ?? [] } : {}) });
     }
   }
   return {
@@ -114,7 +115,7 @@ export function headlineBadges(o) {
     badge('session', o.sessions, plural(o.sessions, 'session'), { quiet: true }),
     badge('live', o.projects, `${plural(o.projects, 'project')} with sessions`, { quiet: true }),
     computers > 1 ? badge('computer', computers, plural(computers, 'computer'), { quiet: true }) : '',
-    o.jobs ? badge('job', o.jobs, `${plural(o.jobs, 'job')} running (training and other long runs)`) : '',
+    o.jobs ? badge('job', o.jobs, `${plural(o.jobs, 'job')} running (training, scripts on the GPU or busy CPU)`) : '',
   ].join('');
 }
 
