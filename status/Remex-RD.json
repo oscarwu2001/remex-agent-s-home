@@ -1,0 +1,25 @@
+{
+ "app": "agents-home",
+ "version": 1,
+ "id": "Remex-RD",
+ "computer": "Remex-RD",
+ "at": 1793330961949,
+ "every": 3600000,
+ "sessions": [
+  {
+   "project": "stoic-morse-54a28d",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1793330888229.0327,
+   "agents": []
+  },
+  {
+   "project": "stoic-morse-54a28d",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1793330903197.027,
+   "agents": []
+  }
+ ],
+ "repos": []
+}
