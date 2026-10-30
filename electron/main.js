@@ -679,7 +679,10 @@ app.whenReady().then(() => {
   // online this mode makes, and only once the user has picked the folder.
   function pullStatus() {
     if (fleetMode !== 'git' || !fleetDir) return;
-    execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+    // Never a sign-in window for a background pull (Git Credential
+    // Manager would ask which account to use): a failure shows under
+    // "Needs attention" instead.
+    execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } },
       (err, _out, stderr) => {
         lastPull = err
           ? { at: Date.now(), ok: false, error: err.code === 'ENOENT' ? 'git was not found' : String(stderr || err.message).trim().split('\n').pop() }
