@@ -24,10 +24,44 @@ const DETAILS = {
   Edit: ['Editing a file', 'write', 'settings.json'],
 };
 
+const HERE = 'STUDIO-PC';
 const SESSIONS = {
-  a: { project: 'spine-seg', start: 0 },
-  b: { project: 'carm-calib', start: 0 },
+  a: { project: 'spine-seg', start: 0, source: 'code', computer: HERE },
+  b: { project: 'carm-calib', start: 0, source: 'wsl', computer: `${HERE} · WSL Ubuntu` },
 };
+
+// Each demo session's to-do list, ticking along with the loop.
+const TODOS = {
+  a: ['Map the loader modules', 'Review the resampler change', 'Check viewer contrast', 'Plan the export step', 'Write the release note'],
+  b: ['Run the fast test loop', 'Hunt swallowed errors', 'Second opinion on registration'],
+};
+function demoTodos(key, t) {
+  const list = TODOS[key];
+  const done = Math.min(list.length - 1, Math.floor((t / 60) * list.length));
+  const items = list.map((text, i) => ({ text, status: i < done ? 'completed' : i === done ? 'in_progress' : 'pending' }));
+  return { items, total: items.length, done, doing: 1 };
+}
+
+// A Cowork task of the Claude app and a second computer sharing its status,
+// so "Running now" has several places to show.
+function coworkSession(nowMs, epochMs, t) {
+  const busy = t % 30 < 22;
+  return {
+    id: 'demo-c', project: 'weekly-report', projectId: 'weekly-report', source: 'cowork', computer: HERE, title: 'Summarise this week',
+    room: 'nurses-station', startedAt: epochMs - 3 * 60_000, lastActivityAt: nowMs, errors: 0,
+    status: busy ? 'working' : 'your-turn', activity: busy ? { label: 'Reading a file', kind: 'read', detail: 'notes.md' } : null,
+    tokens: demoTokens(40_000 + t * 300, 2), tokensWithHelpers: 0,
+    context: { tokens: 52_000, model: 'claude-sonnet-5-5', window: 200_000, source: 'model', pct: 0.26 },
+    history: [], agents: [], map: { steps: [], more: 0 },
+    todos: { items: [{ text: 'Collect the logs', status: 'completed' }, { text: 'Draft the summary', active: 'Drafting the summary', status: busy ? 'in_progress' : 'completed' }, { text: 'Send to the team', status: 'pending' }], total: 3, done: busy ? 1 : 2, doing: busy ? 1 : 0 },
+  };
+}
+const OTHER_COMPUTERS = (nowMs) => [
+  { computer: 'LAB-LAPTOP', online: true, at: nowMs - 4000, sessions: [
+    { project: 'garden-planner', source: 'code', status: 'working', agents: [{ type: 'code-reviewer', status: 'working' }], todos: { done: 2, doing: 1, total: 6 } },
+    { project: 'recipe-book', source: 'cowork', status: 'your-turn', agents: [] },
+  ] },
+];
 
 // Skills on the live map: [second, session, name, helper type or '' for the
 // session itself, how long it runs].
@@ -116,6 +150,10 @@ export function demoSnapshot(nowMs, epochMs) {
       // One demo session is nearly out of context, to show the warning.
       context: { tokens: key === 'a' ? 176_000 : 412_000, model: key === 'a' ? 'claude-haiku-4-5' : 'claude-opus-5-5', window: key === 'a' ? 200_000 : 1_000_000, source: 'model', pct: key === 'a' ? 0.88 : 0.412 },
       project: s.project,
+      projectId: s.project,
+      source: s.source,
+      computer: s.computer,
+      todos: demoTodos(key, t),
       room: 'nurses-station',
       startedAt: epochMs - (key === 'a' ? 14 : 6) * 60_000,
       lastActivityAt: nowMs,
@@ -128,9 +166,13 @@ export function demoSnapshot(nowMs, epochMs) {
     };
   });
 
+  sessions.push(coworkSession(nowMs, epochMs, t));
   return {
     generatedAt: nowMs,
     demo: true,
+    here: HERE,
+    fleet: { on: true, computers: OTHER_COMPUTERS(nowMs) },
+    sources: { cowork: 1 },
     sessions,
     stats: { malformedLines: 0, unlinkedSidechains: 0 },
     watcher: { roots: [], filesTailed: 0 },

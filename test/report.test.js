@@ -13,7 +13,7 @@ function ago(entry, daysAgo, sec) {
   return { ...entry, timestamp: new Date(Date.now() - daysAgo * 86_400_000 + sec * 1000).toISOString() };
 }
 
-test('the stats for the Meadow name every agent called in both windows read', () => {
+test('the stats-only numbers cover only the period asked for', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-report-'));
   fs.mkdirSync(path.join(root, 'p'));
   const lines = [
@@ -28,9 +28,6 @@ test('the stats for the Meadow name every agent called in both windows read', ()
   const res = run(['--days', '7', '--stats-only', '--roots', JSON.stringify([root])]);
   assert.equal(res.ok, true);
   assert.deepEqual(res.agents.map((a) => a.name), ['writer'], 'numbers cover only the last 7 days');
-  assert.deepEqual(res.seen, ['planner', 'writer'], 'the agent quiet this week still has a home');
-  assert.deepEqual(Object.keys(res.tokensByDay).sort(), ['planner', 'writer'], 'tokens per day for both, for the Meadow\'s running total');
-  for (const byDay of Object.values(res.tokensByDay)) assert.equal(Object.keys(byDay).length, 1);
 });
 
 test('report dates: impossible days, --until without --since, --days with --since and --compare outside the period are refused', () => {

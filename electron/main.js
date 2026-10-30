@@ -1,7 +1,8 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification, dialog } = require('electron');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
@@ -9,6 +10,9 @@ const { Tracker } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
 const { readRoster } = require('../src/core/roster');
 const { wslRoots, rootKey } = require('../src/core/wsl');
+const { coworkRoots } = require('../src/core/cowork');
+const fleet = require('../src/core/fleet');
+const projectList = require('../src/core/projects');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
 } = require('../src/core/rooms');
@@ -22,6 +26,9 @@ const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
 const WSL_MS = 1_500; // WSL files are read this often, each time after a running check
 const WSL_IDLE_MS = 5_000; // how often to look for a distro while none is running
+const COWORK_MS = 30_000; // how often to look for new Cowork tasks
+const FLEET_MS = 5_000; // how often to write and read the shared folder
+const HERE = os.hostname() || 'This computer';
 
 let win;
 let tracker;
@@ -29,6 +36,9 @@ let syslog; // the system log, in the app's data folder (see src/core/syslog.js)
 let watcher;
 let wslWatcher;
 let wsl = { roots: [], problems: [] };
+let coworkWatcher;
+let cowork = { roots: [], tasks: new Map(), problems: [] };
+let mini; // the mini window, when open
 // Problems shown under "Needs attention". `label` is safe on a shared
 // screen; `detail` may hold a path and is hidden in privacy mode. Repeats are
 // counted, not re-added, so a noisy folder cannot push others off the list.
@@ -140,6 +150,29 @@ function rosterDirs() {
   return dirs;
 }
 
+// Every transcripts folder the app reads: ~/.claude, WSL homes, Cowork tasks.
+const allRoots = () => [...watcher.roots, ...wslWatcher.roots, ...coworkWatcher.roots];
+
+// Where one transcript came from, for the board, the mini window and the
+// shared folder. Paths on Windows ignore case.
+const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+function sourceOf(file) {
+  const f = norm(file);
+  for (const root of coworkWatcher?.roots ?? []) {
+    if (f.startsWith(norm(root))) {
+      const t = cowork.tasks.get(root) ?? {};
+      return { source: 'cowork', computer: HERE, title: t.title, project: t.project };
+    }
+  }
+  for (const root of wslWatcher?.roots ?? []) {
+    if (f.startsWith(norm(root))) {
+      const distro = /^\\\\wsl(?:\.localhost|\$)\\([^\\]+)/i.exec(root)?.[1];
+      return { source: 'wsl', computer: `${HERE} · WSL${distro ? ` ${distro}` : ''}` };
+    }
+  }
+  return { source: 'code', computer: HERE };
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -166,11 +199,9 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Launch options: --demo shows scripted patients; --meadow (or
-  // AGENTS_HOME_MEADOW=1) turns on the Meadow, which is otherwise hidden.
+  // Launch option: --demo shows scripted patients.
   const query = {};
   if (process.argv.includes('--demo')) query.demo = '1';
-  if (process.argv.includes('--meadow') || process.env.AGENTS_HOME_MEADOW === '1') query.meadow = '1';
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), { query });
 }
 
@@ -211,7 +242,7 @@ app.whenReady().then(() => {
   let overrides = { ...overridesFrom(layout), ...fileOverrides };
   const { file: decorFile, decor: loadedDecor } = loadDecor(roomsWith(layout), gardensWith(layout));
   let decor = loadedDecor;
-  tracker = new Tracker({ overrides });
+  tracker = new Tracker({ overrides, sourceOf });
   const sink = {
     onEntry: (file, entry, now) => tracker.ingest(file, entry, now),
     onMalformed: (file, err) => tracker.noteMalformed(file, err),
@@ -248,6 +279,23 @@ app.whenReady().then(() => {
       problem(`Following WSL sessions failed (${err.name})`, err.message);
     } finally {
       setTimeout(followWsl, wsl.roots.length ? WSL_MS : WSL_IDLE_MS);
+    }
+  })();
+
+  // Cowork tasks of the Claude desktop app: their own transcripts folders,
+  // looked for again every half minute as new tasks start. Roots the other
+  // watchers already read are left to them.
+  coworkWatcher = new TranscriptWatcher({ roots: [], ...sink });
+  coworkWatcher.start();
+  (function followCowork() {
+    try {
+      cowork = coworkRoots();
+      const taken = new Set([...watcher.roots, ...wslWatcher.roots].map((r) => rootKey(r)));
+      coworkWatcher.setRoots(cowork.roots.filter((r) => !taken.has(rootKey(r))));
+    } catch (err) {
+      problem(`Looking for Cowork tasks failed (${err.name})`, err.message);
+    } finally {
+      setTimeout(followCowork, COWORK_MS);
     }
   })();
 
@@ -292,7 +340,7 @@ app.whenReady().then(() => {
       resolve({ ok: false, error: 'Choose 7, 28 or 90 days.' });
       return;
     }
-    const roots = [...watcher.roots, ...wslWatcher.roots];
+    const roots = allRoots();
     const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
       ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots), ...(details === true ? ['--details'] : [])], { stdio: 'pipe' });
     let err = '';
@@ -312,33 +360,6 @@ app.whenReady().then(() => {
     child.on('exit', (code) => {
       if (answered) return;
       resolve({ ok: false, error: `The report could not be built (exit ${code})${err ? `: ${err.trim().split('\n').pop()}` : ''}` });
-    });
-  }));
-
-  // Numbers per agent for the creature screen: the report's own figures,
-  // worked out in the background, with no files written. Kept 5 minutes.
-  let agentStats;
-  ipcMain.handle('home:agent-stats', () => new Promise((resolve) => {
-    if (agentStats && Date.now() - agentStats.at < 5 * 60_000) {
-      resolve(agentStats.result);
-      return;
-    }
-    const roots = [...watcher.roots, ...wslWatcher.roots];
-    const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
-      ['--days', '28', '--stats-only', '--roots', JSON.stringify(roots)], { stdio: 'pipe' });
-    let err = '';
-    let answered = false;
-    child.stderr.on('data', (d) => { err += d; });
-    child.stdout.on('data', () => {}); // nothing printed in stats-only mode
-    child.on('message', (result) => {
-      answered = true;
-      const reply = result && result.ok ? { ok: true, days: result.days, agents: result.agents, seen: result.seen ?? [], tokensByDay: result.tokensByDay ?? {} }
-        : { ok: false, error: (result && result.error) || 'The numbers could not be worked out.' };
-      if (reply.ok) agentStats = { at: Date.now(), result: reply };
-      resolve(reply);
-    });
-    child.on('exit', (code) => {
-      if (!answered) resolve({ ok: false, error: `The numbers could not be worked out (exit ${code})${err ? `: ${err.trim().split('\n').pop()}` : ''}` });
     });
   }));
 
@@ -524,7 +545,7 @@ app.whenReady().then(() => {
   let usageSummary;
   (async function followUsage() {
     try {
-      usage.setRoots([...watcher.roots, ...wslWatcher.roots]);
+      usage.setRoots(allRoots());
       await usage.scan();
       usageSummary = usage.summary();
     } catch (err) {
@@ -617,6 +638,183 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
+  // ---- running now, on every computer ------------------------------------
+  // Off until the user picks a shared folder; see src/core/fleet.js for what
+  // the status file holds (never more than privacy mode shows).
+  const fleetFile = path.join(app.getPath('userData'), 'fleet.json');
+  let fleetDir;
+  // This copy's own id, so computers with the same name keep apart.
+  let fleetId;
+  try {
+    const saved = JSON.parse(fs.readFileSync(fleetFile, 'utf8'));
+    if (typeof saved.dir === 'string' && saved.dir) fleetDir = saved.dir;
+    if (typeof saved.id === 'string' && /^[a-f0-9]{8,16}$/.test(saved.id)) fleetId = saved.id;
+  } catch (err) {
+    if (err.code !== 'ENOENT') problem('fleet.json could not be read; sharing with other computers is off', fleetFile);
+  }
+  fleetId ??= require('crypto').randomBytes(5).toString('hex');
+  let fleetState = { computers: [], problems: [] };
+  const saveFleet = () => {
+    fs.mkdirSync(path.dirname(fleetFile), { recursive: true });
+    fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir ?? null, id: fleetId }, null, 2)}\n`);
+  };
+  ipcMain.handle('home:fleet-choose', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Pick a folder your computers share (OneDrive, Dropbox, a network drive)',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      fleetDir = path.join(res.filePaths[0], 'agents-home-status');
+      fs.mkdirSync(fleetDir, { recursive: true });
+      saveFleet();
+      return { ok: true, dir: fleetDir };
+    } catch (err) {
+      fleetDir = undefined;
+      return { ok: false, error: `That folder cannot be used (${err.code || err.message})` };
+    }
+  });
+  ipcMain.handle('home:fleet-off', () => {
+    // This computer's file is left for the others to see go offline.
+    fleetDir = undefined;
+    fleetState = { computers: [], problems: [] };
+    try {
+      saveFleet();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+  });
+  setInterval(() => {
+    if (!fleetDir) return;
+    const now = Date.now();
+    const problemsNow = [];
+    try {
+      fleet.writeShare(fleetDir, fleet.summaryOf(tracker.snapshot(now), HERE, now, fleetId));
+    } catch (err) {
+      problemsNow.push({ label: `This computer's status could not be written to the shared folder (${err.code || 'error'})`, detail: fleetDir, count: 1 });
+    }
+    const read = fleet.readShares(fleetDir, fleet.fileFor(HERE, fleetId), now);
+    fleetState = { computers: read.computers, problems: [...problemsNow, ...read.problems.map((p) => ({ ...p, count: 1 }))] };
+  }, FLEET_MS);
+
+  // ---- the project list ------------------------------------------------------
+  // ~/.agents-home/projects.json, written by the personal-assistant and
+  // project-manager agents and by the user here. Re-read when it changes;
+  // every change from the app is made to a fresh read, so nothing an agent
+  // wrote a moment ago is lost.
+  const projectsPath = projectList.projectsFile();
+  let projects = { data: { projects: [] }, problems: [], missing: true };
+  let projectsStamp = '';
+  function readProjects(force = false) {
+    let stamp = 'missing';
+    try {
+      const st = fs.statSync(projectsPath);
+      stamp = `${st.mtimeMs}:${st.size}`;
+    } catch (err) {
+      if (err.code !== 'ENOENT') stamp = `error:${err.code}`;
+    }
+    if (!force && stamp === projectsStamp) return;
+    projectsStamp = stamp;
+    projects = projectList.loadProjects(projectsPath);
+  }
+  readProjects(true);
+  setInterval(() => readProjects(), 2_000);
+  ipcMain.handle('home:project-change', (_event, change) => {
+    readProjects(true);
+    if (!projects.raw) return { ok: false, error: `The project list cannot be changed: ${projects.problems[0]}` };
+    try {
+      const next = projectList.applyChange(projects.raw, change);
+      projectList.saveProjects(projectsPath, next);
+    } catch (err) {
+      return { ok: false, error: err.code ? `The project list could not be saved (${err.code})` : err.message };
+    }
+    readProjects(true);
+    return { ok: true };
+  });
+  ipcMain.handle('home:projects-show', async () => {
+    if (fs.existsSync(projectsPath)) {
+      shell.showItemInFolder(projectsPath);
+      return { ok: true, file: projectsPath };
+    }
+    // No list yet: open the folder it will live in, made if need be.
+    try {
+      fs.mkdirSync(path.dirname(projectsPath), { recursive: true });
+    } catch (err) {
+      return { ok: false, file: projectsPath, error: `The folder for the project list could not be made (${err.code || err.message})` };
+    }
+    const error = await shell.openPath(path.dirname(projectsPath));
+    return error ? { ok: false, file: projectsPath, error: `The folder could not be opened: ${error}` } : { ok: true, file: projectsPath };
+  });
+
+  // ---- the mini window ------------------------------------------------------
+  // A small window that stays on top, like a music player's mini mode: what
+  // runs now, per computer and project, and each session's to-do list.
+  const miniFile = path.join(app.getPath('userData'), 'mini.json');
+  function openMini() {
+    if (mini && !mini.isDestroyed()) {
+      mini.show();
+      mini.focus();
+      return;
+    }
+    let bounds = {};
+    try {
+      bounds = JSON.parse(fs.readFileSync(miniFile, 'utf8'));
+    } catch {
+      // No saved place yet (or an unreadable one): open at the default size.
+    }
+    mini = new BrowserWindow({
+      width: Number(bounds.width) || 360,
+      height: Number(bounds.height) || 520,
+      ...(Number.isFinite(bounds.x) && Number.isFinite(bounds.y) ? { x: bounds.x, y: bounds.y } : {}),
+      minWidth: 280,
+      minHeight: 200,
+      alwaysOnTop: true,
+      title: "Agent's Home · mini",
+      backgroundColor: '#fbfaf8',
+      autoHideMenuBar: true,
+      maximizable: false,
+      fullscreenable: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        spellcheck: false,
+      },
+    });
+    mini.setAlwaysOnTop(true, 'floating');
+    mini.webContents.on('will-navigate', (e) => e.preventDefault());
+    mini.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    mini.on('close', () => {
+      try {
+        fs.writeFileSync(miniFile, JSON.stringify(mini.getBounds()));
+      } catch (err) {
+        problem(`The mini window's place could not be saved (${err.code || err.message})`, miniFile);
+      }
+    });
+    mini.on('closed', () => { mini = undefined; });
+    mini.loadFile(path.join(__dirname, '..', 'renderer', 'mini.html'), { query: process.argv.includes('--demo') ? { demo: '1' } : {} });
+  }
+  ipcMain.handle('home:mini-open', () => {
+    openMini();
+    return { ok: true };
+  });
+  ipcMain.handle('home:mini-pin', (_event, on) => {
+    if (mini && !mini.isDestroyed()) mini.setAlwaysOnTop(on !== false, 'floating');
+    return { ok: true };
+  });
+  ipcMain.handle('home:show-main', () => {
+    if (!win || win.isDestroyed()) createWindow();
+    else {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+    return { ok: true };
+  });
+  if (process.argv.includes('--mini')) openMini();
+
   createWindow();
 
   let lastSnap;
@@ -625,8 +823,19 @@ app.whenReady().then(() => {
   const seenProblems = new Set();
   const SUMMARY_MS = 5 * 60_000;
   setInterval(() => {
-    if (!win || win.isDestroyed()) return;
+    const mainOpen = win && !win.isDestroyed();
+    const miniOpen = mini && !mini.isDestroyed();
+    if (!mainOpen && !miniOpen) return;
     const snap = tracker.snapshot();
+    // Which listed project each session works in, from its folder (the
+    // folder itself is never sent).
+    for (const s of snap.sessions) {
+      const hit = projectList.projectFor(tracker.sessions.get(s.id)?.cwd, projects.data?.projects ?? []);
+      if (hit) {
+        s.projectId = hit.id;
+        s.inCopy = hit.copy;
+      }
+    }
     // What changed since the last push, then who is working (every few
     // minutes while anyone is, and once when everyone has stopped).
     for (const { event, fields } of snapshotEvents(lastSnap, snap)) syslog.write('activity', event, fields);
@@ -643,21 +852,33 @@ app.whenReady().then(() => {
       seenProblems.add('log');
       problem(`The system log could not be written (${syslog.failed})`, logDir);
     }
-    win.webContents.send('home:snapshot', {
+    const payload = {
       ...snap,
+      here: HERE,
+      fleet: { on: Boolean(fleetDir), dir: fleetDir, computers: fleetState.computers },
+      projects: {
+        file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
+        list: projects.data?.projects ?? [],
+      },
+      sources: { cowork: coworkWatcher.roots.length },
       watcher: (() => {
         const a = watcher.status();
         const b = wslWatcher.status();
-        return { roots: [...a.roots, ...b.roots], filesTailed: a.filesTailed + b.filesTailed };
+        const c = coworkWatcher.status();
+        return { roots: [...a.roots, ...b.roots, ...c.roots], filesTailed: a.filesTailed + b.filesTailed + c.filesTailed };
       })(),
       roster: roster.agents,
       usage: usageSummary,
       problems: [
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
+        ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems,
+        ...projects.problems.map((label) => ({ label: `Project list: ${label}`, detail: projectsPath, count: 1 })),
         ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),
         ...(usageSummary?.unreadable ? [{ label: 'Lines that could not be read while counting use', detail: '', count: usageSummary.unreadable }] : []),
       ],
-    });
+    };
+    if (mainOpen) win.webContents.send('home:snapshot', payload);
+    if (miniOpen) mini.webContents.send('home:snapshot', payload);
     // Problems that do not come through problem() go to the log once each.
     for (const p of [...wsl.problems, ...roster.problems]) {
       const key = `${p.label}|${p.detail ?? ''}`;
@@ -674,5 +895,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   watcher?.stop();
+  coworkWatcher?.stop();
   if (process.platform !== 'darwin') app.quit();
 });

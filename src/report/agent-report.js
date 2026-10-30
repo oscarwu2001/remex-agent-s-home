@@ -42,7 +42,7 @@ function args(argv) {
     else if (a === '--by-project') opt.byProject = true;
     else if (a === '--roots') opt.roots = JSON.parse(argv[++i]); // the app passes its own (WSL included)
     else if (a === '--json') opt.json = true; // one JSON line on stdout, for the app
-    else if (a === '--stats-only') opt.statsOnly = true; // numbers per agent, no files (the creature screen)
+    else if (a === '--stats-only') opt.statsOnly = true; // numbers per agent as JSON, no files
     else if (a === '--since') opt.since = dateArg('--since', argv[++i]);
     else if (a === '--until') opt.until = endOfDay(dateArg('--until', argv[++i]));
     else if (a === '--compare') opt.compare = dateArg('--compare', argv[++i]);
@@ -778,7 +778,7 @@ function run(argv) {
   const roll = rollUp({ runs, sessions });
   const days = Array.from({ length: opt.days }, (_, i) => dayKey(since + i * 86_400_000 + 3_600_000));
 
-  // Per agent, for the app's creature screen: counts only, nothing identifying.
+  // Per agent, for --stats-only: counts only, nothing identifying.
   const agents = roll.types.map((t) => {
     const o = roll.overall[t];
     return {
@@ -789,19 +789,7 @@ function run(argv) {
     };
   });
   if (opt.statsOnly) {
-    // Every agent called in the two windows read (twice --days), so the
-    // Meadow keeps agents that were busy before but quiet lately.
-    const seen = [...new Set(data.runs.map((r) => r.type).filter(Boolean))].sort();
-    // Tokens per agent per day over the same span, so the Meadow can keep a
-    // running total that outlives the window (it merges days it already has).
-    const tokensByDay = {};
-    for (const r of data.runs) {
-      if (!r.type || r.start === undefined) continue;
-      const day = dayKey(r.start);
-      const byDay = (tokensByDay[r.type] ??= {});
-      byDay[day] = (byDay[day] ?? 0) + totalTokens(r.tokens);
-    }
-    const result = { ok: true, days: opt.days, agents, seen, tokensByDay, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
+    const result = { ok: true, days: opt.days, agents, notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length };
     if (opt.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

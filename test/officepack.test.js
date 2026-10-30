@@ -13,9 +13,9 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'office-pack-'));
 
 test('the pack lists its agents and skills with a one-line summary each', () => {
   const items = listPack(PACK);
-  assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['checker', 'code-reviewer', 'data-helper', 'planner', 'summariser', 'test-runner', 'writer']);
+  assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['builder', 'checker', 'code-reviewer', 'data-helper', 'personal-assistant', 'planner', 'project-manager', 'summariser', 'test-runner', 'writer']);
   assert.deepEqual(items.filter((i) => i.kind === 'hook').map((i) => i.name), ['team-reminders']);
-  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'handover', 'question-me', 'teach-me']);
+  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'handover', 'question-me', 'scan-projects', 'teach-me']);
   for (const i of items) assert.ok(i.summary.length > 10 && i.summary.length <= 120, i.name);
 });
 

@@ -1,4 +1,7 @@
 {
+  "agents/builder.md": [
+    "b9427a116bb9aecb3ae268b9e0cfd264"
+  ],
   "agents/checker.md": [
     "24549b498f0c80b41fc4a23179127d0d",
     "1970cfd2c588927f3efb4996020e980b"
@@ -11,9 +14,17 @@
     "24e579b0201468f86e10cc28a263cb04",
     "6d0f3dc758b0bbc87047d996818b6328"
   ],
+  "agents/personal-assistant.md": [
+    "9f867e8a08315cd39426f216a57dc6bc",
+    "79360e3926ea27f10fe3407dc1cf6c00"
+  ],
   "agents/planner.md": [
     "c4040eab06727a72abae0ea73b4e29ad",
     "b779b91fbe2a934569d0b86ebbaaf622"
+  ],
+  "agents/project-manager.md": [
+    "b136f13e066c2423ea2659454b43681d",
+    "2caf299ae8e4c22cda37be2b157b53b2"
   ],
   "agents/summariser.md": [
     "324bdee7ad0c273482ae412226bb60c7",
@@ -21,7 +32,8 @@
   ],
   "agents/test-runner.md": [
     "f9ef060c55820a0cae942e0f157b4a4b",
-    "34007ce717b15a23bdd8d7254f0e213e"
+    "34007ce717b15a23bdd8d7254f0e213e",
+    "ee47c0ac2b3ebcc5f0cb60b819309dbd"
   ],
   "agents/writer.md": [
     "259da62600629eb7443ec9f6b972249b",
@@ -33,7 +45,8 @@
     "94ddbad1068d0c5ee2c87a14cd7c85b6",
     "32d03485114a9d028bf40bb1f0b17e27",
     "c8e04cf9e2f509956ec403a1c9f9bcd7",
-    "a74ea42c2319769b6b8456319e5236c0"
+    "a74ea42c2319769b6b8456319e5236c0",
+    "9a98d9003b1006c15bc880f2368ab7cf"
   ],
   "skills/break-down/SKILL.md": [
     "8393a4e2ba1ac1605df384631a634fe1",
@@ -46,6 +59,10 @@
   "skills/question-me/SKILL.md": [
     "01301e4f40ad4782999f2f99b4c2e4cd",
     "7022e0a8fa6a3940e09a9886e2334188"
+  ],
+  "skills/scan-projects/SKILL.md": [
+    "46df8787b532c95c6a1ed70ed54226e6",
+    "538387386b184aa42cb4ecd9c5785b09"
   ],
   "skills/teach-me/SKILL.md": [
     "4eeba70fdf7fe8d7660f9ab7abd9c54e",

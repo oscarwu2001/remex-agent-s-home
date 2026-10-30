@@ -1,0 +1,81 @@
+/* Count badges and to-do pips, shared by both windows. */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.ico { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px 0 6px;
+  border-radius: 999px; background: var(--panel-raised); border: 1px solid var(--line);
+  font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap;
+}
+.badge-running:not(.quiet) { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 500; }
+.badge.quiet { color: var(--ink-muted); }
+
+.todo-pips { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.pips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.pip { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--ink-muted); position: relative; transition: all 0.45s var(--spring); }
+.pip.in_progress { border-color: var(--accent); }
+.pip.in_progress::after { content: ""; position: absolute; inset: 1px 50% 1px 1px; border-radius: 5px 0 0 5px; background: var(--accent); }
+.pip.completed { border-color: var(--accent); background: var(--accent); border-radius: 3px; }
+.pip.completed::after { content: ""; position: absolute; left: 2.2px; top: -0.2px; width: 2.5px; height: 5px; border: solid var(--on-accent); border-width: 0 1.4px 1.4px 0; transform: rotate(45deg); }
+.pip-bar { width: 110px; height: 6px; border-radius: 999px; background: var(--panel-sunk); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.pip-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.pip-n { font-size: 11.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+
+/* Hints and errors look the same in both windows. */
+.hint { font-size: 13px; color: var(--ink-muted); margin: 0 0 var(--s-2); }
+.form-error { margin: 4px 0 0; font-size: 12.5px; font-weight: 500; color: var(--warn); }
+.pcard > .form-error { margin-top: var(--s-1); }
+
+/* ---- project cards, both windows ------------------------------------------ */
+
+.pcards { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pcard { padding: var(--s-2) var(--s-3); background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-soft); }
+.pcard.unconfirmed { border-style: dashed; box-shadow: none; background: var(--panel); }
+.pcard-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.pname {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; padding: 0; border: 0; background: none;
+  color: var(--ink); font: 500 14px var(--font); letter-spacing: var(--track-tight); cursor: pointer; text-align: left;
+}
+.pname span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pname .ico { color: var(--ink-muted); transition: transform 0.4s var(--spring); }
+.pcard.open .pname .ico { transform: rotate(-8deg) scale(1.08); color: var(--accent); }
+.pcard-head .badges { flex: none; gap: 4px; }
+.pcard-head .badge { height: 22px; font-size: 12px; }
+.pcard-sub { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); min-height: 22px; }
+.confirm {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px 0 6px; border: 0; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent); font: 500 12px var(--font); cursor: pointer; transition: transform 0.35s var(--spring);
+}
+.confirm .ico { width: 14px; height: 14px; }
+.confirm:active { transform: scale(0.94); }
+.proj-check { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 var(--s-2); font-size: 12.5px; color: var(--ink-muted); }
+.proj-check .ico { color: var(--accent); margin-top: 1px; }
+.ptodos { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.ptodos li { display: grid; grid-template-columns: 24px 1fr auto auto; align-items: center; gap: 4px; min-height: 30px; font-size: 13px; }
+.ptodos li.completed .ptext { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.tick { width: 24px; height: 24px; display: grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer; border-radius: 6px; }
+.tick:hover .pip { border-color: var(--accent); transform: scale(1.15); }
+.by { display: inline-flex; color: var(--ink-muted); }
+.by .ico { width: 14px; height: 14px; }
+.icon-act { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 0.2s var(--ease-out), transform 0.35s var(--spring); }
+.icon-act:hover { background: var(--panel-sunk); color: var(--ink); }
+.icon-act:active { transform: scale(0.9); }
+.icon-act.subtle { opacity: 0.4; }
+.ptodos li:hover .icon-act.subtle, .icon-act.subtle:focus-visible { opacity: 1; }
+.proj-add { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.proj-add input {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel-sunk); color: var(--ink); font: 13px var(--font); transition: border-color 0.2s, background-color 0.2s;
+}
+.proj-add input:focus { border-color: var(--accent); background: var(--panel-raised); }
+.proj-add input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.proj-add input[aria-invalid="true"] { border-color: var(--warn); }
+.ptext.hidden-text { color: var(--ink-muted); }
+
+/* Small controls keep their small look but get a 36px hit area. */
+.tick, .icon-act, .confirm, .todo-toggle { position: relative; }
+.tick::before, .icon-act::before, .confirm::before, .todo-toggle::before { content: ""; position: absolute; inset: -5px; }
+.proj-add input::placeholder { color: var(--ink-muted); }
+@media (hover: none) { .icon-act.subtle { opacity: 1; } }

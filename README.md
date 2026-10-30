@@ -1,7 +1,8 @@
 # Agent's Home
 
 A little isometric hospital, drawn in the soft geometric style of *Monument
-Valley*, where your Claude Code agents live and work. It's the same idea as
+Valley*, where your Claude Code agents live and work, and a small assistant
+that keeps track of your projects and what is running on each computer. It's the same idea as
 Pixel Agents, but the rooms are hospital departments:
 
 - **Nurses' Station**: every Claude Code session you have open is an attending here.
@@ -64,62 +65,82 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
 - Helpers act out their work too: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
 
-## The Meadow
+## Running now, on every computer
 
-The Meadow is a hidden extra. A normal start shows a **Report** button at the
-top of the map instead, which builds the performance report and opens it
-straight away. To turn the Meadow on, start the app with `--meadow`:
-`npm run meadow` (or `npm start -- --meadow`); for the installed app, add
-` --meadow` to the end of the shortcut's Target, or set the environment
-variable `AGENTS_HOME_MEADOW=1`. In the browser preview, add `&meadow=1`.
+The **Running now** card at the top of the board counts what is live, with
+icons instead of words: a play mark for running, a terminal for sessions, a
+grid for projects with sessions, a screen for computers.
+Below it, every computer is listed with its projects, and each project with
+how many sessions run in it and how many helpers are at work. Hover any icon
+for its words.
 
-With it on, press **Meadow** at the top of the map for a second screen, away from the
-hospital: a floating island of nine grass terraces at different heights,
-drawn in the same Monument Valley isometric 3D as the hospital. Every agent
-lives there: the agents in your `.claude/agents`, plus every agent Claude
-has ever called (built-in ones like Explore included). Once an agent has
-been seen it keeps its spot, even after months of quiet.
+The app reads three kinds of session on this computer:
 
-Every agent grows up like a Pokémon:
+- **Claude Code**, in a terminal, an IDE or the Claude app's Code tab
+  (`~/.claude/projects`).
+- **WSL**: Claude Code inside a running Linux distro.
+- **Cowork tasks** of the Claude desktop app, which keep their own
+  transcripts in the app's data folder
+  (`%APPDATA%\Claude\local-agent-mode-sessions\…\.claude\projects`). The
+  app looks for new tasks every 30 seconds and only reads. That layout is
+  not documented by Anthropic, so if a new Claude app version moves it, the
+  tasks stop showing and nothing else breaks.
 
-- **Egg.** Each agent starts as an egg in a straw nest. It cracks as the
-  agent works, and once the agent has used 100k tokens it is ready to hatch.
-- **Hatching.** Pick one of three starters (always the same three for that
-  agent) from ten kinds: cat, dog, bunny, fox, dragon, dinosaur, fish, bird,
-  turtle and axolotl. It hatches as a baby.
-- **Growing and evolving.** It grows as the agent uses more tokens. At 1M
-  tokens it can evolve, and again at 5M. Each evolution starts small again,
-  and each kind has three stages (for example Drakelet, Drake, Skywyrm).
-  Fully grown dragons and birds fly.
-- **Rarity.** Every creature starts R. Good work earns it SR (a score of 80
-  over 5 or more runs) or SSR (90 over 10 or more), shown with gold or
-  rainbow sparkles and stars by its name. Once earned, rarity is kept.
-- **Looks.** Each kind has ten looks to choose from.
-- **SR and SSR show.** An SR creature wears silver anklets and a
-  silver-set gem. An SSR one turns gold: gold markings and trim, gold
-  anklets, a ruby in a gold setting, a floating gold halo and a gold glow.
-- **Points and mystery eggs.** Every 15 minutes the app is open earns a
-  point (time asleep does not count), and you start with 8. A mystery egg
-  costs 8 points and hatches after an hour of the app running, into a
-  random creature: any kind and look, rare (SR) 1 time in 5, super rare
-  (SSR) 1 in 20. Mystery creatures belong to no agent. They grow and evolve
-  with time in the app (hatch after 1 hour, evolve at 10 and 50 hours).
-  The island has room for 12.
-- **Creature index.** Every form you have raised (10 kinds × 3 stages),
-  its best rarity and the looks you have seen. Forms not found yet show as
-  shadows.
+Sessions in the cloud (claude.ai, cloud tasks) keep no files on your
+computer, so they can't be shown.
 
-Tokens are counted per agent per day and kept, so growth never goes
-backwards. The creatures wander about like mobs in a block game: they walk
-tile by tile, hop up and down the terraces, rest, and set off again. The
-fish swim in the pond. They stand still if your system asks for reduced
-motion.
+**Other computers.** In **Settings → Other computers**, pick a folder your
+computers all sync (OneDrive, Dropbox, a network drive) and do the same on
+each. Every copy of the app then writes a small status file there every few
+seconds and reads the others'. The file holds project names, statuses,
+helper types and to-do counts, never file names, commands, prompts or to-do
+wording. The app itself never goes online for this; the folder's own sync
+does. A computer not heard from for three minutes shows as offline.
 
-Click a creature, or its name in the sidebar, to see how it is growing and
-its performance: score, runs, finished rate, re-runs, median time, tokens,
-tool errors, verdicts and runs per day (the performance report's numbers
-for the last 28 days). Q and E (or dragging) turn the island. The demo shows
-every stage without saving anything.
+## Mini window
+
+**Mini window** (top of the map) opens a small window that stays on top of
+your other windows, like a music player's mini mode. It has two tabs:
+
+- **Now**: every live session by computer and project, each with its status
+  glyph, its helpers and its to-do list as pips (a ring for to do, a
+  half-filled ring for in progress, a ticked square for done). With privacy
+  mode off it also shows the task being worked on, and the whole list a
+  click away; with it on, only the pips and counts show. The to-do list is the one Claude keeps while it works
+  (TodoWrite or TaskCreate).
+- **Projects**: your project list (below), where you can type and tick
+  to-dos while you prompt in your IDE or the Claude app.
+
+The pin keeps it on top or lets other windows cover it; the arrow brings
+the hospital back. Start the app with `--mini` to open it straight away.
+
+## Projects and the two managers
+
+**Projects** on the board (and the mini window's Projects tab) is your
+own list of the projects you work on, each with its live sessions and a
+to-do list you can type into. It is one local file,
+`~/.agents-home/projects.json` (or `$AGENTS_HOME_PROJECTS`), so the app and
+two agents in the office team share it:
+
+- **personal-assistant**: your day across all projects. Ask it in Claude to
+  *scan my computer for projects*: it finds every git project, puts branch
+  copies, worktrees and extra clones under their main project, tells you
+  how many there are and how many look active, and asks you to confirm
+  before saving. It also plans your day and keeps a daily log.
+- **project-manager**: one project at a time. *Where are we on this?* gets
+  done / open / decided / next, and it adds and ticks to-dos (marked with a
+  small robot) in the same list.
+
+Projects the assistant found but you have not confirmed show dashed, with
+a **Confirm** button. With privacy mode on, to-dos show as *To-do 1, To-do
+2…* (you can still tick, remove and add them); turn it off to read them. Sessions are matched to a project by their folder.
+The app rewrites the file only for your own changes, always as a whole file,
+and leaves a file it can't read alone (it says so under **Needs attention**).
+
+## The Report button
+
+The **Report** button at the top of the map builds the performance report
+(the same one as Settings → Report) and opens it straight away.
 
 ## The office team for Claude
 
@@ -245,7 +266,10 @@ Click a figure or a row on the board to open its **chart**, which shows its
 recent tool calls and its tokens split into input, output, cache read and cache write.
 
 **Privacy.** The app is local only. It makes no network requests and never
-writes to `.claude`. There are two exceptions, and both happen only when you ask:
+writes to `.claude`. It writes only its own files: its settings and logs,
+your project list (`~/.agents-home/projects.json`) when you change a to-do,
+and, if you turn on **Other computers**, one status file in the folder you
+picked. There are two exceptions, and both happen only when you ask:
 - **Use the real weather**, switched on in Settings, asks
   [Open-Meteo](https://open-meteo.com) for the weather and temperature every
   30 minutes. It sends only the place you chose, never anything from your

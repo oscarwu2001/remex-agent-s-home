@@ -1,0 +1,129 @@
+@import url('tokens.css');
+@import url('icons.css');
+
+/* The mini window: one column, quiet surfaces, the same tokens as the
+   hospital. It is always light, for reading at a glance beside other apps. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  background:
+    radial-gradient(120% 60% at 50% -10%, var(--sky-mid) 0%, transparent 60%),
+    var(--panel);
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  line-height: 1.4;
+}
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---- head ---------------------------------------------------------------- */
+
+.mini-head {
+  position: sticky; top: 0; z-index: 1;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--s-3);
+  padding: var(--s-4) var(--s-4) var(--s-3);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.mascot {
+  width: 44px; height: 44px; padding: 4px 6px 0; overflow: visible; border-radius: 50%;
+  background: radial-gradient(circle at 50% 60%, var(--accent-soft) 0 62%, transparent 63%);
+  animation: bob 3.2s var(--ease-out) infinite alternate;
+}
+.mascot .hit, .mascot .select-ring, .mascot .tag, .mascot .bubble { display: none; }
+@keyframes bob { to { transform: translateY(-3px); } }
+h1 { margin: 0; font: 400 19px/1.15 var(--font-display); letter-spacing: -0.015em; }
+.headline { margin-top: 2px; color: var(--ink-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mini-actions { display: flex; gap: 2px; }
+.tabs {
+  grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px;
+  border-radius: 999px; background: var(--panel-sunk); border: 1px solid var(--line);
+}
+.tabs button {
+  height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-muted);
+  font: 500 13px var(--font); cursor: pointer; transition: background-color 0.25s var(--ease-out), color 0.25s, box-shadow 0.3s;
+}
+.tabs button[aria-selected="true"] { background: var(--panel-raised); color: var(--ink); box-shadow: 0 1px 3px rgba(20, 20, 30, 0.08); }
+#projects { padding-top: var(--s-3); }
+.mini-btn {
+  width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-muted); cursor: pointer;
+  transition: background-color 0.2s var(--ease-out), transform 0.35s var(--spring);
+}
+.mini-btn:hover { background: var(--panel-sunk); color: var(--ink); }
+.mini-btn:active { transform: scale(0.92); }
+.mini-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mini-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+
+/* ---- list ---------------------------------------------------------------- */
+
+.mini-list { padding: var(--s-2) var(--s-3) var(--s-4); }
+.computer { padding: var(--s-2) 0; }
+.computer + .computer { border-top: 1px solid var(--line); margin-top: var(--s-2); }
+.computer h2 { margin: var(--s-1) var(--s-1) var(--s-2); font: 500 12px var(--font); color: var(--ink-muted); letter-spacing: 0; }
+.computer h2 .state { font-weight: 400; }
+.computer.offline .sess { border-style: dashed; box-shadow: none; background: var(--panel); }
+.projects, .sessions { list-style: none; margin: 0; padding: 0; }
+.proj + .proj { margin-top: var(--s-3); }
+.proj-head { display: flex; justify-content: space-between; gap: var(--s-2); padding: 0 var(--s-1) var(--s-1); font: 500 14px var(--font); letter-spacing: var(--track-tight); }
+
+.sess {
+  display: grid; grid-template-columns: 26px 1fr; gap: var(--s-2); align-items: start;
+  padding: var(--s-3); margin-bottom: 6px;
+  background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-soft);
+
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.glyph { width: 26px; height: 26px; display: block; }
+.sess-body { min-width: 0; }
+.sess-top { display: flex; align-items: center; gap: var(--s-2); }
+.tag { flex: none; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-sunk); font-size: 11px; color: var(--ink-muted); }
+.since { margin-left: auto; flex: none; color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sess-what { min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
+.sess.running .sess-what { color: var(--ink); }
+
+/* ---- to-dos -------------------------------------------------------------- */
+
+.todo-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-top: var(--s-2); }
+.todo-sum { margin-top: var(--s-2); }
+.todo-row .todo-sum { margin-top: 0; }
+.todo-now { margin-top: 6px; font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-toggle {
+  position: relative; flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 0.2s var(--ease-out);
+}
+.todo-toggle:hover { background: var(--panel-sunk); color: var(--ink); }
+.todo-toggle::after { content: ""; width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.6px 1.6px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.4s var(--spring); }
+.todo-toggle[aria-expanded="true"]::after { transform: translateY(2px) rotate(-135deg); }
+.todo-all { list-style: none; margin: var(--s-2) 0 0; padding: 0; animation: pop-in 0.4s var(--spring); }
+.todo-all li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: 12.5px; }
+.todo-all li .pip { margin-top: 3px; flex: none; }
+.todo-all li.completed span:last-child { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--line); }
+
+.helpers { display: inline-flex; gap: 2px; align-items: center; }
+.helper .glyph { width: 20px; height: 20px; display: block; }
+.more { font-size: 11.5px; color: var(--ink-muted); margin-left: 2px; }
+.headline .badges { margin-top: 6px; }
+.proj-head { align-items: center; }
+.proj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.empty { padding: var(--s-4) var(--s-1); color: var(--ink-muted); }
+.mini-foot { padding: 0 var(--s-4) var(--s-4); color: var(--ink-muted); font-size: 11.5px; }
+.mini-foot:empty { display: none; }
+
+/* The status glyphs, as in the hospital. */
+.b-bg { fill: #ffffff; stroke: #9c8f84; stroke-width: 1; }
+.b-q { font: 700 13px var(--font); fill: #ffffff; }
+.dot { fill: #675f7a; }
+.spin { transform-origin: 0 0; animation: spin 1s linear infinite; }
+.d1, .d2, .d3 { animation: blink 1.2s infinite; }
+.d2 { animation-delay: 0.2s; }
+.d3 { animation-delay: 0.4s; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+

@@ -11,7 +11,6 @@ contextBridge.exposeInMainWorld('agentsHome', {
   updateInfo: () => ipcRenderer.invoke('home:update-info'),
   update: () => ipcRenderer.invoke('home:update'),
   notify: (n) => ipcRenderer.invoke('home:notify', n),
-  agentStats: () => ipcRenderer.invoke('home:agent-stats'),
   packStatus: () => ipcRenderer.invoke('pack:status'),
   packInstall: (names) => ipcRenderer.invoke('pack:install', names),
   packUpdate: () => ipcRenderer.invoke('pack:update'),
@@ -20,6 +19,13 @@ contextBridge.exposeInMainWorld('agentsHome', {
   logError: (info) => ipcRenderer.invoke('home:log-error', info),
   buildReport: (days, details) => ipcRenderer.invoke('home:build-report', days, details),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),
+  fleetChoose: () => ipcRenderer.invoke('home:fleet-choose'),
+  fleetOff: () => ipcRenderer.invoke('home:fleet-off'),
+  openMini: () => ipcRenderer.invoke('home:mini-open'),
+  miniPin: (on) => ipcRenderer.invoke('home:mini-pin', on),
+  showMain: () => ipcRenderer.invoke('home:show-main'),
+  projectChange: (change) => ipcRenderer.invoke('home:project-change', change),
+  projectsShow: () => ipcRenderer.invoke('home:projects-show'),
   onSnapshot: (fn) => {
     const handler = (_event, snapshot) => fn(snapshot);
     ipcRenderer.on('home:snapshot', handler);

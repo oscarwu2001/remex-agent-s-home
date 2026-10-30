@@ -29,8 +29,39 @@ flowchart LR
 | a plan, schedule, checklist | `planner` |
 | tables, numbers, formulas | `data-helper` |
 | a second look before it goes out | `checker` |
-| a finished code change (feature, bug, refactor) | `code-reviewer`, once per change, not after each small fix |
+| a whole code change handed off (feature, refactor, migration) | `builder` (Sonnet), never a general-purpose helper |
+| a finished code change (feature, bug, refactor) | `code-reviewer` or `/code-review`, once per change, not both and not after each small fix |
 | running tests, a build or a linter | `test-runner`: the tests for the change first, the full suite only when needed |
+| where this project stands, what is next, its to-do list | `project-manager` |
+| your day across projects, scanning and organising projects | `personal-assistant` (with the `scan-projects` skill) |
+
+## Two managers
+
+```mermaid
+flowchart LR
+  PA[personal-assistant<br/>all projects, your day] -- scan-projects:<br/>find, group copies, you confirm --> L[(~/.agents-home/projects.json)]
+  PM[project-manager<br/>one project] -- its to-dos --> L
+  Y[You, in Agent's Home<br/>board or mini window] -- type and tick to-dos --> L
+  L --> AH[Agent's Home: Projects,<br/>live sessions per project]
+```
+
+The project list is one local JSON file. Every writer reads it fresh,
+changes its own part and writes the whole file at once, so nobody's
+changes are lost. The assistant saves a scanned list only after you
+confirm it.
+
+## Why it is set up this way (report of 2026-10-29)
+
+- General-purpose helpers were 7 runs but 62% of the weighted cost (Opus,
+  16 to 29 minutes, all making edits). Whole changes now go to `builder`
+  on Sonnet with a brief that names the files and the check.
+- Some sessions ran both `/code-review` and `code-reviewer` on one change.
+  The reminder now asks for one of them.
+- `test-runner` had 9% tool errors. It now uses the project's own command
+  as written, checks the shell first (Git Bash on Windows) and never
+  repeats a failing command.
+- The office helpers (`writer`, `planner`, ...) were not called in 28 days;
+  they stay in the pack for non-coding work and cost nothing unless used.
 
 ## Worth knowing
 

@@ -1,7 +1,8 @@
 # Office pack
 
 A small team for Claude Code: everyday office work for people who do not
-code, and two helpers for people who do. Agent's Home offers to add it to `~/.claude` (or `$CLAUDE_CONFIG_DIR`)
+code, helpers for people who do, and two managers (one per project, one
+for your day). Agent's Home offers to add it to `~/.claude` (or `$CLAUDE_CONFIG_DIR`)
 and never overwrites anything already there.
 
 | Agent | Does | Room in Agent's Home |
@@ -13,6 +14,9 @@ and never overwrites anything already there.
 | `checker` | a second look before anything goes out | Operating Room |
 | `code-reviewer` | checks a code change before it is called done | Operating Room |
 | `test-runner` | runs tests and builds, reports only what matters | Laboratory |
+| `builder` | carries out one scoped code change, on Sonnet | General Ward |
+| `project-manager` | where one project stands, its to-do list | General Ward |
+| `personal-assistant` | your day across projects; finds and organises them | General Ward |
 
 | Skill | Does | Adapted from |
 | --- | --- | --- |
@@ -20,6 +24,7 @@ and never overwrites anything already there.
 | `teach-me` | short lessons with a recall quiz | `teach` |
 | `handover` | a handover note for a colleague | `handoff` |
 | `break-down` | a project split into small tasks | `to-tickets` |
+| `scan-projects` | finds your projects, groups copies, asks you, saves the list | — |
 
 Every agent and skill follows the same few rules:
 

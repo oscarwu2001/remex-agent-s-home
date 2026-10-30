@@ -1,0 +1,147 @@
+/* Design tokens, shared by the hospital window (styles.css) and the mini
+   window (mini.css).
+
+   The look: calm and airy, after molly.studio: near-white surfaces, one
+   regular-weight typeface with slightly tight headings, hairline edges
+   instead of boxes, a single accent per colourway, and springy motion. The
+   cute isometric scene keeps its colour; the chrome around it steps back.
+
+   Every text pair measures 4.5:1 or better (most 6:1+); test/contrast.test.js
+   checks them all. */
+
+:root {
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  /* System fonts only: the app never loads a web font. */
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --track-tight: -0.012em;
+
+  /* A spring that settles with a small overshoot, for hovers and panels. */
+  --spring: linear(0, 0.08 4%, 0.3 9%, 0.56 14%, 0.8 20%, 0.95 26%, 1.03 32%, 1.045 38%, 1.03 46%, 1.01 58%, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow-soft: 0 1px 2px rgba(20, 20, 30, 0.04), 0 8px 24px rgba(20, 20, 30, 0.06);
+  --shadow-float: 0 2px 6px rgba(20, 20, 30, 0.05), 0 18px 40px rgba(20, 20, 30, 0.10);
+  color-scheme: light;
+}
+
+/* Colourways. The scene's solids come from renderer/themes.js; these are the
+   sky and the chrome. */
+:root,
+:root[data-theme="blossom"] {
+  --sky-top: #cfe4f5;
+  --sky-mid: #ebe5f6;
+  --sky-bottom: #fbf4f7;
+  --mist: #fbf4f7;
+  --cloud: #ffffff;
+  --window-top: #fff3d6;
+  --window-bottom: #c9b6f0;
+
+  --panel: #fcfbfb;
+  --panel-raised: #ffffff;
+  --panel-sunk: #f6f2f3;
+  --line: #ece5e8;
+  --ink: #1d171e;
+  --ink-muted: #675d6b;
+  --accent: #9c3a60;
+  --accent-soft: #f6edf1;
+  --warn: #a33a36;
+  --warn-soft: #fbece8;
+  --focus: #9c3a60;
+  --label-bg: rgba(255, 255, 255, 0.86);
+  --swatch: #eeb3bd;
+  --on-accent: #ffffff;
+}
+
+:root[data-theme="tide"] {
+  --sky-top: #d3ecee;
+  --sky-mid: #e2edf8;
+  --sky-bottom: #f6f8fc;
+  --mist: #f6f8fc;
+  --cloud: #ffffff;
+  --window-top: #fff6dd;
+  --window-bottom: #a9b4f0;
+
+  --panel: #fafbfc;
+  --panel-raised: #ffffff;
+  --panel-sunk: #f1f4f7;
+  --line: #e5eaef;
+  --ink: #131a21;
+  --ink-muted: #5a6672;
+  --accent: #1d6797;
+  --accent-soft: #ecf4fa;
+  --warn: #a33a36;
+  --warn-soft: #fbece8;
+  --focus: #1d6797;
+  --label-bg: rgba(255, 255, 255, 0.86);
+  --swatch: #86bdd6;
+  --on-accent: #ffffff;
+}
+
+:root[data-theme="grove"] {
+  --sky-top: #d6eee6;
+  --sky-mid: #e9f3e3;
+  --sky-bottom: #fbfaf2;
+  --mist: #fbfaf2;
+  --cloud: #ffffff;
+  --window-top: #fffbe0;
+  --window-bottom: #9fd2d9;
+
+  --panel: #fbfbf8;
+  --panel-raised: #ffffff;
+  --panel-sunk: #f2f4ee;
+  --line: #e6e9e1;
+  --ink: #161f19;
+  --ink-muted: #5b675e;
+  --accent: #2e6a48;
+  --accent-soft: #eef4eb;
+  --warn: #a33a36;
+  --warn-soft: #fbece8;
+  --focus: #2e6a48;
+  --label-bg: rgba(255, 255, 255, 0.86);
+  --swatch: #9dcbb6;
+  --on-accent: #ffffff;
+}
+
+/* Night variants: the same three colourways after dark. */
+:root[data-time="night"] { color-scheme: dark; --on-accent: #1d1838; --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.25); --shadow-float: 0 2px 6px rgba(0, 0, 0, 0.25), 0 18px 40px rgba(0, 0, 0, 0.35); }
+:root[data-theme="blossom"][data-time="night"],
+:root[data-time="night"]:not([data-theme]) {
+  --sky-top: #1b1a45; --sky-mid: #3a3276; --sky-bottom: #8a6aa6; --mist: #6f5690; --cloud: #4a3f86;
+  --window-top: #ffe9b0; --window-bottom: #ffb877;
+  --panel: #1d1a3b; --panel-raised: #252148; --panel-sunk: #18162f; --line: #332e5c; --ink: #f6effa; --ink-muted: #c3b9dc;
+  --accent: #f2a6c4; --accent-soft: #2f2858; --warn: #ffb0a8; --warn-soft: #43213c; --focus: #f2a6c4;
+  --label-bg: rgba(29, 26, 59, 0.88); --on-accent: #1d1838;
+}
+:root[data-theme="tide"][data-time="night"] {
+  --sky-top: #0a1430; --sky-mid: #1a2f5f; --sky-bottom: #3d5f93; --mist: #34507e; --cloud: #2a3f6e;
+  --window-top: #fff0c0; --window-bottom: #ffc27a;
+  --panel: #0f1a32; --panel-raised: #15233f; --panel-sunk: #0b1428; --line: #223453; --ink: #eef4ff; --ink-muted: #b1c0db;
+  --accent: #9cc4ff; --accent-soft: #1c3155; --warn: #ffb0a8; --warn-soft: #3d2236; --focus: #9cc4ff;
+  --label-bg: rgba(15, 26, 50, 0.88); --on-accent: #0e1830;
+}
+:root[data-theme="grove"][data-time="night"] {
+  --sky-top: #0b2023; --sky-mid: #173f3e; --sky-bottom: #3c6a58; --mist: #2f5a4c; --cloud: #24493f;
+  --window-top: #fff4bf; --window-bottom: #ffcf6e;
+  --panel: #0e2121; --panel-raised: #142c2c; --panel-sunk: #0a1a1a; --line: #1f4040; --ink: #eefaf3; --ink-muted: #aecdbf;
+  --accent: #9fe0c0; --accent-soft: #1a3a3a; --warn: #ffb0a8; --warn-soft: #3d2426; --focus: #9fe0c0;
+  --label-bg: rgba(14, 33, 33, 0.88); --on-accent: #0b1f1f;
+}
+
+/* Reduced motion, for every window: nothing springs, pulses or spins. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

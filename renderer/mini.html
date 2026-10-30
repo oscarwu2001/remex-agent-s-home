@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent's Home · mini</title>
+  <link rel="stylesheet" href="mini.css">
+</head>
+<body>
+  <header class="mini-head">
+    <svg class="mascot" viewBox="-22 -58 44 66" aria-hidden="true" id="mascot"></svg>
+    <div class="mini-title">
+      <h1>Running now</h1>
+      <p class="headline" id="headline" aria-live="polite">Looking for sessions…</p>
+    </div>
+    <div class="mini-actions">
+      <button type="button" class="mini-btn" id="pin" aria-pressed="true" title="Keep this window on top">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6zM12 13v7"/></svg>
+        <span class="visually-hidden">Keep on top</span>
+      </button>
+      <button type="button" class="mini-btn" id="open-main" title="Open the hospital">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+        <span class="visually-hidden">Open the hospital</span>
+      </button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Show">
+      <button type="button" role="tab" id="tab-now" aria-selected="true" aria-controls="list">Now</button>
+      <button type="button" role="tab" id="tab-projects" aria-selected="false" aria-controls="projects" tabindex="-1">Projects</button>
+    </div>
+  </header>
+  <main>
+    <section id="list" class="mini-list" role="tabpanel" aria-labelledby="tab-now"></section>
+    <section id="projects" class="mini-list" role="tabpanel" aria-labelledby="tab-projects" hidden></section>
+  </main>
+  <footer class="mini-foot" id="foot"></footer>
+  <script type="module" src="mini.js"></script>
+</body>
+</html>

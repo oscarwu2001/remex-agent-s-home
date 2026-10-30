@@ -5,10 +5,12 @@ import {
 } from './scene.js';
 import { P } from './iso.js';
 import { BLOSSOMING } from './decor.js';
-import { createMeadow } from './meadow.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
+import { overview as runningOverview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
+import { statusText, glyphKey, elapsed } from './status.js';
+import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
@@ -50,7 +52,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // live: the real weather, off unless the user turns it on. `place` is the
 // town they chose ({ name, region, country, latitude, longitude }).
 const prefs = {
-  budget5h: 0, notify: true, creatures: {},
+  budget5h: 0, notify: true,
   private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
   live: { on: false, place: null, unit: 'celsius' },
 };
@@ -412,10 +414,11 @@ function drawLabels() {
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const [x, y] = labelPoint(r.id);
-      const w = Math.max(r.name.length * 16, r.purpose.length * 9.8) + 32;
+      // Sentence-case signs: about 11px a letter for the name, 9px for the purpose.
+      const w = Math.max(r.name.length * 11.5, r.purpose.length * 9.2) + 40;
       return `<g class="room-label" data-room="${r.id}" role="button" tabindex="0"
           aria-label="Visit the ${escapeXml(r.name)}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
-        <rect x="${-w / 2}" y="-24" width="${w}" height="56" rx="14"/>
+        <rect x="${-w / 2}" y="-24" width="${w}" height="56" rx="28"/>
         <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
         <text class="purpose" text-anchor="middle" y="22">${escapeXml(r.purpose)}</text></g>`;
     })
@@ -1060,39 +1063,6 @@ requestAnimationFrame(frame);
 
 // ---- words -----------------------------------------------------------------
 
-// Distinct words lead each status, so they can be told apart at a glance.
-function statusText(x) {
-  switch (x.status) {
-    case 'standby': return 'Standby';
-    case 'working': return x.activity ? x.activity.label : 'Working';
-    case 'delegating': return x.activity ? x.activity.label.replace('Consulting', 'With') : 'With a helper';
-    case 'blocked': return 'Needs approval, or a long tool is running';
-    case 'thinking': return 'Thinking';
-    case 'reporting': return 'Writing up findings';
-    case 'your-turn': return 'Your turn';
-    case 'done':
-      if (x.endReason === 'interrupted') return 'Stopped';
-      if (x.endReason === 'error') return 'Failed';
-      if (x.endReason === 'went quiet') return 'Presumed finished (went quiet)';
-      return 'Finished';
-    default: return 'Idle';
-  }
-}
-
-// A finished helper's glyph says how it finished, not just that it did.
-function glyphKey(x) {
-  if (x.status !== 'done') return x.status;
-  return { error: 'failed', interrupted: 'stopped', 'went quiet': 'quiet' }[x.endReason] ?? 'done';
-}
-
-function elapsed(fromMs, nowMs) {
-  const s = Math.max(0, Math.floor((nowMs - fromMs) / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = String(s % 60).padStart(2, '0');
-  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
-}
-
 function clock(ms) {
   const d = new Date(ms);
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
@@ -1142,13 +1112,17 @@ function rowHtml(key, x, name, sub) {
   const tokenText = [tokens ? `${compact(tokens)} tokens` : '', ctx !== undefined ? `context ${ctx}%` : ''].filter(Boolean).join(' · ');
   const nearlyFull = ctx !== undefined && ctx >= CONTEXT_WARN * 100;
   const detail = !prefs.private && x.activity?.detail ? ` · ${x.activity.detail}` : '';
-  const warn = x.status === 'blocked' || x.status === 'your-turn' || glyphKey(x) === 'failed';
+  const warn = x.status === 'blocked' || glyphKey(x) === 'failed';
+  const turn = x.status === 'your-turn';
   const where = sub ? ` in the ${roomName(x.room)}` : '';
+  // Where a session runs, when it is not plain Claude Code on this computer.
+  const tag = !sub && x.source && x.source !== 'code' ? `<span class="tag tag-${escapeXml(x.source)}">${escapeXml(SOURCE_NAMES[x.source] ?? x.source)}</span>` : '';
+  const todo = !sub && x.todos?.total ? `<span class="todo-count">${todoPips(x.todos)}</span>` : '';
   return `<button class="row${sub ? ' sub' : ''}" data-key="${escapeXml(key)}" aria-pressed="${key === selected}"
       title="${escapeXml(`${name}${where}: ${what}${detail}${tokens ? ` · ${tokens.toLocaleString()} tokens${sub ? '' : ' with helpers'}` : ''}`)}">
       ${glyph(x)}
-      <span class="who"><span class="name">${escapeXml(name)}</span>
-        <span class="what${warn ? ' warn' : ''}">${escapeXml(what + detail)}</span></span>
+      <span class="who"><span class="name"><span class="n">${escapeXml(name)}</span></span>
+        <span class="what${warn ? ' warn' : turn ? ' turn' : ''}">${tag}${escapeXml(what + detail)}</span>${todo}</span>
       <span class="when"><span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
         ${tokenText ? `<span class="tokens">${tokenText}</span>` : ''}</span>
       ${nearlyFull ? `<span class="ctx-warn">⚠ Context ${ctx}% full: save your work</span>` : ''}
@@ -1195,6 +1169,8 @@ function renderChart(s) {
     ['Room', roomName(room)],
     ['Status', statusText(x)],
     parent ? ['Called by', parent] : null,
+    !parent && x.source ? ['Runs in', `${SOURCE_NAMES[x.source] ?? x.source}${x.computer ? ` on ${x.computer}` : ''}`] : null,
+    !parent && x.title && !prefs.private ? ['Task', x.title] : null,
     !prefs.private && x.description ? ['Task', x.description] : null,
     x.background ? ['Mode', 'Background'] : null,
     x.startedAt ? ['On shift since', clock(x.startedAt)] : null,
@@ -1211,8 +1187,37 @@ function renderChart(s) {
     ? `<label class="field move-to" for="move-to">Work in another room
         <select id="move-to" data-agent="${escapeXml(name)}">${config.rooms.filter((r) => LAYOUT[r.id]).map((r) => `<option value="${r.id}" ${r.id === room ? 'selected' : ''}>${escapeXml(r.name)}</option>`).join('')}</select></label>`
     : '';
-  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>${moveTo}
+  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>${moveTo}${!parent ? todoListHtml(x.todos) : ''}
     <ol aria-label="Recent activity">${history || `<li><span class="t">—</span><span>${found.resident ? 'Standing by in their room' : 'No tool calls yet'}</span></li>`}</ol>`;
+}
+
+// A session's to-do list. The wording is the user's own, so with privacy
+// mode on only the counts show.
+const TODO_WORDS = { completed: 'Done', in_progress: 'Doing now', pending: 'To do' };
+function todoListHtml(todos) {
+  if (!todos?.total) return '';
+  const head = `<p class="todo-head">To-do list · ${todos.done} of ${todos.total} done${todos.doing ? ` · ${todos.doing} in progress` : ''}</p>`;
+  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names and commands” to see what each item says.</p>`;
+  const items = todos.items.map((t) => `<li class="todo ${t.status}"><span class="todo-mark" aria-hidden="true"></span>
+      <span>${escapeXml(t.status === 'in_progress' && t.active ? t.active : t.text || 'Untitled')}</span><span class="visually-hidden"> (${TODO_WORDS[t.status]})</span></li>`).join('');
+  return `${head}<ol class="todos">${items}</ol>`;
+}
+
+// "Running now": every live session here and on the computers sharing a
+// folder, by computer and then by project.
+function renderRunning(s) {
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? []);
+  const groups = o.computers.map((c) => {
+    const state = c.local ? 'This computer' : c.online ? 'Online' : `Offline since ${clock(c.at)}`;
+    const projects = c.projects.map((p) => `<li class="proj"><span class="proj-name">${escapeXml(p.project)}</span>
+        <span class="badges">${p.running ? runningBadge(p.running) : '<span class="idle" title="Nothing running"><span aria-hidden="true">–</span><span class="visually-hidden">Nothing running</span></span>'}${p.helpers ? helperBadge(p.helpers) : ''}</span></li>`).join('');
+    return `<li class="computer${c.online ? '' : ' offline'}">
+        <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
+        ${projects ? `<ul class="projects">${projects}</ul>` : '<p class="hint">No sessions.</p>'}</li>`;
+  }).join('');
+  const share = s.fleet?.on ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
+  const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers])])]);
+  return { head: headline(o), badges: headlineBadges(o), body: `<ul class="computers">${groups}</ul>${share}`, key };
 }
 
 function renderCensus(s) {
@@ -1298,22 +1303,27 @@ function render(force = false) {
 
   const chart = renderChart(snapshot);
   const problems = renderProblems(snapshot);
+  const running = renderRunning(snapshot);
   const signature = JSON.stringify([
     snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail, compact(x.tokensWithHelpers ?? 0),
       x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail, compact(a.tokens?.total ?? 0)])]),
     chart, problems, (snapshot.roster || []).length, selected, prefs.private, warnings,
     snapshot.usage ? [snapshot.usage.last5h.total, snapshot.usage.today.total, snapshot.usage.limitNotice?.ts, prefs.budget5h] : null,
     snapshot.sessions.map((x) => Math.round((x.context?.pct ?? 0) * 100)),
+    snapshot.sessions.map((x) => (x.todos ? [x.todos.done, x.todos.total, x.todos.doing] : 0)),
+    running.key, snapshot.fleet?.on,
   ]);
   renderLiveMap();
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
-  meadow?.refresh();
 
   // Re-render, then put keyboard focus back where it was.
   const focusKey = document.activeElement?.dataset?.key;
   $('sessions').innerHTML = renderSessions(snapshot);
   $('census').textContent = renderCensus(snapshot);
+  renderProjects();
+  $('running-head').innerHTML = `<span class="badges">${running.badges}</span>`;
+  $('running-body').innerHTML = running.body;
   renderUsage(snapshot);
   $('source').textContent = renderSource(snapshot);
   $('chart').hidden = !chart;
@@ -2476,27 +2486,10 @@ document.addEventListener('click', (e) => {
 
 loadPack();
 
-// ---- the Meadow: agents as creatures -------------------------------------------------
+// ---- the Report button ------------------------------------------------------------
 
-// A hidden extra: only when the app is started with --meadow (npm run
-// meadow). Otherwise the same toolbar button opens the performance report.
-const meadowOn = new URLSearchParams(location.search).get('meadow') === '1';
-const meadow = meadowOn
-  ? createMeadow({
-    bridge,
-    prefs,
-    savePrefs,
-    getSnapshot: () => snapshot,
-    getLight: () => ({ theme: themeFor(prefs.theme, shownPhase ?? phase()), phase: shownPhase ?? phase() }),
-    onEnter: () => {
-      if (decorating) setDecorating(false);
-      if (buildMode) setBuildMode(false);
-    },
-  })
-  : null;
-
-if (!meadowOn) {
-  const button = $('cam-meadow');
+{
+  const button = $('cam-report');
   button.textContent = 'Report';
   button.title = 'Open the performance report of your helpers';
   button.addEventListener('click', async () => {
@@ -2520,6 +2513,63 @@ if (!meadowOn) {
   });
 }
 
+// ---- the project list -------------------------------------------------------------
+
+const projOpen = new Set();
+let projError;
+const demoProj = demoProjects();
+function renderProjects() {
+  const data = prefs.demo ? demoProj.snapshot() : snapshot.projects;
+  paint($('projects-body'), projectsHtml(data, snapshot.sessions ?? [], { privacy: prefs.private, open: projOpen, error: projError }));
+}
+wireProjects($('projects-body'), {
+  open: projOpen,
+  change: async (c) => {
+    if (prefs.demo) return demoProj.change(c);
+    if (!bridge.projectChange) return { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
+    return bridge.projectChange(c).catch((err) => ({ ok: false, error: err.message }));
+  },
+  // The app's list arrives with the next snapshot, half a second later.
+  rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
+  setError: (e) => { projError = e; },
+});
+$('projects-file').addEventListener('click', async () => {
+  const res = await bridge.projectsShow?.();
+  $('projects-file-status').textContent = !res ? 'The browser preview has no list file.' : !res.ok ? res.error : !prefs.private ? `The list is ${res.file}` : '';
+});
+setInterval(renderProjects, 1000);
+
+// ---- the mini window and other computers --------------------------------------
+
+$('cam-mini').addEventListener('click', () => {
+  // The browser preview has no second window: open the page in a new tab.
+  if (bridge.openMini) bridge.openMini();
+  else window.open(`mini.html${prefs.demo ? '?demo=1' : ''}`, '_blank', 'width=360,height=540');
+});
+
+function showFleet() {
+  const on = Boolean(snapshot.fleet?.on);
+  $('fleet-off').hidden = !on || snapshot.demo;
+  $('fleet-choose').textContent = on ? 'Choose another folder' : 'Choose shared folder';
+  const others = (snapshot.fleet?.computers ?? []).length;
+  $('fleet-status').textContent = snapshot.demo ? 'The demo shows a made-up second computer.'
+    : on ? `Sharing${prefs.private || !snapshot.fleet.dir ? '' : ` in ${snapshot.fleet.dir}`}. ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No other computer has written there yet.'}`
+      : 'Off.';
+}
+$('fleet-choose').addEventListener('click', async () => {
+  if (!bridge.fleetChoose) {
+    $('fleet-status').textContent = 'The browser preview cannot pick folders; this works in the app.';
+    return;
+  }
+  const res = await bridge.fleetChoose();
+  if (!res.ok && !res.canceled) $('fleet-status').textContent = res.error;
+});
+$('fleet-off').addEventListener('click', async () => {
+  const res = await bridge.fleetOff?.();
+  if (res && !res.ok) $('fleet-status').textContent = res.error;
+});
+setInterval(() => { if (!$('settings').hidden) showFleet(); }, 1000);
+
 // ---- settings panel ------------------------------------------------------------
 
 function setSettings(open) {
@@ -2528,6 +2578,7 @@ function setSettings(open) {
   if (open) {
     showUpdateInfo();
     showLogStatus();
+    showFleet();
     $('settings-close').focus();
   }
   else {

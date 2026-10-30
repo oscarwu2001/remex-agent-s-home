@@ -75,14 +75,66 @@ function tokensOf(actor) {
   return { ...t, total: t.input + t.output + t.cacheRead + t.cacheWrite };
 }
 
+// The to-do list a session keeps with TodoWrite (older Claude Code) or
+// TaskCreate / TaskUpdate (newer). Items carry their wording; the board
+// shows it only with privacy mode off, and counts otherwise.
+const TODO_LIMIT = 60;
+const TODO_STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const todoText = (v) => (typeof v === 'string' ? v.trim().slice(0, 200) : '');
+
+function applyTodos(todos, name, input, id) {
+  if (name === 'TodoWrite' && Array.isArray(input.todos)) {
+    todos.items = input.todos.slice(0, TODO_LIMIT).map((t, i) => ({
+      key: `w${i}`,
+      text: todoText(t?.content ?? t?.subject),
+      active: todoText(t?.activeForm),
+      status: TODO_STATUSES.has(t?.status) ? t.status : 'pending',
+    }));
+    todos.seen = true;
+  } else if (name === 'TaskCreate' && typeof input.subject === 'string') {
+    if (todos.items.length < TODO_LIMIT) {
+      todos.items.push({ key: `c:${id}`, callId: id, text: todoText(input.subject), active: todoText(input.activeForm), status: 'pending' });
+    }
+    todos.seen = true;
+  } else if (name === 'TaskUpdate' && input.taskId !== undefined) {
+    const item = todos.items.find((t) => t.taskId === String(input.taskId));
+    if (!item) return;
+    if (input.status === 'deleted') todos.items = todos.items.filter((t) => t !== item);
+    else if (TODO_STATUSES.has(input.status)) item.status = input.status;
+    if (typeof input.subject === 'string') item.text = todoText(input.subject);
+    if (typeof input.activeForm === 'string') item.active = todoText(input.activeForm);
+  }
+}
+
+// TaskCreate's id comes back in its result ("Task #3 created ...").
+function linkTodo(todos, id, text) {
+  const item = todos.items.find((t) => t.callId === id);
+  const m = /Task #(\w+)/.exec(text ?? '');
+  if (item && m) item.taskId = m[1];
+}
+
+function todosOut(todos) {
+  if (!todos.seen) return undefined;
+  const items = todos.items.map(({ text, active, status }) => ({ text, active, status }));
+  return {
+    items,
+    total: items.length,
+    done: items.filter((t) => t.status === 'completed').length,
+    doing: items.filter((t) => t.status === 'in_progress').length,
+  };
+}
+
 function pushHistory(actor, item) {
   actor.history.push(item);
   if (actor.history.length > HISTORY_LIMIT) actor.history.shift();
 }
 
 class Tracker {
-  constructor({ overrides = {}, timing = {} } = {}) {
+  // `sourceOf(fileKey)` says where a transcript came from:
+  // { source: 'code' | 'cowork' | 'wsl', computer, title?, project? }.
+  constructor({ overrides = {}, timing = {}, sourceOf } = {}) {
     this.overrides = overrides;
+    this.sourceOf = sourceOf ?? (() => ({ source: 'code' }));
     this.timing = { ...TIMING, ...timing };
     this.sessions = new Map(); // sessionId -> session
     this.streams = new Map(); // streamKey -> { role, sessionId, taskId?, buffer?, firstSeen }
@@ -118,9 +170,16 @@ class Tracker {
     }
 
     const session = this.ensureSession(sessionId, meta, receivedAt);
+    if (!session.origin && !isSidechain) {
+      session.origin = this.sourceOf(fileKey) ?? { source: 'code' };
+      if (session.origin.project) session.project = session.origin.project;
+    }
     if (meta.cwd && !session.cwd) {
       session.cwd = meta.cwd;
-      session.project = path.basename(meta.cwd.replace(/\\/g, '/')) || session.project;
+      // A Cowork task's working folder is the app's own scratch folder; its
+      // project comes from the task's details instead.
+      if (session.origin?.source !== 'cowork') session.project = path.basename(meta.cwd.replace(/\\/g, '/')) || session.project;
+      else if (!session.origin.project) session.project = 'Cowork task';
     }
 
     // Usage rides along as an event of its own, so a helper's tokens wait
@@ -145,6 +204,8 @@ class Tracker {
         id: sessionId,
         cwd: undefined,
         project: 'session',
+        origin: undefined,
+        todos: { items: [], seen: false },
         actor: newActor(startedAt),
         subagents: new Map(), // Task tool_use id -> sub
       };
@@ -197,6 +258,9 @@ class Tracker {
       if (!ev.untimed) session.actor.lastAt = Math.max(session.actor.lastAt, ev.ts);
       return; // not a turn of the session's own
     }
+
+    if (ev.kind === 'tool-start') applyTodos(session.todos, ev.name, ev.input ?? {}, ev.id);
+    if (ev.kind === 'tool-end') linkTodo(session.todos, ev.id, ev.text);
 
     if (ev.kind === 'tool-end') {
       const sub = session.subagents.get(ev.id);
@@ -401,6 +465,10 @@ class Tracker {
       sessions.push({
         id: session.id,
         project: session.project,
+        source: session.origin?.source ?? 'code',
+        computer: session.origin?.computer,
+        title: session.origin?.title,
+        todos: todosOut(session.todos),
         room: 'nurses-station',
         startedAt: session.actor.startedAt,
         lastActivityAt: lastAt,
