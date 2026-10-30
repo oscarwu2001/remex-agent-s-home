@@ -146,8 +146,8 @@ export function bubbleMarkup(status) {
       return `${BG}<path d="M-4,-5 H4 L0,0 L4,5 H-4 L0,0 Z" fill="#8467a3"/>`;
     case 'done': // filled disc, tick
       return '<circle r="9.5" fill="#2f6f6b"/><path d="M-4,0 L-1,3 L4.5,-3.5" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
-    case 'quiet': // dashed ring, tick: a presumption, not a report
-      return `<circle r="8.5" fill="#ffffff" stroke="#2f6f6b" stroke-width="1.6" stroke-dasharray="3 2.2"/><path d="M-4,0 L-1,3 L4.5,-3.5" fill="none" stroke="#2f6f6b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case 'quiet': // nothing in the scene: a presumption, said in words on the board
+      return '';
     case 'failed': // red diamond, cross
       return '<path d="M0,-10.5 L10.5,0 L0,10.5 L-10.5,0 Z" fill="#b8443f"/><path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>';
     case 'stopped': // grey square, stop bar
@@ -217,7 +217,8 @@ export class Person {
   setStatus(status) {
     if (status === this.status) return;
     // A little hop of relief when a helper comes back with its result.
-    if (['done', 'quiet'].includes(status) && this.status && this.status !== status) this.hopAt = performance.now() / 1000;
+    // A helper only presumed finished (went quiet) gets no hop and no bubble.
+    if (status === 'done' && this.status && this.status !== status) this.hopAt = performance.now() / 1000;
     this.status = status;
     this.bubble.innerHTML = bubbleMarkup(status);
     this.el.dataset.status = status;

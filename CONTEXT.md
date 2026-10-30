@@ -55,7 +55,7 @@ Every status has its own glyph silhouette in the scene and its own words on the 
 | `idle` | crescent | Idle | Nothing seen yet but proof of life (attachments, meta lines). |
 | `standby` | small dot badge | Standby | A staff member at their post, not working on anything. |
 | `done` / finished | teal disc, tick | Finished | The helper's result came back, or its task notification said *completed*. |
-| `done` / went quiet | dashed ring, tick | Presumed finished (went quiet) | A background helper wrote nothing for 2 minutes. A guess, shown as one. |
+| `done` / went quiet | none: no bubble, no hop | Presumed finished (went quiet) | A background helper wrote nothing for 2 minutes. A guess, so it is only said in words. |
 | `done` / error | red diamond, cross | Failed | The result was an error, or the notification said *failed*. |
 | `done` / interrupted | dark square | Stopped | A new prompt arrived while it ran, or it was killed. |
 

@@ -825,6 +825,9 @@ app.whenReady().then(() => {
       minWidth: 280,
       minHeight: 200,
       alwaysOnTop: true,
+      // No system title bar: the window's own header moves it, and has a close button.
+      frame: false,
+      roundedCorners: true,
       title: "Agent's Home · mini",
       backgroundColor: '#fbfaf8',
       autoHideMenuBar: true,
@@ -853,6 +856,10 @@ app.whenReady().then(() => {
   }
   ipcMain.handle('home:mini-open', () => {
     openMini();
+    return { ok: true };
+  });
+  ipcMain.handle('home:mini-close', () => {
+    if (mini && !mini.isDestroyed()) mini.close();
     return { ok: true };
   });
   ipcMain.handle('home:mini-pin', (_event, on) => {
