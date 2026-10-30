@@ -57,7 +57,9 @@ function coworkSession(nowMs, epochMs, t) {
   };
 }
 const OTHER_COMPUTERS = (nowMs) => [
-  { computer: 'LAB-LAPTOP', online: true, at: nowMs - 4000, sessions: [
+  { computer: 'LAB-LAPTOP', online: true, at: nowMs - 14 * 60_000, every: 3_600_000,
+    repos: [{ project: 'garden-planner', branch: 'main', lastCommit: nowMs - 2 * 3_600_000, changed: 3 }, { project: 'recipe-book', branch: 'draft', lastCommit: nowMs - 26 * 3_600_000, changed: 0 }],
+    sessions: [
     { project: 'garden-planner', source: 'code', status: 'working', agents: [{ type: 'code-reviewer', status: 'working' }], todos: { done: 2, doing: 1, total: 6 } },
     { project: 'recipe-book', source: 'cowork', status: 'your-turn', agents: [] },
   ] },

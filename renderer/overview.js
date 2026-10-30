@@ -11,7 +11,7 @@ export const SOURCE_NAMES = { code: 'Claude Code', cowork: 'Cowork', wsl: 'WSL' 
 
 export function overview(localSessions, here, others = []) {
   const groups = [];
-  const add = (computer, sessions, { local = false, online = true, at } = {}) => {
+  const add = (computer, sessions, { local = false, online = true, at, every, repos = [] } = {}) => {
     const byProject = new Map();
     for (const s of sessions) {
       const p = byProject.get(s.project) ?? { project: s.project, sessions: [], running: 0, helpers: 0 };
@@ -22,7 +22,7 @@ export function overview(localSessions, here, others = []) {
     }
     const projects = [...byProject.values()].sort((a, b) => b.running - a.running || a.project.localeCompare(b.project));
     groups.push({
-      computer, local, online, at,
+      computer, local, online, at, every, repos,
       sessions: sessions.length,
       running: sessions.filter((s) => isRunning(s.status)).length,
       helpers: projects.reduce((n, p) => n + p.helpers, 0),
@@ -44,7 +44,10 @@ export function overview(localSessions, here, others = []) {
       const where = s.where && s.where.startsWith(o.computer) ? s.where : o.computer;
       byPlace.set(where, [...(byPlace.get(where) ?? []), s]);
     }
-    for (const [where, sessions] of byPlace) if (sessions.length || where === o.computer) add(where, sessions, { online: o.online, at: o.at });
+    for (const [where, sessions] of byPlace) {
+      const main = where === o.computer;
+      if (sessions.length || main) add(where, sessions, { online: o.online, at: o.at, every: o.every, repos: main ? o.repos ?? [] : [] });
+    }
   }
   return {
     computers: groups,

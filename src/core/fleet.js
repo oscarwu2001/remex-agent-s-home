@@ -87,8 +87,21 @@ function cleanSession(s) {
     const [done, doing, total] = [count(s.todos.done), count(s.todos.doing) ?? 0, count(s.todos.total)];
     if (done !== undefined && total !== undefined && done + doing <= total) todos = { done, doing, total };
   }
-  return { project, source: SOURCES.has(s.source) ? s.source : 'code', where: nameOf(s.where, 80), status: s.status, agents, todos };
+  const lastAt = Number.isFinite(s.lastAt) ? s.lastAt : undefined;
+  return { project, source: SOURCES.has(s.source) ? s.source : 'code', where: nameOf(s.where, 80), status: s.status, lastAt, agents, todos };
 }
+
+// A posted project's git line: branch, last commit time, uncommitted files.
+const when = (v) => (Number.isFinite(v) && v > 0 ? v : undefined);
+function cleanRepo(r) {
+  const project = nameOf(r?.project, 80);
+  if (!project) return undefined;
+  return { project, branch: nameOf(r.branch, 80), lastCommit: when(r.lastCommit), changed: count(r.changed) ?? 0 };
+}
+
+// Hourly posts are snapshots: a session counts as running only if it was
+// written to in the last few minutes, not because it was busy at post time.
+const LIVE_MS = 10 * 60_000;
 
 // The other computers' files. A file that cannot be read or makes no sense
 // is reported, never guessed at.
@@ -126,12 +139,19 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
     const online = now - data.at <= Math.max(FRESH_MS, every * 1.25);
     const sessions = online ? data.sessions.slice(0, 100).map(cleanSession) : [];
     const kept = sessions.filter(Boolean);
+    if (every) {
+      for (const s of kept) {
+        if (RUNNING.has(s.status) && now - (s.lastAt ?? data.at) > LIVE_MS) s.status = 'idle';
+      }
+    }
     if (kept.length < sessions.length) problems.push({ label: `${sessions.length - kept.length} session${sessions.length - kept.length === 1 ? '' : 's'} in a computer's status file did not make sense and ${sessions.length - kept.length === 1 ? 'is' : 'are'} not shown`, detail: file });
     computers.push({
       computer: nameOf(data.computer, 80) ?? 'A computer',
       at: data.at,
       online,
+      every: every || undefined,
       sessions: kept,
+      repos: (Array.isArray(data.repos) ? data.repos.slice(0, 50) : []).map(cleanRepo).filter(Boolean),
     });
   }
   computers.sort((a, b) => a.computer.localeCompare(b.computer));

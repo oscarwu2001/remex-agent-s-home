@@ -363,6 +363,7 @@ test('a Claude app Code session in a made-up worktree is named after its reposit
   assert.equal(projectName('C:\\Users\\me\\Desktop\\Oscar\\Raymond_CAD\\.claude\\worktrees\\stoic-morse-54a28d'), 'Raymond_CAD');
   assert.equal(projectName('/home/me/cad/.claude/worktrees/x/src'), 'cad');
   assert.equal(projectName('/home/me/cad/'), 'cad');
+  assert.equal(projectName('C:\\Users\\me\\.claude'), 'Claude config');
   const t = new Tracker();
   feed(t, MAIN, [prompt(0, 'go', { cwd: '/work/endo/.claude/worktrees/brave-otter-1a2b3c' })]);
   assert.equal(t.snapshot(s(1)).sessions[0].project, 'endo');

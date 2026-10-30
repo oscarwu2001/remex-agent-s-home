@@ -61,7 +61,7 @@ test('a status file from the shared folder is rebuilt from checked values, never
   ] }));
   const { computers, problems } = fleet.readShares(dir, 'me.json', now);
   const [a, b] = computers[0].sessions;
-  assert.deepEqual(a, { project: 'ok', source: 'code', where: undefined, status: 'working', agents: [], todos: undefined });
+  assert.deepEqual(a, { project: 'ok', source: 'code', where: undefined, status: 'working', lastAt: undefined, agents: [], todos: undefined });
   assert.deepEqual(b.agents, [{ type: 'a', status: 'thinking' }]);
   assert.equal(b.source, 'code');
   assert.equal(b.todos, undefined);
@@ -82,4 +82,16 @@ test('a computer that posts hourly stays online until a quarter past its next po
   post('late', 80 * 60_000);
   const { computers } = fleet.readShares(dir, 'me.json', now);
   assert.deepEqual(computers.map((c) => [c.computer, c.online]), [['fresh', true], ['late', false]]);
+});
+
+test('an hourly post is a snapshot: old sessions count as idle, and the git lines come through clean', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fleet-'));
+  const now = Date.now();
+  fs.writeFileSync(path.join(dir, 'rd.json'), JSON.stringify({ app: 'agents-home', computer: 'RD', at: now - 14 * 60_000, every: 3_600_000,
+    sessions: [{ project: 'cad', status: 'working', lastAt: now - 15 * 60_000, agents: [] }, { project: 'endo', status: 'working', lastAt: now - 2 * 60_000, agents: [] }],
+    repos: [{ project: 'cad', branch: 'main', lastCommit: now - 3_600_000, changed: 3 }, { project: '<x>', branch: 5 }, { nope: 1 }] }));
+  const [c] = fleet.readShares(dir, 'me.json', now).computers;
+  assert.deepEqual(c.sessions.map((s) => [s.project, s.status]), [['cad', 'idle'], ['endo', 'working']]);
+  assert.deepEqual(c.repos, [{ project: 'cad', branch: 'main', lastCommit: now - 3_600_000, changed: 3 }, { project: '<x>', branch: undefined, lastCommit: undefined, changed: 0 }]);
+  assert.equal(c.every, 3_600_000);
 });

@@ -135,7 +135,9 @@ function pushHistory(actor, item) {
 function projectName(cwd) {
   const p = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
   const m = /^(.*?)\/\.claude\/worktrees\/[^/]+(?:\/|$)/.exec(p);
-  return path.posix.basename(m ? m[1] : p);
+  const name = path.posix.basename(m ? m[1] : p);
+  // Sessions run in the Claude settings folder itself (~/.claude).
+  return name === '.claude' ? 'Claude config' : name;
 }
 
 class Tracker {

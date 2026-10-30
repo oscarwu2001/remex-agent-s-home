@@ -730,3 +730,5 @@ body.no-select, body.no-select * { user-select: none; }
 
 .link-btn.small { min-height: 32px; font-size: 12px; color: var(--ink-muted); }
 .proj-section .title-row h2 { margin: 0; }
+.proj-git { display: block; font-size: 11.5px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj .proj-name { min-width: 0; }

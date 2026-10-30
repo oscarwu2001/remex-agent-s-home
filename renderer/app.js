@@ -8,7 +8,7 @@ import { BLOSSOMING } from './decor.js';
 import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
-import { overview as runningOverview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
+import { overview as runningOverview, headline, headlineBadges, badge, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
 import { installTips } from './tip.js';
@@ -1154,10 +1154,20 @@ function renderSessions(s) {
     if (!cards) return '';
     return many ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${cards}` : cards;
   }).join('');
+  const hm = (t) => new Date(t).toTimeString().slice(0, 5);
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
   const remote = others.map((c) => {
-    const state = c.online ? 'Online' : `Offline since ${clock(c.at)}`;
-    const projects = c.projects.map((p) => `<li class="proj"><span class="proj-name">${escapeXml(p.project)}</span>
-        <span class="badges">${p.running ? runningBadge(p.running) : '<span class="idle" title="Nothing running"><span aria-hidden="true">–</span><span class="visually-hidden">Nothing running</span></span>'}${p.helpers ? helperBadge(p.helpers) : ''}</span></li>`).join('');
+    const state = !c.online ? `Offline since ${hm(c.at)}` : c.every ? `Posted ${hm(c.at)}` : 'Online';
+    // Projects with sessions in the last post, then those with only git news.
+    const names = [...new Set([...c.projects.map((p) => p.project), ...(c.repos ?? []).map((r) => r.project)])];
+    const projects = names.map((name) => {
+      const p = c.projects.find((x) => x.project === name);
+      const r = (c.repos ?? []).find((x) => x.project === name);
+      const live = p?.running ? runningBadge(p.running) : p ? badge('session', p.sessions.length, `${p.sessions.length} session${p.sessions.length === 1 ? '' : 's'} in the hour before the post`, { quiet: true }) : '';
+      const git = r ? [r.branch, r.lastCommit ? `committed ${ago(r.lastCommit)}` : '', r.changed ? `${r.changed} uncommitted` : ''].filter(Boolean).join(' · ') : '';
+      return `<li class="proj"><span class="proj-name">${escapeXml(name)}${git ? `<span class="proj-git" title="${escapeXml(git)}">${escapeXml(git)}</span>` : ''}</span>
+        <span class="badges">${live || '<span class="idle" title="No session in the last hour"><span aria-hidden="true">–</span><span class="visually-hidden">No session in the last hour</span></span>'}${p?.helpers ? helperBadge(p.helpers) : ''}</span></li>`;
+    }).join('');
     return `<div class="computer${c.online ? '' : ' offline'}">
         <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
         ${projects ? `<ul class="projects">${projects}</ul>` : '<p class="hint">No sessions.</p>'}</div>`;
