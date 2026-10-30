@@ -69,7 +69,7 @@
 .proj-check { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 var(--s-2); font-size: 12.5px; color: var(--ink-muted); }
 .proj-check .ico { color: var(--accent); margin-top: 1px; }
 .ptodos { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
-.ptodos li { display: grid; grid-template-columns: 24px 1fr auto auto; align-items: center; gap: 4px; min-height: 30px; font-size: 13px; }
+.ptodos li { display: grid; grid-template-columns: 24px 1fr auto auto auto; align-items: center; gap: 4px; min-height: 30px; font-size: 13px; }
 .ptodos li.completed .ptext { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--line); }
 .tick { width: 24px; height: 24px; display: grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer; border-radius: 6px; }
 .tick:hover .pip { border-color: var(--accent); transform: scale(1.15); }
@@ -105,3 +105,22 @@
   transition: opacity 0.12s var(--ease-out), transform 0.2s var(--spring);
 }
 .tip.on { opacity: 1; transform: none; }
+
+/* Planned days on to-dos. */
+.when { position: relative; display: inline-flex; }
+.date-input { position: absolute; inset: auto 0 0 auto; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.date-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-muted); font: 12px var(--font); cursor: pointer; white-space: nowrap;
+  opacity: 0.55; transition: opacity 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
+}
+.date-btn .ico { width: 14px; height: 14px; }
+.ptodos li:hover .date-btn, .date-btn:focus-visible, .date-btn.set { opacity: 1; }
+.date-btn:hover { background: var(--panel-sunk); color: var(--ink); }
+.date-btn.set { background: var(--panel-sunk); color: var(--ink); }
+.date-btn.today, .next-due.today { background: var(--accent-soft); color: var(--accent); }
+.date-btn.overdue, .next-due.overdue { background: var(--warn-soft); color: var(--warn); }
+.sub-left { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.next-due { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--panel-sunk); color: var(--ink-muted); font-size: 11.5px; white-space: nowrap; }
+.next-due .ico { width: 12px; height: 12px; }
+@media (hover: none) { .date-btn { opacity: 1; } }

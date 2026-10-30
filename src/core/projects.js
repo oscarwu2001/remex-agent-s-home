@@ -31,6 +31,9 @@ function projectsFile(env = process.env, home = os.homedir()) {
 const str = (v, max = TEXT_LIMIT) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const newId = (prefix) => `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
 const STATES = new Set(['active', 'paused', 'done']);
+// A to-do's planned day, as YYYY-MM-DD (a real calendar day).
+const isDay = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
+  && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
 // The file as written stays the source of truth: the app reads a clean
 // view of it to show, but every save writes the file back as it was, with
@@ -87,7 +90,7 @@ function checkProjects(raw) {
     if (list.length > TODO_LIMIT) problems.push(`${name} has more than ${TODO_LIMIT} to-dos; the rest are not shown (they stay in the file)`);
     const todos = list.slice(0, TODO_LIMIT)
       .filter((t) => t && typeof t === 'object' && str(t.text))
-      .map((t) => ({ id: t.id, text: str(t.text), done: t.done === true, by: t.by === 'agent' ? 'agent' : 'you' }));
+      .map((t) => ({ id: t.id, text: str(t.text), done: t.done === true, by: t.by === 'agent' ? 'agent' : 'you', ...(isDay(t.due) ? { due: t.due } : {}) }));
     projects.push({
       id: p.id,
       name,
@@ -165,6 +168,13 @@ function applyChange(raw, change) {
       const t = findTodo(find(change.project), change.todo);
       t.done = t.done !== true;
       if (t.done) t.doneAt = new Date().toISOString();
+      break;
+    }
+    case 'set-date': {
+      const t = findTodo(find(change.project), change.todo);
+      if (change.date === '' || change.date == null) delete t.due;
+      else if (isDay(change.date)) t.due = change.date;
+      else throw new Error('That is not a date.');
       break;
     }
     case 'remove-todo': {

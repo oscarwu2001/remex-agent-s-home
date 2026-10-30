@@ -8,6 +8,42 @@ import { icon, badge, runningBadge, todoPips, isRunning } from './overview.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ORDER = { active: 0, paused: 1, done: 2 };
 
+// Days are local calendar days, YYYY-MM-DD.
+const dayOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export function dueLabel(due, today = new Date()) {
+  const t = dayOf(today);
+  const tomorrow = dayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
+  if (due === t) return { text: 'Today', when: 'today' };
+  if (due === tomorrow) return { text: 'Tomorrow', when: 'soon' };
+  const [y, m, d] = due.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const text = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', ...(y !== today.getFullYear() ? { year: 'numeric' } : {}) });
+  return due < t ? { text: `${text} · overdue`, when: 'overdue' } : { text, when: 'later' };
+}
+
+// Projects with open to-dos first (the soonest day first), then the ones
+// with nothing to do; active before paused before done within each.
+export function sortProjects(list) {
+  const key = (p) => {
+    const open = p.todos.filter((t) => !t.done);
+    const soonest = open.map((t) => t.due).filter(Boolean).sort()[0] ?? '9999-99-99';
+    return [open.length ? 0 : 1, soonest, ORDER[p.status] ?? 0, p.name.toLowerCase()];
+  };
+  return [...list].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+    return 0;
+  });
+}
+
+// Inside a project: open to-dos with a day (soonest first), open ones
+// without, then the done ones; each group keeps the list's own order.
+export function sortTodos(todos) {
+  const rank = (t) => (t.done ? 2 : t.due ? 0 : 1);
+  return todos.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t)
+    || (rank(a.t) === 0 ? a.t.due.localeCompare(b.t.due) : 0) || a.i - b.i).map(({ t }) => t);
+}
+
 // The add form for a project (or for a new project), with its own error
 // line, linked to the field so it is read out and found next to it.
 function addForm({ op, project, id, label, placeholder, max, error }) {
@@ -56,7 +92,7 @@ function assistantHtml(a, list, privacy, check = '') {
 // With privacy mode on, to-do wording is hidden like everything else that
 // could name a file, a dataset or a case: items show as "To-do 3".
 export function projectsHtml(projects, sessions, opts) {
-  const list = [...(projects?.list ?? [])].sort((a, b) => (ORDER[a.status] - ORDER[b.status]) || a.name.localeCompare(b.name));
+  const list = sortProjects(projects?.list ?? []);
   const unconfirmed = list.filter((p) => !p.confirmed).length;
   const checkText = unconfirmed ? `Your assistant found ${unconfirmed} project${unconfirmed === 1 ? '' : 's'} to check. Confirm the ones you are working on.` : '';
   const asks = assistantHtml(projects?.assistant, list, opts.privacy, checkText);
@@ -84,11 +120,18 @@ export function projectsHtml(projects, sessions, opts) {
       p.copies?.length ? badge('branch', p.copies.length, `${p.copies.length} branch cop${p.copies.length === 1 ? 'y' : 'ies'} or worktree${p.copies.length === 1 ? '' : 's'}`, { quiet: true }) : '',
       p.status !== 'active' ? `<span class="badge quiet">${esc(p.status === 'paused' ? 'Paused' : 'Done')}</span>` : '',
     ].join('');
-    const items = isOpen ? `<ul class="ptodos">${p.todos.map((t, i) => {
+    const items = isOpen ? `<ul class="ptodos">${sortTodos(p.todos).map((t, i) => {
       const text = opts.privacy ? `To-do ${i + 1}` : t.text;
+      const due = t.due ? dueLabel(t.due) : null;
+      const dateId = `date-${p.id}-${t.id}`;
+      // A date chip that opens the calendar; the native picker does the rest.
+      const when = t.done && !due ? '<span></span>' : `<span class="when">
+          <button type="button" class="date-btn${due ? ` set ${due.when}` : ''}" data-op="pick-date" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="${due ? `Planned for ${esc(due.text)} (click to change)` : 'Pick a day for this'}">${icon('calendar')}${due ? `<span>${esc(due.text)}</span>` : ''}<span class="visually-hidden">${due ? '' : 'Pick a day for '}${esc(text)}</span></button>
+          <input type="date" class="date-input" id="${esc(dateId)}" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" value="${esc(t.due ?? '')}" tabindex="-1" aria-hidden="true"></span>`;
       return `<li class="${t.done ? 'completed' : ''}">
         <button type="button" class="tick" data-op="toggle-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}"><span class="pip ${t.done ? 'completed' : 'pending'}" aria-hidden="true"></span><span class="visually-hidden">Mark as done: ${esc(text)}</span></button>
         <span class="ptext${opts.privacy ? ' hidden-text' : ''}" aria-hidden="true">${esc(text)}</span>
+        ${when}
         ${t.by === 'agent' ? `<span class="by" title="Added by an agent">${icon('agent')}<span class="visually-hidden">Added by an agent</span></span>` : '<span></span>'}
         <button type="button" class="icon-act subtle" data-op="remove-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="Remove">${icon('close')}<span class="visually-hidden">Remove ${esc(text)}</span></button></li>`;
     }).join('')}</ul>
@@ -98,7 +141,12 @@ export function projectsHtml(projects, sessions, opts) {
         <button type="button" class="pname" data-op="open" data-project="${esc(p.id)}" aria-expanded="${isOpen}"${where}>${icon('project')}<span>${esc(p.name)}</span></button>
         <span class="badges">${badges}</span>
       </div>
-      <div class="pcard-sub">${todos.total ? todoPips(todos) : '<span class="pip-n">No to-dos yet</span>'}
+      <div class="pcard-sub"><span class="sub-left">${todos.total ? todoPips(todos) : '<span class="pip-n">No to-dos yet</span>'}${(() => {
+        const next = p.todos.filter((t) => !t.done && t.due).map((t) => t.due).sort()[0];
+        if (!next) return '';
+        const d = dueLabel(next);
+        return `<span class="next-due ${d.when}" title="Next planned to-do">${icon('calendar')}${esc(d.text)}</span>`;
+      })()}</span>
         ${p.confirmed ? '' : `<button type="button" class="confirm" data-op="confirm" data-project="${esc(p.id)}">${icon('check')}Confirm<span class="visually-hidden"> ${esc(p.name)}</span></button>`}</div>
       ${errFor(`card:${p.id}`) ? `<p class="form-error" role="alert">${esc(errFor(`card:${p.id}`))}</p>` : ''}
       ${items}</li>`;
@@ -114,6 +162,17 @@ export function wireProjects(root, { open, change, rerender, setError }) {
     const b = e.target.closest('button[data-op]');
     if (!b || b.type === 'submit') return;
     const { op, project, todo } = b.dataset;
+    if (op === 'pick-date') {
+      // Open the calendar for that to-do's hidden date field.
+      const input = b.parentElement.querySelector('input.date-input');
+      try {
+        input.showPicker();
+      } catch {
+        // Older engines without showPicker: focus the field instead.
+        input.focus();
+      }
+      return;
+    }
     if (op === 'open') {
       if (open.has(project)) open.delete(project);
       else open.add(project);
@@ -127,6 +186,15 @@ export function wireProjects(root, { open, change, rerender, setError }) {
     const back = op === 'remove-todo' || op === 'confirm';
     rerender();
     if (back) root.querySelector(`.pname[data-project="${CSS.escape(project)}"]`)?.focus();
+  });
+  root.addEventListener('change', async (e) => {
+    const input = e.target.closest?.('input.date-input');
+    if (!input) return;
+    const { project, todo } = input.dataset;
+    const res = await change({ op: 'set-date', project, todo, date: input.value });
+    setError(res.ok ? undefined : { where: `card:${project}`, text: res.error });
+    rerender();
+    root.querySelector(`.date-btn[data-project="${CSS.escape(project)}"][data-todo="${CSS.escape(todo)}"]`)?.focus();
   });
   root.addEventListener('submit', async (e) => {
     const form = e.target.closest('form.proj-add');
@@ -146,8 +214,8 @@ export function wireProjects(root, { open, change, rerender, setError }) {
 export function demoProjects() {
   const list = [
     { id: 'spine-seg', name: 'spine-seg', confirmed: true, status: 'active', copies: [{ path: 'spine-seg-wt-docs' }], todos: [
-      { id: 'a', text: 'Draft the intro', done: true, by: 'you' }, { id: 'b', text: 'Tidy the loader tests', done: false, by: 'agent' }, { id: 'c', text: 'Write the release note', done: false, by: 'you' }] },
-    { id: 'carm-calib', name: 'carm-calib', confirmed: true, status: 'active', copies: [], todos: [{ id: 'a', text: 'Re-run the fast test loop', done: false, by: 'agent' }] },
+      { id: 'a', text: 'Draft the intro', done: true, by: 'you' }, { id: 'b', text: 'Tidy the loader tests', done: false, by: 'agent', due: dayOf(new Date()) }, { id: 'c', text: 'Write the release note', done: false, by: 'you' }] },
+    { id: 'carm-calib', name: 'carm-calib', confirmed: true, status: 'active', copies: [], todos: [{ id: 'a', text: 'Re-run the fast test loop', done: false, by: 'agent', due: dayOf(new Date(Date.now() + 3 * 86_400_000)) }] },
     { id: 'weekly-report', name: 'weekly-report', confirmed: true, status: 'active', copies: [], todos: [] },
     { id: 'garden-planner', name: 'garden-planner', confirmed: false, status: 'active', copies: [{ path: 'garden-planner-old' }, { path: 'garden-planner-v2' }], todos: [] },
   ];
@@ -176,6 +244,10 @@ export function demoProjects() {
       if (t) t.done = !t.done;
     } else if (c.op === 'remove-todo') p.todos = p.todos.filter((x) => x.id !== c.todo);
     else if (c.op === 'confirm') p.confirmed = true;
+    else if (c.op === 'set-date') {
+      const t = p.todos.find((x) => x.id === c.todo);
+      if (t) { if (c.date) t.due = c.date; else delete t.due; }
+    }
     return { ok: true };
   };
   return { snapshot: () => ({ ok: true, list: list.map((p) => ({ ...p, todos: p.todos.map((t) => ({ ...t })) })), assistant }), change };

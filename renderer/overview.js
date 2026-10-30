@@ -81,6 +81,7 @@ const PATHS = {
   branch: '<circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="8" r="2.2"/><path d="M7 8.2v7.6M17 10.2c0 3.5-4 3.2-8.6 6.4"/>',
   agent: '<rect x="5" y="8" width="14" height="10" rx="3"/><path d="M12 4.5V8M9.5 12.5h.01M14.5 12.5h.01" stroke-width="2.2"/>',
   check: '<path d="M5 12.5l4.2 4L19 7"/>',
+  calendar: '<rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   close: '<path d="M7 7l10 10M17 7L7 17"/>',
   waiting: '<path d="M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3v-3H5A1.5 1.5 0 0 1 3.5 15V8A1.5 1.5 0 0 1 5 6.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" stroke-width="2.6"/>',

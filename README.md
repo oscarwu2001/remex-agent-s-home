@@ -141,6 +141,11 @@ two agents in the office team share it:
   done / open / decided / next, and it adds and ticks to-dos (marked with a
   small robot) in the same list.
 
+Projects with open to-dos sit at the top (the soonest planned day first)
+and projects with nothing to do drop to the bottom. Open a project and each
+to-do has a calendar button: pick the day you mean to do it, and it shows as
+*Today*, *Tomorrow*, a date, or red when overdue; dated to-dos come first.
+
 Projects the assistant found but you have not confirmed show dashed, with
 a **Confirm** button. With privacy mode on, to-dos show as *To-do 1, To-do
 2…* (you can still tick, remove and add them); turn it off to read them. Sessions are matched to a project by their folder.

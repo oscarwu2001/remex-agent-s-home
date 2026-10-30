@@ -101,3 +101,27 @@ test('the file lives outside the .claude folder unless the user says otherwise',
   assert.equal(P.projectsFile({}, '/home/me'), path.join('/home/me', '.agents-home', 'projects.json'));
   assert.equal(P.projectsFile({ AGENTS_HOME_PROJECTS: '/x/p.json' }, '/home/me'), '/x/p.json');
 });
+
+test('a to-do can be given a day, changed and cleared; nonsense dates are refused', () => {
+  const raw = { projects: [{ id: 'a', name: 'A', todos: [{ id: 't1', text: 'one' }, { id: 't2', text: 'two', due: '2026-02-31' }] }] };
+  let next = P.applyChange(raw, { op: 'set-date', project: 'a', todo: 't1', date: '2026-11-03' });
+  assert.equal(next.projects[0].todos[0].due, '2026-11-03');
+  assert.equal(P.checkProjects(next).data.projects[0].todos[0].due, '2026-11-03');
+  assert.equal(P.checkProjects(next).data.projects[0].todos[1].due, undefined, 'an impossible day is not shown');
+  next = P.applyChange(next, { op: 'set-date', project: 'a', todo: 't1', date: '' });
+  assert.equal('due' in next.projects[0].todos[0], false);
+  assert.throws(() => P.applyChange(next, { op: 'set-date', project: 'a', todo: 't1', date: 'tomorrow' }), /not a date/);
+});
+
+test('projects with open to-dos come first (soonest day first), then those with none; to-dos sort by day', async () => {
+  const { sortProjects, sortTodos, dueLabel } = await import('../renderer/projects-view.js');
+  const p = (name, todos, status = 'active') => ({ name, status, todos });
+  const list = [p('Empty', []), p('Later', [{ text: 'x', due: '2026-12-01' }]), p('Undated', [{ text: 'y' }]), p('Soon', [{ text: 'z', due: '2026-11-01' }]), p('Done only', [{ text: 'w', done: true }])];
+  assert.deepEqual(sortProjects(list).map((x) => x.name), ['Soon', 'Later', 'Undated', 'Done only', 'Empty']);
+  const todos = [{ text: 'a' }, { text: 'b', due: '2026-11-05' }, { text: 'c', done: true, due: '2026-10-01' }, { text: 'd', due: '2026-11-02' }, { text: 'e' }];
+  assert.deepEqual(sortTodos(todos).map((t) => t.text), ['d', 'b', 'a', 'e', 'c']);
+  const today = new Date(2026, 9, 30);
+  assert.equal(dueLabel('2026-10-30', today).text, 'Today');
+  assert.equal(dueLabel('2026-10-31', today).text, 'Tomorrow');
+  assert.equal(dueLabel('2026-10-29', today).when, 'overdue');
+});
