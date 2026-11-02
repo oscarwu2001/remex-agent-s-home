@@ -3,24 +3,39 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793530802112,
+ "at": 1793581201590,
  "every": 3600000,
- "sessions": [],
- "repos": [],
+ "sessions": [
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793579538803.8992,
+   "agents": []
+  }
+ ],
+ "repos": [
+  {
+   "project": "spine-sim",
+   "branch": "handle-map-model",
+   "lastCommit": 1793347937000,
+   "changed": 0
+  }
+ ],
  "jobs": [],
  "work": [],
  "machine": {
   "gpus": [
    {
     "name": "RTX 2000E Ada Generation",
-    "util": 1,
-    "memUsed": 714,
+    "util": 0,
+    "memUsed": 744,
     "memTotal": 16380,
-    "temp": 42
+    "temp": 39
    }
   ],
-  "cpu": 11,
-  "memUsed": 12619,
+  "cpu": 21,
+  "memUsed": 12142,
   "memTotal": 16148
  }
 }
