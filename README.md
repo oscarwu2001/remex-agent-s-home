@@ -38,6 +38,16 @@ files to a GitHub Release.
 The exe is not code-signed, so SmartScreen will warn the first time. Choose
 **More info → Run anyway**.
 
+**For colleagues without access to this repository:** the repository is
+private, so cloning it or opening its Actions tab needs a GitHub sign-in with
+access. Instead, download the setup exe yourself and pass it on (a shared
+drive, Teams, a USB stick). The installed app never signs in to GitHub and
+never asks to: it reads only the computer's own Claude sessions. GitHub comes
+in only if that person chooses to link their computer to the others
+(Settings → Other computers → Use a git status folder, or posting their own
+status with the `agents-status` branch's scripts); only then do they need a
+GitHub account with access to this repository.
+
 **Or build it yourself** with Node.js 20 or later:
 
 ```powershell

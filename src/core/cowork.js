@@ -36,8 +36,10 @@ function claudeDataDirs({ platform = process.platform, env = process.env, home =
     }
     return dirs;
   }
-  if (platform === 'darwin') return [path.join(home, 'Library', 'Application Support', 'Claude')];
-  return [path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'Claude')];
+  // posix joins, so the answer for a Mac or Linux is the same whichever
+  // platform runs the code (the tests run on Windows too).
+  if (platform === 'darwin') return [path.posix.join(home, 'Library', 'Application Support', 'Claude')];
+  return [path.posix.join(env.XDG_CONFIG_HOME || path.posix.join(home, '.config'), 'Claude')];
 }
 
 const realFs = {
