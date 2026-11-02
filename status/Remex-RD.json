@@ -3,28 +3,41 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793588402091,
- "every": 3600000,
+ "at": 1793590201910,
+ "every": 900000,
  "sessions": [
   {
    "project": "spine-sim",
    "source": "code",
    "status": "working",
-   "lastAt": 1793588399814.19,
+   "lastAt": 1793590180046.8257,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793589169290.777,
    "agents": []
   }
  ],
  "repos": [
   {
-   "project": "spine-recon",
-   "branch": "main",
-   "lastCommit": 1793584757000,
+   "project": "spine-ct",
+   "branch": "handle-map-model",
+   "lastCommit": 1793589139000,
    "changed": 0
   },
   {
-   "project": "spine-ct",
-   "branch": "handle-map-model",
-   "lastCommit": 1793584094000,
+   "project": "spine-seg2d",
+   "branch": "main",
+   "lastCommit": 1793588954000,
+   "changed": 0
+  },
+  {
+   "project": "spine-recon",
+   "branch": "main",
+   "lastCommit": 1793584757000,
    "changed": 0
   },
   {
@@ -46,12 +59,6 @@
    "changed": 0
   },
   {
-   "project": "spine-seg2d",
-   "branch": "main",
-   "lastCommit": 1793337488000,
-   "changed": 0
-  },
-  {
    "project": "anatasenavi",
    "branch": "main",
    "lastCommit": 1774533448000,
@@ -59,19 +66,25 @@
   }
  ],
  "jobs": [],
- "work": [],
+ "work": [
+  {
+   "name": "-m not needs_data and not needs_gpu",
+   "on": "gpu",
+   "startedAt": 1793590179916
+  }
+ ],
  "machine": {
   "gpus": [
    {
     "name": "RTX 2000E Ada Generation",
-    "util": 0,
-    "memUsed": 958,
+    "util": 100,
+    "memUsed": 1339,
     "memTotal": 16380,
-    "temp": 40
+    "temp": 41
    }
   ],
-  "cpu": 16,
-  "memUsed": 11613,
+  "cpu": 35,
+  "memUsed": 12777,
   "memTotal": 16148
  }
 }
