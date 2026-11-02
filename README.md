@@ -198,7 +198,9 @@ The **Report** button at the top of the map builds the performance report
 ## The office team for Claude
 
 Agent's Home can add a small, ready-made team to Claude Code, for people who
-do not code and for people who do. They keep prompting in Claude as usual,
+do not code and for people who do. **It is optional and off by default:** the
+app never adds, changes or switches on anything in your Claude setup unless
+you tick it yourself, so a pipeline you already have stays exactly as it is. They keep prompting in Claude as usual,
 with their own plan, and the team shows up in the hospital:
 
 - **Agents for office work:** a writer (Research Office), a summariser (Radiology), a planner (Vision Clinic), a data helper (Laboratory) and a checker (Operating Room).
@@ -209,15 +211,16 @@ with their own plan, and the team shows up in the hospital:
 How work flows through the team is drawn in
 [`office-pack/PIPELINE.md`](office-pack/PIPELINE.md).
 
-On first start the app asks, in one short card, whether to add them. If
-Claude has no agents yet, one **Add** does it. If it already has some, you
-tick the ones you want. Anything already in `~/.claude` is never replaced.
-**Not now** is remembered, and **Settings → Office team for Claude** keeps
-the list. The files are in `office-pack/` if you'd rather copy them by hand.
+The app does not offer them on its own. To add any, open **Settings → Office
+team for Claude (optional)**, tick the ones you want (nothing is ticked to
+start with) and press **Add the ticked ones**. Anything already in
+`~/.claude` is never replaced. The files are in `office-pack/` if you'd rather
+copy them by hand.
 
-**Settings → Updates → Update agents** brings the team up to date in one go.
-It adds any helpers not there yet and turns on the reminders. It also refreshes
-files that are exactly as some earlier version of the app shipped them. A file
+**Settings → Updates → Update agents** refreshes only the helpers you added,
+when a newer version came with the app. It adds nothing new and never turns
+the reminders on (or back on). It refreshes files that are exactly as some
+earlier version of the app shipped them. A file
 you edited is left as it is, and listed. Your own agents, skills and hooks are
 never opened: it only reads and writes the pack's own files, and an agent of
 yours that happens to share a pack name is left alone and listed too. When it

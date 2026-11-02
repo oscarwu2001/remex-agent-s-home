@@ -246,7 +246,10 @@ function ownItems(packDir, claudeDir) {
 }
 
 function updatePack(packDir, claudeDir, versions) {
-  const result = { updated: [], added: [], edited: [], upToDate: [], errors: [], own: { agents: [], skills: [] } };
+  // Refreshes only what the user added. A helper they never added stays
+  // out, and reminders they never turned on (or turned off) stay off: the
+  // user's own pipeline is theirs. `added` stays empty; kept for callers.
+  const result = { updated: [], added: [], edited: [], upToDate: [], notAdded: [], errors: [], own: { agents: [], skills: [] } };
   try {
     result.own = ownItems(packDir, claudeDir);
   } catch (err) {
@@ -254,11 +257,10 @@ function updatePack(packDir, claudeDir, versions) {
   }
   const known = (rel, text) => (versions[rel] ?? []).includes(fingerprint(text));
   const files = packFiles(packDir);
-  const missing = [];
   for (const item of listPack(packDir)) {
     const target = path.join(claudeDir, item.to);
     if (!fs.existsSync(target) || (item.kind === 'hook' && !hookIsOn(claudeDir))) {
-      missing.push(item.name);
+      result.notAdded.push(item.name);
       continue;
     }
     const mine = item.kind === 'skill' ? files.filter((f) => f.startsWith(`${item.from.split(path.sep).join('/')}/`)) : [item.from.split(path.sep).join('/')];
@@ -301,11 +303,6 @@ function updatePack(packDir, claudeDir, versions) {
     if (edited) result.edited.push(item.name);
     else if (changed) result.updated.push(item.name);
     else result.upToDate.push(item.name);
-  }
-  if (missing.length) {
-    const res = installPack(packDir, claudeDir, missing);
-    result.added.push(...res.installed);
-    result.errors.push(...res.errors);
   }
   return result;
 }

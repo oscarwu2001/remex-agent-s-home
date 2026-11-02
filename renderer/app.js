@@ -2317,7 +2317,8 @@ $('update-run').addEventListener('click', async () => {
   }
 });
 
-// Update agents: the team in Claude, up to date and switched on.
+// Update agents: refreshes the team helpers the user added. Adds nothing
+// new and turns nothing on.
 if (!bridge.packUpdate) $('update-agents').disabled = true;
 // "Your own 3 agents and 2 skills were not touched." Only the counts: the
 // names are the user's and Settings already lists the team's own.
@@ -2342,10 +2343,10 @@ $('update-agents').addEventListener('click', async () => {
     }
     const list = (names) => names.map(packLabel).join(', ');
     const parts = [
-      res.added.length ? `Added: ${list(res.added)}.` : '',
+
       res.updated.length ? `Updated: ${list(res.updated)}.` : '',
       res.edited.length ? `Left alone, because you changed them or they are your own with the same name: ${list(res.edited)}.` : '',
-      !res.added.length && !res.updated.length ? 'The team was already up to date.' : 'Start a new Claude session to use the changes.',
+      !res.updated.length ? (res.upToDate.length || res.edited.length ? 'The helpers you added were already up to date.' : 'You have not added any of the team; nothing to update.') : 'Start a new Claude session to use the changes.',
       ownText(res.own),
       res.errors.length ? `Problems: ${res.errors.join('; ')}` : '',
     ].filter(Boolean);
@@ -2431,7 +2432,7 @@ async function loadPack() {
 // The card shows names only; Settings adds what each one does.
 function packChoices(id, withSummary) {
   return pack.items.filter((i) => !i.installed).map((i) => `<label class="check">
-    <input type="checkbox" name="${id}" value="${escapeXml(i.name)}" checked>
+    <input type="checkbox" name="${id}" value="${escapeXml(i.name)}">
     <span><strong>${escapeXml(packLabel(i.name))}</strong>${withSummary ? ` <span class="muted">${escapeXml(i.summary)}</span>` : ''}</span></label>`).join('');
 }
 
@@ -2452,9 +2453,9 @@ function renderPack() {
   const key = missing.map((i) => i.name).join(',');
   const note = packNote ? `<p class="hint" role="status">${escapeXml(packNote)}</p>` : '';
   const err = packError ? `<p class="form-error" role="alert">${escapeXml(packError)}</p>` : '';
-  // The board card: short. A new Claude folder gets one button; one that
-  // already has agents gets the list to choose from.
-  offer.hidden = !(missing.length && prefs.packDismissed !== key) && !packNote;
+  // No card on the board: people keep their own agent pipelines, so the
+  // office team is only ever offered in Settings, with nothing ticked.
+  offer.hidden = true;
   if (!offer.hidden) {
     offer.innerHTML = missing.length && prefs.packDismissed !== key ? `
       <h2 id="pack-h">Add the office team to Claude?</h2>
@@ -2467,8 +2468,9 @@ function renderPack() {
   settings.innerHTML = `
     ${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
       <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
-    ${missing.length ? `<div class="checks">${packChoices('pack-pick-settings', true)}</div>
-      <button type="button" class="button" id="pack-add-settings">Add to Claude</button>` : '<p class="hint">All of the office team is in Claude.</p>'}
+    ${missing.length ? `<p class="hint">Optional. Nothing is added to Claude unless you tick it here; your own agents, skills and hooks are never touched.</p>
+      <div class="checks">${packChoices('pack-pick-settings', true)}</div>
+      <button type="button" class="button" id="pack-add-settings">Add the ticked ones</button>` : '<p class="hint">All of the office team is in Claude.</p>'}
     ${err}${note}`;
 }
 

@@ -98,7 +98,7 @@ test('a settings.json that is not valid JSON is left exactly as it is', () => {
   assert.equal(fs.readFileSync(path.join(claude, 'settings.json'), 'utf8'), '{ "model": "x", // a comment }');
 });
 
-test('update agents: refreshes untouched files, leaves edited ones, adds what is missing and turns reminders on', () => {
+test('update agents: refreshes untouched files, leaves edited ones, and adds nothing the user did not choose', () => {
   const claude = tmp();
   installPack(PACK, claude, ['writer', 'checker', 'handover']);
   // writer as an older pack version shipped it; checker edited by the user.
@@ -109,11 +109,14 @@ test('update agents: refreshes untouched files, leaves edited ones, adds what is
   assert.deepEqual(res.updated, ['writer']);
   assert.deepEqual(res.edited, ['checker']);
   assert.ok(res.upToDate.includes('handover'));
-  assert.ok(res.added.includes('code-reviewer') && res.added.includes('test-runner') && res.added.includes('team-reminders'));
+  assert.deepEqual(res.added, [], 'nothing new is added');
+  assert.ok(res.notAdded.includes('code-reviewer') && res.notAdded.includes('team-reminders'));
+  assert.equal(fs.existsSync(path.join(claude, 'agents', 'code-reviewer.md')), false);
+  assert.equal(fs.existsSync(path.join(claude, 'settings.json')), false, 'reminders stay off');
   assert.deepEqual(res.errors, []);
   assert.equal(fs.readFileSync(path.join(claude, 'agents', 'writer.md'), 'utf8'), fs.readFileSync(path.join(PACK, 'agents', 'writer.md'), 'utf8'));
   assert.equal(fs.readFileSync(path.join(claude, 'agents', 'checker.md'), 'utf8'), 'my own checker');
-  assert.ok(packStatus(PACK, claude).items.every((i) => i.installed));
+  assert.deepEqual(packStatus(PACK, claude).items.filter((i) => i.installed).map((i) => i.name).sort(), ['checker', 'handover', 'writer']);
   const again = updatePack(PACK, claude, old);
   assert.deepEqual([again.updated, again.added], [[], []], 'a second update has nothing to do');
 });
@@ -159,9 +162,10 @@ test('update agents never touches the user\'s own agents, skills or hooks, even 
   for (const rel of Object.keys(own)) assert.equal(after[rel], before[rel], `${rel} unchanged`);
   assert.deepEqual(res.edited, ['planner'], 'the same-name agent is reported, not replaced');
   assert.deepEqual(res.own, { agents: ['rca-skeptic'], skills: ['my-skill'] });
-  // Whatever changed or appeared is the pack's own, or the one hook entry
-  // in settings.json (and its backup).
-  const pack = new Set([...packFiles(PACK), 'settings.json', 'settings.json.agents-home-backup', 'hooks/agents-home-router.log']);
+  // Whatever changed is one of the pack files the user added; nothing new
+  // appears, and settings.json is not created.
+  const pack = new Set(packFiles(PACK));
+  assert.deepEqual(Object.keys(after).filter((rel) => !(rel in before)), [], 'nothing added');
   const touched = Object.keys(after).filter((rel) => after[rel] !== before[rel]);
   assert.ok(touched.includes('agents/writer.md'));
   assert.deepEqual(touched.filter((rel) => !pack.has(rel)), [], 'nothing outside the pack');
