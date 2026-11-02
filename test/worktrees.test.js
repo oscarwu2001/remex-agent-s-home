@@ -27,6 +27,13 @@ test('worktrees: merged and clean ones are safe to remove, ones with work are no
   g(path.join(dir, 'app-wip'), 'commit', '-q', '--allow-empty', '-m', 'not merged yet');
   g(repo, 'worktree', 'add', '-q', '-b', 'dirty', path.join(dir, 'app-dirty'));
   fs.writeFileSync(path.join(dir, 'app-dirty', 'note.txt'), 'x');
+  // Merged and clean, but holding an ignored output that removal would delete.
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'out/\n');
+  g(repo, 'add', '.gitignore');
+  g(repo, 'commit', '-q', '-m', 'ignore out');
+  g(repo, 'worktree', 'add', '-q', '-b', 'trained', path.join(dir, 'app-trained'));
+  fs.mkdirSync(path.join(dir, 'app-trained', 'out'));
+  fs.writeFileSync(path.join(dir, 'app-trained', 'out', 'result.npy'), 'x');
   const res = await W.inspectWorktrees(repo);
   assert.equal(res.ok, true);
   assert.equal(res.base, 'main');
@@ -35,11 +42,18 @@ test('worktrees: merged and clean ones are safe to remove, ones with work are no
   assert.deepEqual([by['app-done'].merged, by['app-done'].safe], [true, true]);
   assert.deepEqual([by['app-wip'].merged, by['app-wip'].safe], [false, false]);
   assert.deepEqual([by['app-dirty'].changed, by['app-dirty'].safe], [1, false]);
+  assert.deepEqual([by['app-trained'].merged, by['app-trained'].ignored, by['app-trained'].safe], [true, 1, false], 'ignored files keep a worktree from being called safe');
   assert.equal(res.trees[res.trees.length - 1].name, 'app-done', 'safe ones are listed last');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('a folder that is not a repository says so', async () => {
   assert.equal((await W.inspectWorktrees(path.join(os.tmpdir(), 'no-such-repo-xyz'))).ok, false);
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-plain-'));
-  if (hasGit) assert.match((await W.inspectWorktrees(plain)).error, /not a git repository/);
+  if (hasGit) {
+    const res = await W.inspectWorktrees(plain);
+    assert.match(res.error, /not a git repository/);
+    assert.doesNotMatch(res.error, /agents-plain-/, 'git\'s own words, which may hold paths, stay in detail');
+  }
+  fs.rmSync(plain, { recursive: true, force: true });
 });

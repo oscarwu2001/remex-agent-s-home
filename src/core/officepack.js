@@ -221,9 +221,9 @@ function installPack(packDir, claudeDir, names) {
 // "Update agents": brings the team up to date in one go. Pack files already
 // installed are replaced with the new version only when they are exactly as
 // some version of the pack shipped them; a file the user edited is left as
-// it is and reported. A file new to an installed skill is added. Anything
-// in the pack not yet in Claude is added (never over a file that is there),
-// and the reminder hook is turned on.
+// it is and reported. A file new to an installed skill is added. Nothing
+// else: items the user never added stay out (listed in notAdded), and the
+// reminder hook is refreshed only if the user already turned it on.
 // The user's own agents and skills: everything in ~/.claude/agents and
 // skills whose name the pack does not use. Update agents only ever reads and
 // writes the pack's own files, so these are never opened; they are counted

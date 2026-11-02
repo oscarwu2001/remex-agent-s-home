@@ -135,6 +135,16 @@ test('sessions quiet past the stale limit leave the board, unless they wait on t
   assert.equal(w.snapshot(s(1) + TIMING.waitingStaleMs + 1).sessions.length, 0, 'but not forever');
 });
 
+test('a session whose helper waits for an approval stays in view like one waiting itself', () => {
+  const t = new Tracker();
+  const p = 'Clean the build folder and report back please';
+  feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'task1', 'Task', { subagent_type: 'builder', prompt: p })]);
+  feed(t, '/p/sess-1/subagents/agent-h.jsonl', [prompt(2, p, sidechain('h')), toolUse(3, 'b1', 'Bash', { command: 'rm -rf build' }, sidechain('h'))]);
+  const later = t.snapshot(s(3) + TIMING.staleSessionMs + 60_000).sessions;
+  assert.equal(later.length, 1, 'still shown after the usual quiet limit');
+  assert.ok(later[0].agents.some((a) => a.status === 'blocked'));
+});
+
 test('malformed lines are counted with the file they came from', () => {
   const t = new Tracker();
   t.noteMalformed('/p/sess-9.jsonl', new Error('bad json'));

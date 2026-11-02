@@ -20,12 +20,15 @@ function within(a, b) {
 // sessions: [{ id, project, cwd, lastActivityAt }]
 function findClashes(sessions, now = Date.now()) {
   const live = sessions.filter((s) => s.cwd && now - s.lastActivityAt <= RECENT_MS).map((s) => ({ ...s, dir: norm(s.cwd) }));
-  const groups = [];
-  for (const s of live) {
-    const g = groups.find((x) => x.some((y) => within(y.dir, s.dir)));
-    if (g) g.push(s);
-    else groups.push([s]);
+  // Join every pair that shares a folder, transitively (a in b, c in b).
+  const up = live.map((_, i) => i);
+  const root = (i) => (up[i] === i ? i : (up[i] = root(up[i])));
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) if (within(live[i].dir, live[j].dir)) up[root(j)] = root(i);
   }
+  const byRoot = new Map();
+  live.forEach((s, i) => byRoot.set(root(i), [...(byRoot.get(root(i)) ?? []), s]));
+  const groups = [...byRoot.values()];
   return groups.filter((g) => g.length > 1).map((g) => ({
     project: g[0].project,
     count: g.length,

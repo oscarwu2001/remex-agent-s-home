@@ -2,8 +2,11 @@
 
 // A project's worktrees, looked at when the user asks (Projects → a project
 // → Worktrees): each one's branch, whether that branch is already merged
-// into the main branch, uncommitted files and last activity, and which are
-// safe to remove (merged, nothing uncommitted, not the main checkout). Read
+// into the main branch, uncommitted and ignored files and last activity, and
+// which are safe to remove (merged, nothing uncommitted, no ignored files
+// such as training outputs that `git worktree remove` would delete, not the
+// main checkout). Errors are a plain sentence plus git's own words in
+// `detail`, which may hold paths and is shown only with privacy off. Read
 // only: git commands that look, never ones that change anything, and no
 // network (nothing is fetched).
 
@@ -11,11 +14,14 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_OPTIONAL_LOCKS: '0' };
+// No prompts, no index writes, no lazy fetches in a partial clone, and none
+// of the variables that would point git at another repository than -C.
+const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1' };
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_NAMESPACE']) delete ENV[k];
 
 function git(cwd, args, run = execFile) {
   return new Promise((resolve, reject) => {
-    run('git', ['-C', cwd, ...args], { timeout: 20_000, windowsHide: true, env: ENV, maxBuffer: 4 * 1024 * 1024 }, (err, out, stderr) => {
+    run('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: 20_000, windowsHide: true, env: ENV, maxBuffer: 4 * 1024 * 1024 }, (err, out, stderr) => {
       if (err) reject(new Error(err.code === 'ENOENT' ? 'git was not found' : String(stderr || err.message).trim().split('\n').pop()));
       else resolve(String(out));
     });
@@ -56,7 +62,7 @@ async function inspectWorktrees(repo, { run = execFile, now = Date.now() } = {})
   try {
     list = parseWorktreeList(await git(repo, ['worktree', 'list', '--porcelain'], run));
   } catch (err) {
-    return { ok: false, error: `This folder is not a git repository, or git could not read it (${err.message}).` };
+    return { ok: false, error: 'This folder is not a git repository, or git could not read it.', detail: err.message };
   }
   const base = await defaultBranch(repo, run).catch(() => undefined);
   let merged = new Set();
@@ -71,7 +77,9 @@ async function inspectWorktrees(repo, { run = execFile, now = Date.now() } = {})
     const t = { name: path.basename(w.path.replace(/[\\/]+$/, '')), path: w.path, branch: w.branch, main: w.main, detached: w.detached, missing: w.prunable };
     if (w.prunable || !fs.existsSync(w.path)) return { ...t, missing: true };
     try {
-      t.changed = (await git(w.path, ['status', '--porcelain'], run)).split(/\r?\n/).filter(Boolean).length;
+      const lines = (await git(w.path, ['status', '--porcelain', '--ignored'], run)).split(/\r?\n/).filter(Boolean);
+      t.ignored = lines.filter((l) => l.startsWith('!! ')).length;
+      t.changed = lines.length - t.ignored;
       t.lastCommit = Number((await git(w.path, ['log', '-1', '--format=%ct'], run)).trim()) * 1000 || undefined;
     } catch (err) {
       t.error = err.message;
@@ -82,7 +90,7 @@ async function inspectWorktrees(repo, { run = execFile, now = Date.now() } = {})
       // The folder's own time is a hint only.
     }
     t.merged = Boolean(w.branch && base && w.branch !== base && merged.has(w.branch));
-    t.safe = !w.main && !t.error && t.changed === 0 && t.merged;
+    t.safe = !w.main && !t.error && t.changed === 0 && t.ignored === 0 && t.merged;
     return t;
   }));
   const order = (t) => (t.main ? 0 : t.missing ? 3 : t.safe ? 2 : 1);

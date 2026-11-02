@@ -475,7 +475,7 @@ class Tracker {
       // A session waiting on the user (its turn, or an approval) stays in
       // view much longer: that is exactly when the user needs to see it.
       const own = this.statusOf(session.actor, now, { isSession: true });
-      const waiting = own.status === 'your-turn' || own.status === 'blocked';
+      const waiting = own.status === 'your-turn' || own.status === 'blocked' || agents.some((a) => a.status === 'blocked');
       if (now - lastAt > (waiting ? t.waitingStaleMs : t.staleSessionMs)) continue;
 
       sessions.push({
@@ -494,7 +494,7 @@ class Tracker {
         limitNotice: session.actor.limitNotice,
         // Its own replies plus every helper it has called, finished ones too.
         tokensWithHelpers: [...session.subagents.values()].reduce((n, sub) => n + tokensOf(sub.actor).total, tokensOf(session.actor).total),
-        ...this.statusOf(session.actor, now, { isSession: true }),
+        ...own,
         history: session.actor.history.slice(),
         agents,
         map: this.mapOf(session, now),

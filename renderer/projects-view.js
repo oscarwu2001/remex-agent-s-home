@@ -136,7 +136,7 @@ export function projectsHtml(projects, sessions, opts) {
         <button type="button" class="icon-act subtle" data-op="remove-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="Remove">${icon('close')}<span class="visually-hidden">Remove ${esc(text)}</span></button></li>`;
     }).join('')}</ul>
       ${addForm({ op: 'add-todo', project: p.id, id: `todo-${p.id}`, label: `Add a to-do to ${p.name}`, placeholder: 'Add a to-do', max: 300, error: errFor(p.id) })}
-      ${p.path || p.copies?.length ? worktreesHtml(p, opts.worktrees?.get(p.id), opts.privacy) : ''}` : '';
+      ${p.path ? worktreesHtml(p, opts.worktrees?.get(p.id), opts.privacy) : ''}` : '';
     return `<li class="pcard${p.confirmed ? '' : ' unconfirmed'}${isOpen ? ' open' : ''}" data-id="${esc(p.id)}">
       <div class="pcard-head">
         <button type="button" class="pname" data-op="open" data-project="${esc(p.id)}" aria-expanded="${isOpen}"${where}>${icon('project')}<span>${esc(p.name)}</span></button>
@@ -156,19 +156,21 @@ export function projectsHtml(projects, sessions, opts) {
 }
 
 // A project's worktrees, on request: each one's branch and state, the safe
-// ones (merged, nothing uncommitted) last, and their remove commands to copy.
+// ones (merged, nothing uncommitted or ignored) last, and their remove commands to copy.
 // The app itself never removes anything.
 const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 function worktreesHtml(p, wt, privacy) {
   const button = `<button type="button" class="link-btn small wt-load" data-op="worktrees" data-project="${esc(p.id)}">${icon('branch')} ${wt?.loading ? 'Looking…' : wt ? 'Look again' : 'Worktrees'}</button>`;
   if (!wt || wt.loading) return `<div class="wt">${button}</div>`;
-  if (!wt.ok) return `<div class="wt">${button}<p class="form-error">${esc(wt.error)}</p></div>`;
+  // git's own words can hold paths and commands: shown only with privacy off.
+  if (!wt.ok) return `<div class="wt">${button}<p class="form-error">${esc(wt.error)}${wt.detail && !privacy ? ` <span class="muted">${esc(wt.detail)}</span>` : ''}</p></div>`;
   const rows = wt.trees.map((t) => {
     const bits = [
       t.main ? 'main checkout' : '',
       t.missing ? 'folder gone' : '',
       t.merged ? `merged into ${wt.base}` : '',
       t.changed ? `${t.changed} uncommitted` : '',
+      t.ignored ? `${t.ignored} ignored (outputs, checkpoints?) kept from removal` : '',
       t.lastCommit ? `committed ${ago(t.lastCommit)}` : '',
       t.error ? 'could not be read' : '',
     ].filter(Boolean).join(' · ');
@@ -179,7 +181,7 @@ function worktreesHtml(p, wt, privacy) {
   const safe = wt.trees.filter((t) => t.safe);
   const gone = wt.trees.filter((t) => t.missing);
   return `<div class="wt">${button}
-    <p class="wt-sum">${wt.trees.length} checkout${wt.trees.length === 1 ? '' : 's'}${safe.length ? ` · <strong>${safe.length} safe to remove</strong> (merged, nothing uncommitted)` : ''}${gone.length ? ` · ${gone.length} already gone` : ''}</p>
+    <p class="wt-sum">${wt.trees.length} checkout${wt.trees.length === 1 ? '' : 's'}${safe.length ? ` · <strong>${safe.length} safe to remove</strong> (merged, nothing uncommitted or ignored)` : ''}${gone.length ? ` · ${gone.length} already gone` : ''}</p>
     <ul class="wt-list">${rows}</ul>
     ${safe.length || gone.length ? `<button type="button" class="link-btn small" data-op="copy-wt" data-project="${esc(p.id)}">Copy the commands to remove them</button>` : ''}</div>`;
 }
@@ -268,7 +270,7 @@ export function wireProjects(root, { open, change, rerender, setError, worktrees
 // The demo keeps its projects in memory: the same changes, never saved.
 export function demoProjects() {
   const list = [
-    { id: 'spine-seg', name: 'spine-seg', confirmed: true, status: 'active', copies: [{ path: 'spine-seg-wt-docs' }], todos: [
+    { id: 'spine-seg', name: 'spine-seg', path: 'C:\\demo\\spine-seg', confirmed: true, status: 'active', copies: [{ path: 'spine-seg-wt-docs' }], todos: [
       { id: 'a', text: 'Draft the intro', done: true, by: 'you' }, { id: 'b', text: 'Tidy the loader tests', done: false, by: 'agent', due: dayOf(new Date()) }, { id: 'c', text: 'Write the release note', done: false, by: 'you' }] },
     { id: 'carm-calib', name: 'carm-calib', confirmed: true, status: 'active', copies: [], todos: [{ id: 'a', text: 'Re-run the fast test loop', done: false, by: 'agent', due: dayOf(new Date(Date.now() + 3 * 86_400_000)) }] },
     { id: 'weekly-report', name: 'weekly-report', confirmed: true, status: 'active', copies: [], todos: [] },

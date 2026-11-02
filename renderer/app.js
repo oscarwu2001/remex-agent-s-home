@@ -2430,7 +2430,7 @@ async function showLogStatus() {
   }
   const { summary: s, team } = res;
   if (team.reminders !== 'on') {
-    line.textContent = `Team reminders are off (${team.team} of the team in Claude). Update agents turns them on.`;
+    line.textContent = `Team reminders are off (${team.team} of the team in Claude). To turn them on, tick Team reminders under Office team in Settings.`;
   } else if (!s.runs) {
     line.textContent = `Team reminders are on but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
   } else {
@@ -2499,21 +2499,11 @@ function renderPack() {
     return;
   }
   const missing = pack.items.filter((i) => !i.installed);
-  const key = missing.map((i) => i.name).join(',');
   const note = packNote ? `<p class="hint" role="status">${escapeXml(packNote)}</p>` : '';
   const err = packError ? `<p class="form-error" role="alert">${escapeXml(packError)}</p>` : '';
   // No card on the board: people keep their own agent pipelines, so the
   // office team is only ever offered in Settings, with nothing ticked.
   offer.hidden = true;
-  if (!offer.hidden) {
-    offer.innerHTML = missing.length && prefs.packDismissed !== key ? `
-      <h2 id="pack-h">Add the office team to Claude?</h2>
-      ${pack.hasOwnAgents ? `<div class="checks pack-names">${packChoices('pack-pick', false)}</div>` : '<p class="hint">Helpers for emails, summaries, plans, numbers and code, and reminders so Claude uses them.</p>'}
-      ${err}<div class="form-actions">
-        <button type="button" class="button" id="pack-add">${pack.hasOwnAgents ? 'Add selected' : 'Add'}</button>
-        <button type="button" class="link-btn" id="pack-later">Not now</button></div>`
-      : `<h2 id="pack-h">Office team</h2>${note}<div class="form-actions"><button type="button" class="link-btn" id="pack-ok">OK</button></div>`;
-  }
   settings.innerHTML = `
     ${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
       <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
@@ -2523,15 +2513,10 @@ function renderPack() {
     ${err}${note}`;
 }
 
-async function addPack(names, fromCard = false) {
+async function addPack(names) {
   if (!names.length) return;
   packError = '';
   const res = await bridge.packInstall(names);
-  // From the card, whatever was left unticked counts as "not now".
-  if (fromCard) {
-    prefs.packDismissed = pack.items.filter((i) => !i.installed && !names.includes(i.name)).map((i) => i.name).join(',');
-    savePrefs();
-  }
   const added = res.installed?.length ?? 0;
   packNote = added ? `Added to Claude. Start a new Claude session to use ${added === 1 ? 'it' : 'them'}.` : '';
   if (res.errors?.length) packError = res.errors.join('; ');
@@ -2541,19 +2526,8 @@ async function addPack(names, fromCard = false) {
 
 document.addEventListener('click', (e) => {
   const id = e.target.id;
-  if (id === 'pack-add') {
-    const picks = pack.hasOwnAgents ? [...document.querySelectorAll('input[name="pack-pick"]:checked')].map((x) => x.value)
-      : pack.items.filter((i) => !i.installed).map((i) => i.name);
-    addPack(picks, true);
-  } else if (id === 'pack-add-settings') {
+  if (id === 'pack-add-settings') {
     addPack([...document.querySelectorAll('input[name="pack-pick-settings"]:checked')].map((x) => x.value));
-  } else if (id === 'pack-later') {
-    prefs.packDismissed = pack.items.filter((i) => !i.installed).map((i) => i.name).join(',');
-    savePrefs();
-    renderPack();
-  } else if (id === 'pack-ok') {
-    packNote = '';
-    renderPack();
   }
 });
 

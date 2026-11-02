@@ -809,7 +809,7 @@ app.whenReady().then(() => {
     try {
       return await inspectWorktrees(p.path);
     } catch (err) {
-      return { ok: false, error: `The worktrees could not be read (${err.message})` };
+      return { ok: false, error: 'The worktrees could not be read.', detail: err.message };
     }
   });
   ipcMain.handle('home:projects-show', async () => {

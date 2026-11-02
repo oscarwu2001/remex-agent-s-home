@@ -24,6 +24,11 @@ test('Claude app worktrees, sibling worktrees, other repos and old sessions do n
   assert.deepEqual(res, []);
 });
 
+test('three sessions joined through a shared parent folder are one clash of three', () => {
+  const res = findClashes([s('a', '/r/src'), s('b', '/r/docs'), s('c', '/r')], now);
+  assert.deepEqual(res.map((r) => [r.count, r.ids]), [[3, ['a', 'b', 'c']]]);
+});
+
 test('two sessions in the same Claude app worktree do clash', () => {
   const res = findClashes([s('a', '/r/.claude/worktrees/x'), s('b', '/r/.claude/worktrees/x/lib')], now);
   assert.equal(res.length, 1);
