@@ -177,6 +177,8 @@ export function demoSnapshot(nowMs, epochMs) {
     demo: true,
     here: HERE,
     // A training run on this computer and its machine line.
+    // Two sessions in one checkout, so the warning can be seen.
+    clashes: t % 60 < 30 ? [{ project: 'spine-seg', count: 2, key: 'demo-clash', ids: ['demo-a', 'demo-x'] }] : [],
     jobs: [],
     work: [{ name: 'train.py', project: 'spine-seg', on: 'gpu', startedAt: nowMs - 130 * 60_000, gpuMem: 11264 }],
     machine: { gpus: [{ name: 'RTX 2000 Ada', util: 96, memUsed: 12400, memTotal: 16380, temp: 71 }], cpu: 34, memUsed: 11200, memTotal: 16000 },

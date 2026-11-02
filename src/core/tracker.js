@@ -18,6 +18,7 @@ const TIMING = {
   approvalQuietMs: 7_000, // pending approval-type tool, file quiet this long
   textQuietMs: 4_000, // text with no tool after it, quiet this long -> your turn
   staleSessionMs: 10 * 60_000, // session hidden after this long without a write
+  waitingStaleMs: 2 * 3_600_000, // ...unless it is waiting on the user: then this long
   doneLingerMs: 7_000, // finished sub-agent stays visible (walks home)
   backgroundQuietMs: 120_000, // background sub-agent presumed finished
   unlinkedGraceMs: 15_000, // sidechain with no matching Task call -> counted
@@ -471,7 +472,11 @@ class Tracker {
       }
 
       const lastAt = Math.max(session.actor.lastAt, ...agents.map((a) => a.lastActivityAt));
-      if (now - lastAt > t.staleSessionMs) continue;
+      // A session waiting on the user (its turn, or an approval) stays in
+      // view much longer: that is exactly when the user needs to see it.
+      const own = this.statusOf(session.actor, now, { isSession: true });
+      const waiting = own.status === 'your-turn' || own.status === 'blocked';
+      if (now - lastAt > (waiting ? t.waitingStaleMs : t.staleSessionMs)) continue;
 
       sessions.push({
         id: session.id,
@@ -521,7 +526,7 @@ class Tracker {
   // Drop state for sessions that have been stale a long time. A session
   // counts as active while any of its helpers is.
   prune(now = Date.now()) {
-    const cutoff = this.timing.staleSessionMs * 3;
+    const cutoff = Math.max(this.timing.staleSessionMs * 3, this.timing.waitingStaleMs + 10 * 60_000);
     for (const [id, s] of this.sessions) {
       const lastAt = Math.max(s.actor.lastAt, ...[...s.subagents.values()].map((a) => a.actor.lastAt));
       if (now - lastAt <= cutoff) continue;

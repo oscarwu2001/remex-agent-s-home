@@ -125,10 +125,14 @@ test('background helpers outlive the immediate tool result and end when quiet', 
   assert.equal(later.agents[0].endReason, 'went quiet');
 });
 
-test('sessions quiet past the stale limit leave the board', () => {
+test('sessions quiet past the stale limit leave the board, unless they wait on the user', () => {
   const t = new Tracker();
-  feed(t, MAIN, [prompt(0, 'go'), say(1, 'bye')]);
-  assert.equal(t.snapshot(s(1) + TIMING.staleSessionMs + 1).sessions.length, 0);
+  feed(t, MAIN, [prompt(0, 'go'), toolUse(1, 'r1', 'Read', { file_path: '/x' }), toolResult(2, 'r1')]);
+  assert.equal(t.snapshot(s(2) + TIMING.staleSessionMs + 1).sessions.length, 0, 'a quiet, unfinished session leaves');
+  const w = new Tracker();
+  feed(w, MAIN, [prompt(0, 'go'), say(1, 'bye')]);
+  assert.equal(w.snapshot(s(1) + TIMING.staleSessionMs + 1).sessions[0].status, 'your-turn', 'its turn: still shown');
+  assert.equal(w.snapshot(s(1) + TIMING.waitingStaleMs + 1).sessions.length, 0, 'but not forever');
 });
 
 test('malformed lines are counted with the file they came from', () => {
@@ -228,9 +232,10 @@ test('prune drops long-stale sessions and their unlinked counts', () => {
   feed(t, MAIN, [prompt(0, 'go')]);
   feed(t, '/p/sess-1/subagents/agent-o.jsonl', [prompt(1, 'orphan prompt with no matching call anywhere', sidechain('o'))]);
   assert.equal(t.snapshot(s(1) + TIMING.unlinkedGraceMs + 1).stats.unlinkedSidechains, 1);
-  t.prune(s(1) + TIMING.staleSessionMs * 3 + 1);
+  const gone = s(1) + Math.max(TIMING.staleSessionMs * 3, TIMING.waitingStaleMs + 10 * 60_000) + 1;
+  t.prune(gone);
   assert.equal(t.sessions.size, 0);
-  assert.equal(t.snapshot(s(1) + TIMING.staleSessionMs * 3 + 2).stats.unlinkedSidechains, 0);
+  assert.equal(t.snapshot(gone + 1).stats.unlinkedSidechains, 0);
 });
 
 test('entries without a timestamp are counted and do not freshen a session', () => {

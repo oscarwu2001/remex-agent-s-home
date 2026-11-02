@@ -5,11 +5,12 @@
 
 import { overview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES, isRunning, icon } from './overview.js';
 import { installTips } from './tip.js';
+import { waitingList, waitingHtml, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup, personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
-import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
+import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
@@ -91,7 +92,8 @@ function render() {
     return `<section class="computer${c.online ? '' : ' offline'}"><h2>${esc(c.computer)}${state ? ` <span class="state">${state}</span>` : ''}</h2>
         ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="empty">Nothing running here.</p>'}</section>`;
   }).join('');
-  const html = groups || '<p class="empty">No sessions yet.</p>';
+  const waits = clashHtml(snap.clashes) + waitingHtml(waitingList(snap.sessions ?? [], loadDismissed()), Date.now(), glyph);
+  const html = waits + (groups || '<p class="empty">No sessions yet.</p>');
   // Redraw only on change, so an open list and the scroll position stay put.
   const sig = JSON.stringify([html.replace(/(data-since="\d+">)[^<]*/g, '$1'), prefs.private]);
   const head = headlineBadges(o);
@@ -112,13 +114,14 @@ function render() {
 // ---- the projects tab ----------------------------------------------------------
 
 const projOpen = new Set();
+const projTrees = new Map(); // project id -> worktrees, once looked at
 let projError;
 const demoProj = demoProjects();
 function renderProjects() {
   if ($('projects').hidden) return;
   const snap = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : live;
   const data = prefs.demo ? demoProj.snapshot() : snap.projects;
-  paint($('projects'), projectsHtml(data, snap.sessions ?? [], { privacy: prefs.private, open: projOpen, error: projError }));
+  paint($('projects'), projectsHtml(data, snap.sessions ?? [], { privacy: prefs.private, open: projOpen, error: projError, worktrees: projTrees }));
 }
 wireProjects($('projects'), {
   open: projOpen,
@@ -129,6 +132,8 @@ wireProjects($('projects'), {
   },
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
+  worktrees: projTrees,
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: 'The browser preview cannot look at folders; this works in the app.' }),
 });
 function showTab(which) {
   const projects = which === 'projects';
@@ -156,6 +161,16 @@ setInterval(() => { render(); renderProjects(); }, 500);
 render();
 
 $('list').addEventListener('click', (e) => {
+  const dismiss = e.target.closest('.wait-dismiss');
+  if (dismiss) {
+    dismissWait(dismiss.dataset.key);
+    render();
+    return;
+  }
+  if (e.target.closest('.wait-open')) {
+    bridge.showMain?.();
+    return;
+  }
   const b = e.target.closest('.todo-toggle');
   if (!b) return;
   const key = b.dataset.key;

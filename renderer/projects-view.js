@@ -135,7 +135,8 @@ export function projectsHtml(projects, sessions, opts) {
         ${t.by === 'agent' ? `<span class="by" title="Added by an agent">${icon('agent')}<span class="visually-hidden">Added by an agent</span></span>` : '<span></span>'}
         <button type="button" class="icon-act subtle" data-op="remove-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="Remove">${icon('close')}<span class="visually-hidden">Remove ${esc(text)}</span></button></li>`;
     }).join('')}</ul>
-      ${addForm({ op: 'add-todo', project: p.id, id: `todo-${p.id}`, label: `Add a to-do to ${p.name}`, placeholder: 'Add a to-do', max: 300, error: errFor(p.id) })}` : '';
+      ${addForm({ op: 'add-todo', project: p.id, id: `todo-${p.id}`, label: `Add a to-do to ${p.name}`, placeholder: 'Add a to-do', max: 300, error: errFor(p.id) })}
+      ${p.path || p.copies?.length ? worktreesHtml(p, opts.worktrees?.get(p.id), opts.privacy) : ''}` : '';
     return `<li class="pcard${p.confirmed ? '' : ' unconfirmed'}${isOpen ? ' open' : ''}" data-id="${esc(p.id)}">
       <div class="pcard-head">
         <button type="button" class="pname" data-op="open" data-project="${esc(p.id)}" aria-expanded="${isOpen}"${where}>${icon('project')}<span>${esc(p.name)}</span></button>
@@ -154,14 +155,68 @@ export function projectsHtml(projects, sessions, opts) {
   return `${asks}${head}${privacyNote}<ul class="pcards">${cards}</ul>${newProject}`;
 }
 
+// A project's worktrees, on request: each one's branch and state, the safe
+// ones (merged, nothing uncommitted) last, and their remove commands to copy.
+// The app itself never removes anything.
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+function worktreesHtml(p, wt, privacy) {
+  const button = `<button type="button" class="link-btn small wt-load" data-op="worktrees" data-project="${esc(p.id)}">${icon('branch')} ${wt?.loading ? 'Looking…' : wt ? 'Look again' : 'Worktrees'}</button>`;
+  if (!wt || wt.loading) return `<div class="wt">${button}</div>`;
+  if (!wt.ok) return `<div class="wt">${button}<p class="form-error">${esc(wt.error)}</p></div>`;
+  const rows = wt.trees.map((t) => {
+    const bits = [
+      t.main ? 'main checkout' : '',
+      t.missing ? 'folder gone' : '',
+      t.merged ? `merged into ${wt.base}` : '',
+      t.changed ? `${t.changed} uncommitted` : '',
+      t.lastCommit ? `committed ${ago(t.lastCommit)}` : '',
+      t.error ? 'could not be read' : '',
+    ].filter(Boolean).join(' · ');
+    return `<li class="wt-row${t.safe ? ' safe' : ''}${t.changed ? ' dirty' : ''}"${privacy ? '' : ` title="${esc(t.path)}"`}>
+      <span class="wt-name">${esc(t.name)}</span><span class="wt-branch">${esc(t.branch ?? (t.detached ? 'detached' : ''))}</span>
+      ${t.safe ? '<span class="wt-safe">safe to remove</span>' : ''}<span class="wt-bits">${esc(bits)}</span></li>`;
+  }).join('');
+  const safe = wt.trees.filter((t) => t.safe);
+  const gone = wt.trees.filter((t) => t.missing);
+  return `<div class="wt">${button}
+    <p class="wt-sum">${wt.trees.length} checkout${wt.trees.length === 1 ? '' : 's'}${safe.length ? ` · <strong>${safe.length} safe to remove</strong> (merged, nothing uncommitted)` : ''}${gone.length ? ` · ${gone.length} already gone` : ''}</p>
+    <ul class="wt-list">${rows}</ul>
+    ${safe.length || gone.length ? `<button type="button" class="link-btn small" data-op="copy-wt" data-project="${esc(p.id)}">Copy the commands to remove them</button>` : ''}</div>`;
+}
+
+export function removeCommands(wt) {
+  const lines = wt.trees.filter((t) => t.safe).map((t) => `git worktree remove "${t.path}"`);
+  if (wt.trees.some((t) => t.missing)) lines.push('git worktree prune');
+  return lines.join('\n');
+}
+
 // Clicks and typing in a project list. `change(op)` saves (the app's
 // bridge, or the demo's own copy) and resolves { ok, error }. Errors go to
 // the form or card they came from.
-export function wireProjects(root, { open, change, rerender, setError }) {
+export function wireProjects(root, { open, change, rerender, setError, worktrees, loadWorktrees }) {
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-op]');
     if (!b || b.type === 'submit') return;
     const { op, project, todo } = b.dataset;
+    if (op === 'worktrees' && worktrees && loadWorktrees) {
+      worktrees.set(project, { loading: true });
+      rerender();
+      const res = await loadWorktrees(project).catch((err) => ({ ok: false, error: err.message }));
+      worktrees.set(project, res);
+      rerender();
+      return;
+    }
+    if (op === 'copy-wt') {
+      const wt = worktrees?.get(project);
+      if (!wt?.ok) return;
+      try {
+        await navigator.clipboard.writeText(removeCommands(wt));
+        b.textContent = 'Copied: paste them in a terminal in the project folder';
+      } catch {
+        b.textContent = 'Could not copy; the clipboard is not available here';
+      }
+      return;
+    }
     if (op === 'pick-date') {
       // Open the calendar for that to-do's hidden date field.
       const input = b.parentElement.querySelector('input.date-input');
@@ -278,4 +333,15 @@ export function paint(root, html) {
   if (keep) el.value = keep.value;
   el.focus({ preventScroll: true });
   if (keep && el.setSelectionRange) el.setSelectionRange(keep.start, keep.end);
+}
+
+// The demo's worktrees, made up.
+export function demoTrees(id) {
+  const t = (name, branch, extra) => ({ name, path: `C:\\demo\\${name}`, branch, lastCommit: Date.now() - 3 * 86_400_000, changed: 0, ...extra });
+  return Promise.resolve({ ok: true, base: 'main', trees: [
+    t(id, 'main', { main: true, lastCommit: Date.now() - 3_600_000, changed: 2 }),
+    t(`${id}-restyle`, 'restyle', { changed: 4, lastCommit: Date.now() - 7_200_000 }),
+    t(`${id}-chat`, 'chat', { merged: true, safe: true }),
+    t(`${id}-zip`, 'zip-read', { merged: true, safe: true, lastCommit: Date.now() - 9 * 86_400_000 }),
+  ] });
 }

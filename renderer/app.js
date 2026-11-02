@@ -10,8 +10,9 @@ import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { overview as runningOverview, headline, headlineBadges, badge, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
 import { statusText, glyphKey, elapsed } from './status.js';
-import { projectsHtml, wireProjects, demoProjects, paint } from './projects-view.js';
+import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 import { installTips } from './tip.js';
+import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 
 installTips();
@@ -56,7 +57,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 // live: the real weather, off unless the user turns it on. `place` is the
 // town they chose ({ name, region, country, latitude, longitude }).
 const prefs = {
-  budget5h: 0, notify: true,
+  budget5h: 0, notify: true, waitMin: 5, notifyEnds: true,
   private: true, names: true, theme: DEFAULT_THEME, time: 'auto', detail: 'simple', weather: 'clear', view: 0, demo: false,
   live: { on: false, place: null, unit: 'celsius' },
 };
@@ -1337,6 +1338,8 @@ function render(force = false) {
     running.key, snapshot.fleet?.on,
   ]);
   renderLiveMap();
+  // The waiting list moves on its own (the minutes), so it is drawn every tick.
+  paint($('waiting'), clashHtml(snapshot.clashes) + waitingHtml(waitingList(snapshot.sessions, loadDismissed()), Date.now(), glyph));
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
 
@@ -1594,6 +1597,29 @@ function checkWarnings(s) {
     }
   }
   warnings = now;
+  notifyWaits(s);
+}
+
+// "Has been waiting for you" and "finished / failed / stopped" notices,
+// once each. They need the notifications switch and are off in the demo.
+let endWatch;
+function notifyWaits(s) {
+  const tell = (key, body) => {
+    if (warned.has(key)) return;
+    warned.add(key);
+    if (prefs.notify && bridge.notify && !s.demo) bridge.notify({ title: "Agent's Home", body });
+  };
+  if (prefs.waitMin > 0) {
+    for (const w of waitingList(s.sessions, loadDismissed())) {
+      if (Date.now() - w.since >= prefs.waitMin * 60_000) tell(`wait:${waitKey(w)}`, `${w.project}: ${waitText(w).toLowerCase()}, waiting for ${waitFor(Date.now() - w.since)}.`);
+    }
+  }
+  for (const c of s.clashes ?? []) tell(`clash:${c.key}`, `${c.count} sessions are working in the same folder of ${c.project}. They can overwrite each other's changes.`);
+  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
+  const { ended, running } = endedWork(o, endWatch);
+  // The first look only learns what is running: nothing has ended yet.
+  if (endWatch && prefs.notifyEnds) for (const e of ended) tell(`end:${e.key}`, e.text);
+  endWatch = running;
 }
 
 $('opt-budget').value = prefs.budget5h > 0 ? String(prefs.budget5h) : '';
@@ -1604,6 +1630,29 @@ $('opt-budget').addEventListener('change', (e) => {
   e.target.value = prefs.budget5h ? String(prefs.budget5h) : '';
   savePrefs();
   render(true);
+});
+$('opt-wait').value = String(prefs.waitMin ?? 5);
+$('opt-ends').checked = prefs.notifyEnds !== false;
+$('opt-wait').addEventListener('change', (e) => {
+  prefs.waitMin = Number(e.target.value) || 0;
+  savePrefs();
+});
+$('opt-ends').addEventListener('change', (e) => {
+  prefs.notifyEnds = e.target.checked;
+  savePrefs();
+});
+$('waiting').addEventListener('click', (e) => {
+  const dismiss = e.target.closest('.wait-dismiss');
+  if (dismiss) {
+    dismissWait(dismiss.dataset.key);
+    render(true);
+    return;
+  }
+  const open = e.target.closest('.wait-open');
+  if (open) {
+    select(`s:${open.dataset.session}`);
+    openLiveMap(open.dataset.session);
+  }
 });
 $('opt-notify').addEventListener('change', (e) => {
   prefs.notify = e.target.checked;
@@ -2540,11 +2589,12 @@ loadPack();
 // ---- the project list -------------------------------------------------------------
 
 const projOpen = new Set();
+const projTrees = new Map(); // project id -> worktrees, once looked at
 let projError;
 const demoProj = demoProjects();
 function renderProjects() {
   const data = prefs.demo ? demoProj.snapshot() : snapshot.projects;
-  paint($('projects-body'), projectsHtml(data, snapshot.sessions ?? [], { privacy: prefs.private, open: projOpen, error: projError }));
+  paint($('projects-body'), projectsHtml(data, snapshot.sessions ?? [], { privacy: prefs.private, open: projOpen, error: projError, worktrees: projTrees }));
 }
 wireProjects($('projects-body'), {
   open: projOpen,
@@ -2556,6 +2606,8 @@ wireProjects($('projects-body'), {
   // The app's list arrives with the next snapshot, half a second later.
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
+  worktrees: projTrees,
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: 'The browser preview cannot look at folders; this works in the app.' }),
 });
 $('projects-file').addEventListener('click', async () => {
   const res = await bridge.projectsShow?.();

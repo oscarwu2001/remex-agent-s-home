@@ -125,6 +125,34 @@ their status posts, every 15 minutes while a job runs. A job whose process
 has ended without saying so shows as *Stopped*, one silent for 30 minutes as
 *No news for 30 min*.
 
+## Waiting for you, and two sessions in one folder
+
+At the top of Running now (and of the mini window), **Waiting for you** lists
+every session that cannot go on without you, oldest wait first: *Your turn*,
+or *Needs approval* (with the helper's name when it is a helper that waits).
+Click one to open its live map; the cross hides it until that session does
+something new. A session waiting on you stays listed for up to two hours,
+where others leave the board after ten quiet minutes.
+
+**Settings → Usage warnings** can also tell you, as a Windows notification:
+- when a session has waited for you 2, 5 (the default), 10 or 15 minutes;
+- when training or other long work ends: finished, failed, stopped, or quiet
+  for 30 minutes, here or on another computer.
+
+When two sessions have both been working in the same checkout in the last 15
+minutes (the same folder, or one inside the other), a warning says so: they
+can overwrite each other's changes. Each Claude app session's own worktree
+counts as its own checkout.
+
+## Worktrees
+
+Open a project under **Projects** and press **Worktrees** to see every
+checkout of it: its branch, uncommitted files, last commit, and whether the
+branch is already merged into the main one. Merged ones with nothing
+uncommitted are marked **safe to remove** and listed last; **Copy the commands
+to remove them** puts the `git worktree remove` lines on the clipboard. The
+app itself never removes anything, and only looks when you press the button.
+
 ## Mini window
 
 **Mini window** (top of the map) opens a small window that stays on top of

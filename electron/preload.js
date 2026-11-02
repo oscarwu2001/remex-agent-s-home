@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('agentsHome', {
   showMain: () => ipcRenderer.invoke('home:show-main'),
   projectChange: (change) => ipcRenderer.invoke('home:project-change', change),
   projectsShow: () => ipcRenderer.invoke('home:projects-show'),
+  worktrees: (id) => ipcRenderer.invoke('home:worktrees', id),
   onSnapshot: (fn) => {
     const handler = (_event, snapshot) => fn(snapshot);
     ipcRenderer.on('home:snapshot', handler);

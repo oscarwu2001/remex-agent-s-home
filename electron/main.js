@@ -15,6 +15,8 @@ const fleet = require('../src/core/fleet');
 const projectList = require('../src/core/projects');
 const jobFiles = require('../src/core/jobs');
 const workFinder = require('../src/core/work');
+const { findClashes } = require('../src/core/clashes');
+const { inspectWorktrees } = require('../src/core/worktrees');
 const assistantFiles = require('../src/core/assistant');
 const {
   DEPARTMENT_KINDS, validateOverrides, validateLayout, roomsWith, gardensWith, overridesFrom, openCells,
@@ -800,6 +802,16 @@ app.whenReady().then(() => {
     readProjects(true);
     return { ok: true };
   });
+  // A project's worktrees, looked at only when the user opens them.
+  ipcMain.handle('home:worktrees', async (_event, id) => {
+    const p = (projects.data?.projects ?? []).find((x) => x.id === id);
+    if (!p?.path) return { ok: false, error: 'This project has no folder on this computer.' };
+    try {
+      return await inspectWorktrees(p.path);
+    } catch (err) {
+      return { ok: false, error: `The worktrees could not be read (${err.message})` };
+    }
+  });
   ipcMain.handle('home:projects-show', async () => {
     if (fs.existsSync(projectsPath)) {
       shell.showItemInFolder(projectsPath);
@@ -992,6 +1004,8 @@ app.whenReady().then(() => {
       jobs: jobs.jobs,
       machine,
       work: work.work.filter((w) => !jobs.jobs.some((j) => j.pid === w.pid)),
+      // Sessions working in the same checkout (their folders stay here).
+      clashes: findClashes(snap.sessions.map((s) => ({ id: s.id, project: s.project, lastActivityAt: s.lastActivityAt, cwd: tracker.sessions.get(s.id)?.cwd }))),
       projects: {
         file: projectsPath, missing: Boolean(projects.missing), ok: Boolean(projects.data),
         list: projects.data?.projects ?? [],

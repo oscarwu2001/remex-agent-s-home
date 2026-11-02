@@ -155,3 +155,47 @@
 .load { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--panel-sunk); color: var(--ink-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .load .ico { width: 13px; height: 13px; }
 .load.busy { background: var(--accent-soft); color: var(--accent); }
+
+/* ---- waiting for you, both windows ---------------------------------------- */
+
+.waiting { margin: 0 0 var(--s-3); padding: 8px 10px 6px; border-radius: var(--r-lg); background: var(--accent-soft); }
+.waiting-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12.5px; font-weight: 500; color: var(--accent); }
+.waiting-n { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 11px; }
+.waiting-list { list-style: none; margin: 0; padding: 0; }
+.wait { display: flex; align-items: center; gap: 2px; }
+.wait-open {
+  flex: 1; min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 6px;
+  min-height: 34px; padding: 2px 6px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink);
+  font: 13px var(--font); text-align: left; cursor: pointer; transition: background-color 0.2s var(--ease-out);
+}
+.wait-open:hover { background: var(--panel-raised); }
+.wait-open .glyph { width: 22px; height: 22px; }
+.wait-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-what { color: var(--ink-muted); font-size: 12px; white-space: nowrap; }
+.wait.blocked .wait-what { color: var(--warn); }
+.wait-for { color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.clash { margin: 0 0 var(--s-3); padding: 8px 12px; border-radius: var(--r-lg); background: var(--warn-soft); color: var(--ink); font-size: 12.5px; }
+.clash p { display: flex; gap: 8px; align-items: flex-start; margin: 0; }
+.clash p + p { margin-top: 6px; }
+.clash .ico { color: var(--warn); margin-top: 1px; }
+.clash strong { font-weight: 500; color: var(--warn); }
+
+/* ---- worktrees in a project ------------------------------------------------ */
+.wt { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.wt-load { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0; }
+.wt-load .ico { width: 14px; height: 14px; }
+.wt-sum { margin: 2px 0 4px; font-size: 12px; color: var(--ink-muted); }
+.wt-sum strong { color: var(--accent); font-weight: 500; }
+.wt-list { list-style: none; margin: 0; padding: 0; }
+.wt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 4px 0; font-size: 12.5px; border-top: 1px solid var(--line); }
+.wt-row:first-child { border-top: 0; }
+.wt-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-branch { color: var(--ink-muted); font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.wt-bits { grid-column: 1 / -1; color: var(--ink-muted); font-size: 11.5px; }
+.wt-safe { grid-column: 1 / -1; justify-self: start; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
+.wt-row.dirty .wt-bits { color: var(--ink); }
+
+/* Text buttons, both windows (the board's styles.css adds its own sizes). */
+.link-btn { min-height: 32px; padding: 0 4px; border: 0; background: none; color: var(--accent); font: 500 12.5px var(--font); cursor: pointer; border-radius: var(--r-sm); }
+.link-btn:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+.link-btn.small { min-height: 28px; font-size: 12px; }
