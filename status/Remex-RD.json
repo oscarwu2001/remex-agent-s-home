@@ -3,46 +3,74 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793617202247,
+ "at": 1793667602026,
  "every": 3600000,
  "sessions": [
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1793616774441.0852,
+   "lastAt": 1793665731582.4314,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793665731262.6997,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793665730840.3706,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793667208964.6223,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1793667193461.7605,
    "agents": []
   }
  ],
  "repos": [
   {
-   "project": "spine-ct",
+   "project": "spine-sim",
    "branch": "handle-map-model",
-   "lastCommit": 1793616765000,
+   "lastCommit": 1793666581000,
    "changed": 0
   },
   {
-   "project": "spine-seg2d",
-   "branch": "main",
-   "lastCommit": 1793616419000,
+   "project": "spine-ct",
+   "branch": "handle-map-model",
+   "lastCommit": 1793666316000,
    "changed": 0
   },
   {
    "project": "spine-recon",
    "branch": "main",
-   "lastCommit": 1793611172000,
-   "changed": 1
+   "lastCommit": 1793666078000,
+   "changed": 0
+  },
+  {
+   "project": "spine-seg2d",
+   "branch": "main",
+   "lastCommit": 1793665180000,
+   "changed": 0
   },
   {
    "project": "spine-demo",
    "branch": "dev-demo",
    "lastCommit": 1793352892000,
-   "changed": 0
-  },
-  {
-   "project": "spine-sim",
-   "branch": "handle-map-model",
-   "lastCommit": 1793347937000,
    "changed": 0
   },
   {
@@ -65,13 +93,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 747,
+    "memUsed": 746,
     "memTotal": 16380,
     "temp": 39
    }
   ],
-  "cpu": 28,
-  "memUsed": 12163,
+  "cpu": 30,
+  "memUsed": 8551,
   "memTotal": 16148
  }
 }
