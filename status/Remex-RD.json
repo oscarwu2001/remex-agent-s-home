@@ -3,7 +3,7 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793847601738,
+ "at": 1793851201732,
  "every": 3600000,
  "sessions": [],
  "repos": [
@@ -62,8 +62,8 @@
     "temp": 35
    }
   ],
-  "cpu": 6,
-  "memUsed": 14402,
+  "cpu": 7,
+  "memUsed": 14369,
   "memTotal": 48916
  }
 }
