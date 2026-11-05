@@ -3,9 +3,17 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1793790000614,
+ "at": 1793840401224,
  "every": 3600000,
- "sessions": [],
+ "sessions": [
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1793840183794.0293,
+   "agents": []
+  }
+ ],
  "repos": [
   {
    "project": "spine-recon",
@@ -57,13 +65,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 530,
+    "memUsed": 466,
     "memTotal": 16380,
     "temp": 35
    }
   ],
-  "cpu": 7,
-  "memUsed": 13968,
+  "cpu": 6,
+  "memUsed": 14421,
   "memTotal": 48916
  }
 }
