@@ -46,6 +46,12 @@ if fits '\b(implement|refactor|bug|feature|endpoint|pull request|merge request|c
 fi
 fits '\b(bug|crash(es|ed|ing)?|traceback|stack trace|exception|regression|broken|(doesn.t|does not|stopped|isn.t) work(ing)?)\b' \
   && skilltip find-the-bug 'If the cause is not known yet, follow the find-the-bug skill: first one command that shows it failing, then the cause, then the fix and a test.'
+fits '\b(distill|(turn|save|make|capture) (this|it|that|the workflow) (into|as) a skill|make (a|this) (new )?skill|remember how to do (this|it))\b' \
+  && skilltip save-as-skill 'To keep this way of working, follow the save-as-skill skill: only steps that really happened, every mistake written in as a rule.'
+fits '\b(document (this|it|the|how)|(write|update|fix) (the |a )?(docs|documentation|readme|guide)|readme|docstrings?|changelog|how-to guide)\b' \
+  && skilltip write-docs 'For documentation, follow the write-docs skill: one reader and one kind of page, every claim checked in the code, every safe example run.'
+fits '\b(write (a |the )?spec|spec (it|this) out|turn (this|it) into a spec|requirements doc|scope (out )?(the|this|a) (feature|change|project)|plan (this|it) properly)\b' \
+  && skilltip write-spec 'For a spec, follow the write-spec skill, then split it with break-down or hand it to one builder.'
 fits '\b(research|look (it |this |that )?up|find out (if|whether|how|which)|which (library|package|tool|version|model)|compare (the )?(libraries|packages|tools|options|frameworks)|latest version|official doc(s|umentation))\b' \
   && tip researcher 'For a question that needs looking up, send it to the researcher agent (one question each), so the searching stays out of this conversation.'
 fits '\b(implement|refactor|migrate|migration|port (it|this|the)|scaffold|build (the|a|an) (feature|page|screen|module|app)|in the background|across (the|all|every) files?)\b' \

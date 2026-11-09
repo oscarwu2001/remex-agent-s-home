@@ -70,6 +70,9 @@ flowchart LR
 | ... that touches data, or a screen | `silent-failure-hunter` or `ui-reviewer` alongside it |
 | a bug whose cause is not known | the `find-the-bug` skill |
 | a question that needs looking up | `researcher`, one question each |
+| an idea to plan properly | `question-me` → `write-spec` → `break-down` or one `builder` |
+| documentation | the `write-docs` skill |
+| a way of working that just worked | the `save-as-skill` skill, so it is kept |
 | running tests, a build or a linter | `test-runner`: the tests for the change first |
 | where this project stands, its to-do list | `project-manager` |
 | your day across projects, scanning for projects | `personal-assistant` (with `scan-projects`) |

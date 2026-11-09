@@ -28,6 +28,9 @@ and never overwrites anything already there.
 | `handover` | a handover note for a colleague | `handoff` |
 | `break-down` | a project split into small tasks | `to-tickets` |
 | `find-the-bug` | a failing command first, then cause, fix and test | `diagnosing-bugs` |
+| `write-spec` | an idea turned into a short spec, ready to split into tasks | `grill-with-docs`, `to-spec` |
+| `write-docs` | docs for one reader, every claim checked in the code | `documenting` |
+| `save-as-skill` | a way of working that just worked, saved as a skill | `distill` |
 | `scan-projects` | finds your projects, groups copies, asks you, saves the list | — |
 
 Every agent and skill follows the same few rules:

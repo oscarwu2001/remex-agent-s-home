@@ -62,7 +62,8 @@
     "a74ea42c2319769b6b8456319e5236c0",
     "9a98d9003b1006c15bc880f2368ab7cf",
     "36a71809e28ed8b8e3a6653bf49148a7",
-    "010c69b6afefb746f71719c8f84e7af4"
+    "010c69b6afefb746f71719c8f84e7af4",
+    "63c0e4abd15d048d8ef9cccef826ffdb"
   ],
   "skills/break-down/SKILL.md": [
     "8393a4e2ba1ac1605df384631a634fe1",
@@ -79,6 +80,9 @@
     "01301e4f40ad4782999f2f99b4c2e4cd",
     "7022e0a8fa6a3940e09a9886e2334188"
   ],
+  "skills/save-as-skill/SKILL.md": [
+    "114abcce9c8ba1e2d406b13a12489148"
+  ],
   "skills/scan-projects/SKILL.md": [
     "46df8787b532c95c6a1ed70ed54226e6",
     "538387386b184aa42cb4ecd9c5785b09"
@@ -86,5 +90,11 @@
   "skills/teach-me/SKILL.md": [
     "4eeba70fdf7fe8d7660f9ab7abd9c54e",
     "24f8e849a0968fba8ce3904a7070c4a0"
+  ],
+  "skills/write-docs/SKILL.md": [
+    "a358b9d06d0cf5cb33f4763f0ec153c9"
+  ],
+  "skills/write-spec/SKILL.md": [
+    "b793770fae9ed12e2667fdeeea42886e"
   ]
 }

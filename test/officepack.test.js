@@ -15,7 +15,7 @@ test('the pack lists its agents and skills with a one-line summary each', () => 
   const items = listPack(PACK);
   assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['builder', 'checker', 'code-reviewer', 'data-helper', 'personal-assistant', 'planner', 'project-manager', 'researcher', 'silent-failure-hunter', 'summariser', 'test-runner', 'ui-reviewer', 'writer']);
   assert.deepEqual(items.filter((i) => i.kind === 'hook').map((i) => i.name), ['team-reminders']);
-  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'find-the-bug', 'handover', 'question-me', 'scan-projects', 'teach-me']);
+  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'find-the-bug', 'handover', 'question-me', 'save-as-skill', 'scan-projects', 'teach-me', 'write-docs', 'write-spec']);
   for (const i of items) assert.ok(i.summary.length > 10 && i.summary.length <= 120, i.name);
 });
 
@@ -298,6 +298,20 @@ test('data and screen changes bring their own reviewer; bugs and questions get t
   assert.deepEqual(fired('the export crashes with a traceback'), ['find-the-bug']);
   assert.deepEqual(fired('which library should we use for PDF parsing? find out which version is current'), ['researcher']);
   assert.deepEqual(fired('save the file as a csv'), [], 'data words alone, with no code change, ask for no reviewer');
+});
+
+test('the planning, docs and save-as-skill reminders fire on an explicit ask', { skip: !hasBash && 'no bash here' }, () => {
+  const claude = tmp();
+  installPack(PACK, claude, ['write-spec', 'write-docs', 'save-as-skill', 'researcher', 'team-reminders']);
+  const fired = (prompt) => {
+    const out = spawnSync('bash', [path.join(claude, 'hooks', 'agents-home-router.sh')], { input: JSON.stringify({ prompt }), encoding: 'utf8' }).stdout;
+    return ['write-spec', 'write-docs', 'save-as-skill', 'researcher'].filter((a) => out.includes(a));
+  };
+  assert.deepEqual(fired('write a spec for the export button'), ['write-spec']);
+  assert.deepEqual(fired('update the readme with the new install steps'), ['write-docs']);
+  assert.deepEqual(fired('that worked, save this as a skill'), ['save-as-skill']);
+  assert.deepEqual(fired('check the official documentation for the latest version'), ['researcher'], 'reading docs is research, not writing them');
+  assert.deepEqual(fired('fix the parser'), []);
 });
 
 test('the reminder hook exits 0 on empty or broken input, and reads past an escaped line break', { skip: !hasBash && 'no bash here' }, () => {
