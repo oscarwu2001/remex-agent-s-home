@@ -23,6 +23,7 @@ const path = require('path');
 const { collect, rollUp, summarise, dayKey, totalTokens } = require('../core/metrics');
 const { teamwork, readInventory, YOU } = require('../core/teamwork');
 const costs = require('../core/costs');
+const { readLedger } = require('../core/ledger');
 const { execFileSync } = require('child_process');
 const { defaultRoots } = require('../core/watcher');
 const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../core/rooms');
@@ -534,7 +535,32 @@ function costSections({ cost, opt, stats, days }) {
   </section>` : ''}`;
 }
 
-function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, machine }) {
+// The user's own verdict ledger, when they keep one: how each review
+// agent's verdicts held up. Counts only.
+function ledgerSection(ledger) {
+  if (!ledger?.found) return '';
+  const names = Object.keys(ledger.agents).sort((a, b) => ledger.agents[b].rows - ledger.agents[a].rows);
+  const rows = names.map((n) => {
+    const a = ledger.agents[n];
+    const judged = a.PASS + a.FAIL;
+    const labelled = a.real + a.unverified + a.falseAlarm;
+    return `<tr><th scope="row">${esc(n)}</th><td class="num">${a.rows}</td>
+      <td class="num">${judged ? pct(a.FAIL / judged) : '—'}</td>
+      <td class="num">${a.real}</td><td class="num">${a.unverified}</td><td class="num">${a.falseAlarm}</td><td class="num">${a.open}</td>
+      <td class="num" title="${labelled ? `${pct(a.real / labelled)} of labelled FAILs were real` : 'No FAIL labelled yet'}">${labelled ? pct(a.real / labelled) : '—'}</td>
+      <td class="num">${a.missed}</td><td class="num">${a.BLOCKED}</td><td class="num">${a.MISSING + a.UNREAD}</td></tr>`;
+  }).join('');
+  return `<section class="card">
+    <h2>Verdict ledger</h2>
+    <p class="muted">From your own verdict ledger: every review verdict your hook logged in this period, and what you recorded for it afterwards. A real FAIL found a bug; a missed PASS let one through.</p>
+    <table><thead><tr><th>Agent</th><th class="num">Verdicts</th><th class="num">FAIL share</th><th class="num">Real</th><th class="num">Unverified</th>
+      <th class="num">False alarm</th><th class="num">Not labelled</th><th class="num">Real of labelled</th><th class="num">Missed PASS</th>
+      <th class="num">Blocked</th><th class="num">No verdict line</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="11" class="muted">No verdicts in this period.</td></tr>'}</tbody></table>
+  </section>`;
+}
+
+function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, machine, ledger }) {
   const all = summarise(runs);
   const before = summarise(prevRuns);
   const typeOrder = [...roll.types].sort((a, b) => roll.overall[b].runs - roll.overall[a].runs);
@@ -567,7 +593,8 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
   const rows = typeOrder.map((t) => {
     const o = roll.overall[t];
     const lastWeek = roll.weekly.filter((w) => w.type === t).sort((a, b) => a.period.localeCompare(b.period)).at(-1);
-    const verdicts = Object.entries(o.verdicts).map(([k, n]) => `${n} ${k}`).join(', ') || '—';
+    const verdicts = [Object.entries(o.verdicts).map(([k, n]) => `${n} ${k}`).join(', '),
+      o.noVerdict ? `${o.noVerdict} with no verdict` : ''].filter(Boolean).join(' · ') || '—';
     const spark = days.slice(-14).map((d) => dailyByType.get(t)?.get(d) ?? 0);
     return `<tr>
       <th scope="row"><span class="swatch s${typeSlot(t)}"></span>${esc(t)}</th>
@@ -575,8 +602,10 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
       <td>${esc(modelsText(o.models))}</td>
       <td class="num">${o.runs}</td>
       ${scoreCell(lastWeek ? lastWeek.score : o.score, lastWeek?.mixed)}
-      <td class="num">${pct(o.successRate)}</td>
+      <td class="num"${o.turnLimit ? ` title="${o.turnLimit} stopped at the turn limit before handing back"` : ''}>${pct(o.successRate)}${o.turnLimit ? ` <span class="muted">(${o.turnLimit} at limit)</span>` : ''}</td>
       <td class="num">${pct(o.rerunRate)}</td>
+      <td class="num" title="${o.reviewed ? `${o.firstPass} of ${o.reviewed} reviewed runs` : 'No review after its runs'}">${o.reviewed ? pct(o.firstPassRate) : '—'}</td>
+      <td class="num">${o.medianRounds === undefined ? '—' : num(o.medianRounds, 1)}</td>
       <td class="num">${dur(o.medianMs)}</td>
       <td class="num">${dur(o.p90Ms)}</td>
       <td class="num" title="${compact(o.medianTokens)} raw">${compact(o.medianWeighted)}</td>
@@ -687,12 +716,12 @@ dl.score dd { margin: 0; color: var(--ink-2); }
 
   <section class="card">
     <h2>Scorecard</h2>
-    <p class="muted">Score is for each agent's latest week; hover a score to see its four parts. Times and tokens are medians over the whole period. Weighted tokens count what a run costs (cache re-reads at a tenth); hover one for the raw count. Model is what the helper ran on.</p>
+    <p class="muted">Score is for each agent's latest week; hover a score to see its four parts. Finished leaves out runs stopped by their turn limit. First review passed: of the runs that edited files and were then reviewed, the share with no FAIL in the first round. Rounds: hand-backs per run, so 2 is one round of fixes. Verdicts count one per hand-back, re-checks included. Times run to the first hand-back. Times and tokens are medians over the whole period. Weighted tokens count what a run costs (cache re-reads at a tenth); hover one for the raw count. Model is what the helper ran on.</p>
     <table>
       <thead><tr><th>Agent</th><th>Room</th><th>Model</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
-        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">p90 time</th><th class="num">Weighted / run</th>
+        <th class="num">Re-runs</th><th class="num">First review passed</th><th class="num">Rounds</th><th class="num">Median time</th><th class="num">p90 time</th><th class="num">Weighted / run</th>
         <th class="num">Tool calls / run</th><th class="num">Tool errors</th><th>Verdicts</th><th>Last 14 days</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="14" class="muted">No helper runs in this period.</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="16" class="muted">No helper runs in this period.</td></tr>'}</tbody>
     </table>
   </section>
 
@@ -719,18 +748,19 @@ dl.score dd { margin: 0; color: var(--ink-2); }
     ${durationRanges(typeOrder, roll.overall)}
   </section>
 
+  ${ledgerSection(ledger)}
   ${teamSection(team, opt)}
   ${cost ? costSections({ cost, opt, stats, days }) : ''}
 
   <section class="card">
     <h2>How the score works</h2>
     <dl class="score">
-      <dt>Reliability, 40</dt><dd>Share of ended runs that finished (not failed, not stopped).</dd>
-      <dt>Right first time, 20</dt><dd>Share of runs that were not a re-run: the same session calling the same agent again within 30 minutes of it failing or being stopped.</dd>
+      <dt>Reliability, 40</dt><dd>Share of ended runs that finished: not failed, not stopped, and not cut off by the agent's own turn limit (its <code>maxTurns</code>) before handing back.</dd>
+      <dt>Right first time, 20</dt><dd>For an agent that edits files and had at least 3 runs reviewed: the share whose first review round had no FAIL. For any other agent: the share of runs that were not a re-run, the same session calling the same agent again within 30 minutes of it failing, being stopped or hitting its turn limit.</dd>
       <dt>Speed, 20</dt><dd>This week's median time against the agent's own median for the period. Foreground and background runs are each compared with their own kind, so a week that mixes them is fair. Agents are never compared with each other.</dd>
       <dt>Efficiency, 20</dt><dd>This week's median weighted tokens per run against the agent's own median for the period, again kind by kind.</dd>
     </dl>
-    <p class="muted">An agent needs at least 3 runs in a week to be scored. Treat the score as a prompt to look closer, not a verdict: a reviewer that answers FAIL is doing its job, so its verdicts never lower its score.</p>
+    <p class="muted">An agent needs at least 3 runs in a week to be scored. Treat the score as a prompt to look closer, not a verdict: a reviewer that answers FAIL is doing its job, so its verdicts never lower its score. Whether a reviewer's verdicts were right needs a record of what happened after them, which only a verdict ledger keeps.</p>
   </section>
 
   ${notes.length ? `<section class="card"><h2>Notes on the data</h2><ul class="notes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : ''}
@@ -785,6 +815,7 @@ function run(argv) {
       name: t, runs: o.runs, finished: o.finished, failed: o.failed, stopped: o.stopped, successRate: o.successRate,
       rerunRate: o.rerunRate, medianMs: o.medianMs, p90Ms: o.p90Ms, medianTokens: o.medianTokens, totalTokens: o.totalTokens,
       toolErrorRate: o.toolErrorRate, verdicts: o.verdicts, score: o.score.value, scoreReason: o.score.reason,
+      turnLimit: o.turnLimit, reviewed: o.reviewed, firstPassRate: o.firstPassRate, medianRounds: o.medianRounds, noVerdict: o.noVerdict,
       daily: roll.daily.filter((d) => d.type === t).map((d) => ({ day: d.period, runs: d.runs, score: d.score.value })),
     };
   });
@@ -821,7 +852,9 @@ function run(argv) {
     compare: opt.compare !== undefined ? costs.compareAt(runs, unattributed, opt.compare) : undefined,
     unattributed,
   };
-  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems, team, cost, machine }));
+  const ledger = readLedger(claudeDirs, { since, until: now });
+  data.problems.push(...ledger.problems);
+  fs.writeFileSync(htmlFile, page({ opt, roll, runs, prevRuns, days, stats: data.stats, problems: data.problems, team, cost, machine, ledger }));
 
   // Sessions get anonymous handles; project names only on request.
   const handle = new Map([...new Set(runs.map((r) => r.sessionId))].map((id, i) => [id, `s${i + 1}`]));
@@ -835,6 +868,11 @@ function run(argv) {
     seconds: r.durationMs === undefined ? undefined : Math.round(r.durationMs / 1000),
     outcome: r.outcome,
     verdict: r.verdict,
+    verdicts: (r.verdicts ?? []).join(';'),
+    rounds: r.rounds,
+    turns: r.turns,
+    max_turns: r.maxTurns,
+    first_review: r.reviewed ? (r.firstPass ? 'pass' : 'fail') : undefined,
     rerun: r.rerun ? 1 : 0,
     background: r.background ? 1 : 0,
     tool_calls: r.toolCalls,
@@ -856,7 +894,7 @@ function run(argv) {
     prompt_first_line: opt.details ? r.promptLine : undefined,
   }));
   const runCols = ['session', ...(opt.byProject ? ['project'] : []), 'agent', 'room', 'started', 'seconds', 'outcome', 'verdict',
-    'rerun', 'background', 'mode', 'caller', 'model', 'matched_by', 'tool_calls', 'tool_errors',
+    'verdicts', 'rounds', 'turns', 'max_turns', 'first_review', 'rerun', 'background', 'mode', 'caller', 'model', 'matched_by', 'tool_calls', 'tool_errors',
     'tool_read', 'tool_grep', 'tool_glob', 'tool_bash', 'tool_webfetch', 'tool_websearch', 'tool_edit', 'tool_write', 'tool_other',
     'could_be', 'skill_loads', 'tokens', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'weighted_tokens',
     ...(opt.details ? ['description', 'prompt_first_line'] : [])];
@@ -869,9 +907,12 @@ function run(argv) {
     median_weighted_tokens: r.medianWeighted === undefined ? undefined : Math.round(r.medianWeighted),
     models: modelsText(r.models), mixed_modes: r.mixed ? 'yes' : 'no',
     tool_error_rate: r.toolErrorRate?.toFixed(3), score: r.score.value,
+    turn_limit: r.turnLimit, reviewed: r.reviewed, first_pass_rate: r.firstPassRate?.toFixed(3),
+    median_rounds: r.medianRounds, median_turns: r.medianTurns,
   });
   const periodCols = ['period', 'agent', 'runs', 'finished', 'failed', 'stopped', 'unknown', 'success_rate', 'rerun_rate',
-    'median_seconds', 'p90_seconds', 'median_tokens', 'median_weighted_tokens', 'models', 'mixed_modes', 'tool_error_rate', 'score'];
+    'median_seconds', 'p90_seconds', 'median_tokens', 'median_weighted_tokens', 'models', 'mixed_modes', 'tool_error_rate', 'score',
+    'turn_limit', 'reviewed', 'first_pass_rate', 'median_rounds', 'median_turns'];
   fs.writeFileSync(path.join(opt.out, `runs-${stamp}.csv`), csv(runRows, runCols));
   fs.writeFileSync(path.join(opt.out, `daily-${stamp}.csv`), csv(roll.daily.map(periodRow), periodCols));
   fs.writeFileSync(path.join(opt.out, `weekly-${stamp}.csv`), csv(roll.weekly.map(periodRow), periodCols));

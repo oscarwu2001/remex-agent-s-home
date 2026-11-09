@@ -61,14 +61,53 @@ function addUsage(tokens, usage) {
   tokens.cacheWrite += Number(usage.cache_creation_input_tokens) || 0;
 }
 
-// The first word of a reviewer-style report, and nothing else of it.
+// The verdict of a reviewer-style report, and nothing else of it: a closing
+// "VERDICT: PASS|FAIL|BLOCKED" line (the verdict ledger's format) wins, else
+// the report's first word. BLOCKED means the review could not be finished.
+const VERDICT_WORDS = { pass: 'PASS', fail: 'FAIL', blocked: 'BLOCKED', approve: 'Approve', block: 'Block' };
 function verdictOf(text) {
   if (typeof text !== 'string') return undefined;
-  const first = text.split('\n').map((l) => l.trim()).find(Boolean) || '';
-  const m = /^[*_#>\s`]*(PASS|FAIL|Approve|Block)\b/i.exec(first);
-  if (!m) return undefined;
-  const v = m[1].toLowerCase();
-  return { pass: 'PASS', fail: 'FAIL', approve: 'Approve', block: 'Block' }[v];
+  const lines = text.split('\n').map((l) => l.trim().replace(/^[*_#>`\s]+|[*_`\s]+$/g, '')).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const m = /^VERDICT:\s*(PASS|FAIL|BLOCKED)\b/i.exec(lines[i]);
+    if (m) return VERDICT_WORDS[m[1].toLowerCase()];
+  }
+  const m = /^(PASS|FAIL|BLOCKED|Approve|Block)\b/i.exec(lines[0] ?? '');
+  return m ? VERDICT_WORDS[m[1].toLowerCase()] : undefined;
+}
+
+// Agents whose job is a verdict. Any other agent that answers PASS or FAIL
+// in the period counts too.
+const REVIEW_AGENTS = new Set(['reviewer', 'code-reviewer', 'ui-reviewer', 'silent-failure-hunter']);
+
+// An agent's maxTurns, from its definition beside the transcripts
+// (<.claude>/agents/<type>.md), or undefined when it sets none.
+function turnLimits(roots, problems) {
+  const dirs = [...new Set(roots.map((r) => path.join(path.dirname(r), 'agents')))];
+  const cache = new Map();
+  return (type) => {
+    if (!type || !/^[A-Za-z0-9_.-]+$/.test(type)) return undefined;
+    if (cache.has(type)) return cache.get(type);
+    let max;
+    for (const dir of dirs) {
+      let text;
+      try {
+        text = fs.readFileSync(path.join(dir, `${type}.md`), 'utf8');
+      } catch (err) {
+        // Most agents are not defined in every folder; only a real failure is reported.
+        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(`An agent definition could not be read (${err.code})`);
+        continue;
+      }
+      const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+      const m = front && /^maxTurns:\s*(\d+)\s*$/m.exec(front[1]);
+      if (m) {
+        max = Number(m[1]);
+        break;
+      }
+    }
+    cache.set(type, max);
+    return max;
+  };
 }
 
 // Exact prompt text only: a report must not guess which run a helper was.
@@ -95,6 +134,11 @@ const firstLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).
 
 function collect(roots, { since, until = Date.now(), details = false } = {}) {
   const problems = [];
+  const maxTurnsOf = turnLimits(roots, problems);
+  // Hand-backs that reached the main session (the Claude app's peer
+  // messages), by the helper's agent id, and SendMessage calls to a helper.
+  const mainHandbacks = new Map(); // agentId -> [{ ts, verdict }]
+  const sends = new Map(); // agentId or name -> [ts]
   const stats = {
     files: 0, lines: 0, malformedLines: 0, unlinkedHelpers: 0, ambiguousHelpers: 0,
     unknownNotifications: 0, untimedSessions: 0,
@@ -184,17 +228,47 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
           st = {
             sessionId: sid, agentId, prompt: undefined, toolCalls: 0, toolErrors: 0,
             tokens: emptyTokens(), skills: [], tools: {}, model: undefined, firstTs: undefined, lastTs: undefined, linked: false,
+            // Each hand-back (a closing reply, or a SubagentHandback call)
+            // and its verdict. Turns are counted per stretch of model calls,
+            // which ends at a hand-back, a new prompt or a notification, so a
+            // stretch that reached the agent's maxTurns can be told apart.
+            handbacks: [], stretches: [{ turns: new Set(), handedBack: false }], toolsSinceHandback: true,
           };
           streams.set(key, st);
         }
         noteUsage(st.tokens);
+        const stretch = () => st.stretches[st.stretches.length - 1];
+        const nextStretch = () => {
+          if (stretch().turns.size || stretch().handedBack) st.stretches.push({ turns: new Set(), handedBack: false });
+        };
+        if (meta.messageId && meta.model !== '<synthetic>' && !stretch().turns.has(meta.messageId)) {
+          if (stretch().handedBack) nextStretch();
+          stretch().turns.add(meta.messageId);
+        }
+        const handBack = (text, call) => {
+          const verdict = verdictOf(text);
+          // A closing reply right after a SubagentHandback call, with no
+          // work in between, is that same hand-back.
+          const prev = st.handbacks[st.handbacks.length - 1];
+          if (!call && prev?.call && !st.toolsSinceHandback) {
+            prev.verdict ??= verdict;
+            return;
+          }
+          st.handbacks.push({ ts: meta.ts, verdict, call });
+          stretch().handedBack = true;
+          st.toolsSinceHandback = false;
+        };
         if (meta.ts !== undefined) {
           st.firstTs = st.firstTs === undefined ? meta.ts : Math.min(st.firstTs, meta.ts);
           st.lastTs = st.lastTs === undefined ? meta.ts : Math.max(st.lastTs, meta.ts);
         }
         if (meta.model && !st.model && meta.model !== '<synthetic>') st.model = meta.model;
         for (const ev of events) {
+          if (ev.kind === 'task-notification' || (ev.kind === 'user-prompt' && st.prompt !== undefined)) nextStretch();
           if (ev.kind === 'user-prompt' && st.prompt === undefined) st.prompt = ev.text;
+          if (ev.kind === 'tool-start' && ev.name === 'SubagentHandback') handBack(String(ev.input?.message ?? ''), true);
+          else if (ev.kind === 'assistant-text' && ev.stopReason === 'end_turn') handBack(ev.text, false);
+          else if (ev.kind === 'tool-start' || ev.kind === 'task-start') st.toolsSinceHandback = true;
           if (ev.kind === 'tool-start' || ev.kind === 'task-start') {
             st.toolCalls += 1;
             const kind = TOOL_KINDS[ev.name] ?? 'other';
@@ -240,8 +314,18 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
             sess.toolCalls += 1;
             break;
           }
+          case 'handback': {
+            if (!ev.agentId) break;
+            if (!mainHandbacks.has(ev.agentId)) mainHandbacks.set(ev.agentId, []);
+            mainHandbacks.get(ev.agentId).push({ ts: ev.ts, verdict: verdictOf(ev.text) });
+            break;
+          }
           case 'tool-start': {
             sess.toolCalls += 1;
+            if (ev.name === 'SendMessage' && typeof ev.input?.to === 'string') {
+              if (!sends.has(ev.input.to)) sends.set(ev.input.to, []);
+              sends.get(ev.input.to).push(ev.ts);
+            }
             const name = skillName(ev);
             if (name) sess.activeSkill = name;
             if (name && !skillById.has(ev.id)) { // a resumed transcript repeats earlier lines
@@ -316,6 +400,8 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
     run.model = st.model ?? run.model;
     run.lastSeen = st.lastTs;
     run.skillLoads = st.skills.map((u) => u.name);
+    run.handbacks = st.handbacks.slice();
+    run.stretches = st.stretches;
     for (const k of Object.keys(run.tokens)) run.tokens[k] += st.tokens[k];
   };
   stats.helperTranscripts = streams.size;
@@ -348,6 +434,35 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
     }
     delete run.relayCalls;
     delete run.relayErrors;
+    // Hand-backs: from the helper's own transcript, else from the peer
+    // messages that reached the main session. One verdict per hand-back, so
+    // a re-check after fixes counts as a verdict of its own.
+    const handbacks = run.handbacks?.length ? run.handbacks : (run.agentId && mainHandbacks.get(run.agentId)) || [];
+    const said = handbacks.map((h) => h.verdict).filter(Boolean);
+    run.verdicts = said.length ? said : run.verdict ? [run.verdict] : [];
+    run.verdict = run.verdicts[0];
+    run.verdictTimes = said.length ? handbacks.filter((h) => h.verdict).map((h) => [h.ts, h.verdict]) : run.verdict ? [[run.end ?? run.start, run.verdict]] : [];
+    run.handedBack = handbacks.length;
+    run.firstHandbackAt = handbacks[0]?.ts;
+    run.secondHandbackAt = handbacks[1]?.ts;
+    run.resumes = ((run.agentId && sends.get(run.agentId)) || []).filter((t) => t >= run.start).length;
+    run.rounds = Math.max(1, handbacks.length, run.resumes + 1);
+    // Turns up to the first hand-back, and whether a stretch before it ran
+    // into the agent's maxTurns without handing back: such a run did not
+    // deliver, whatever its notification said.
+    const max = maxTurnsOf(run.type);
+    let turns = 0;
+    let limit = false;
+    for (const s of run.stretches ?? []) {
+      turns += s.turns.size;
+      if (max && s.turns.size >= max && !s.handedBack) limit = true;
+      if (s.handedBack || limit) break;
+    }
+    run.turns = run.stretches ? turns : undefined;
+    run.maxTurns = max;
+    if (limit) run.outcome = 'turn limit';
+    delete run.handbacks;
+    delete run.stretches;
   }
 
   const inRange = (t) => t !== undefined && t >= since && t <= until;
@@ -361,10 +476,15 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
       const ends = [r.notifiedAt, r.lastSeen].filter((t) => t !== undefined && t >= r.start);
       r.end = ends.length ? Math.max(...ends) : undefined;
     }
+    // A run that handed back is timed to its first hand-back: later rounds
+    // (fixing review findings after a SendMessage) and the time it sat idle
+    // in between are not the first delivery.
+    if (r.firstHandbackAt !== undefined && r.firstHandbackAt >= r.start) r.end = Math.min(r.end ?? Infinity, r.firstHandbackAt);
     r.durationMs = r.end !== undefined ? Math.max(0, r.end - r.start) : undefined;
     if (r.outcome === undefined) r.outcome = 'unknown';
     delete r.prompt; // content never leaves this module
   }
+  firstReviews(allRuns);
   stats.untimedSessions = [...sessions.values()].filter((s) => s.start === undefined).length;
   const allSessions = [...sessions.values()].filter((s) => inRange(s.start) || s.runs.some((r) => inRange(r.start)));
   for (const s of allSessions) s.runs = s.runs.filter((r) => inRange(r.start));
@@ -396,6 +516,34 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
 // the agent did not deliver the first time. Being called again after a
 // successful run is just more work, and a reviewer answering FAIL is doing
 // its job, so neither counts.
+// Builders' first review. A run that edited files is reviewed when a review
+// agent in the same session gives a PASS or FAIL after its first hand-back
+// and before the next run of its type; it passed first time when no FAIL
+// came in the first round (before its second hand-back).
+function firstReviews(runs) {
+  const reviewTypes = new Set([...REVIEW_AGENTS, ...runs.filter((r) => r.verdicts.some((v) => v === 'PASS' || v === 'FAIL')).map((r) => r.type)]);
+  for (const list of groupBy(runs, (r) => r.sessionId).values()) {
+    const reviews = list.filter((r) => reviewTypes.has(r.type))
+      .flatMap((r) => r.verdictTimes.filter(([, v]) => v === 'PASS' || v === 'FAIL'))
+      .filter(([t]) => t !== undefined).sort((a, b) => a[0] - b[0]);
+    const builds = list.filter((r) => !reviewTypes.has(r.type) && ((r.tools.Edit ?? 0) + (r.tools.Write ?? 0)) > 0).sort((a, b) => a.start - b.start);
+    builds.forEach((b, i) => {
+      const next = builds.slice(i + 1).find((x) => x.type === b.type);
+      const from = b.firstHandbackAt ?? b.end ?? b.start;
+      const seen = reviews.filter(([t]) => t >= from && t < (next ? next.start : Infinity));
+      b.reviewed = seen.length > 0;
+      if (!b.reviewed) return;
+      const first = seen.filter(([t]) => t < (b.secondHandbackAt ?? Infinity));
+      b.firstPass = !(first.length ? first : seen.slice(0, 1)).some(([, v]) => v === 'FAIL');
+    });
+  }
+  for (const r of runs) {
+    r.reviewAgent = reviewTypes.has(r.type);
+    delete r.verdictTimes;
+    delete r.secondHandbackAt;
+  }
+}
+
 function markReruns(runs) {
   const bySessionType = new Map();
   for (const r of runs) {
@@ -408,7 +556,7 @@ function markReruns(runs) {
     list.forEach((r, i) => {
       const prev = list[i - 1];
       const prevEnd = prev ? prev.end ?? prev.start : undefined;
-      const undelivered = prev && (prev.outcome === 'failed' || prev.outcome === 'stopped');
+      const undelivered = prev && (prev.outcome === 'failed' || prev.outcome === 'stopped' || prev.outcome === 'turn limit');
       r.rerun = Boolean(undelivered && r.start - prevEnd <= RERUN_WINDOW_MS);
     });
   }
@@ -450,7 +598,10 @@ function summarise(runs) {
   const toolCalls = runs.reduce((k, r) => k + r.toolCalls, 0);
   const toolErrors = runs.reduce((k, r) => k + r.toolErrors, 0);
   const verdicts = {};
-  for (const r of runs) if (r.verdict) verdicts[r.verdict] = (verdicts[r.verdict] || 0) + 1;
+  for (const r of runs) for (const v of r.verdicts ?? (r.verdict ? [r.verdict] : [])) verdicts[v] = (verdicts[v] || 0) + 1;
+  const sorted = (key) => runs.map((r) => r[key]).filter(Number.isFinite).sort((a, b) => a - b);
+  const reviewed = runs.filter((r) => r.reviewed).length;
+  const firstPass = runs.filter((r) => r.reviewed && r.firstPass).length;
   return {
     runs: runs.length,
     ended: ended.length,
@@ -471,14 +622,26 @@ function summarise(runs) {
     totalWeighted: costs.reduce((a, b) => a + b, 0),
     models,
     verdicts,
+    // A run that ran into its maxTurns without handing back.
+    turnLimit: ended.filter((r) => r.outcome === 'turn limit').length,
+    medianTurns: quantile(sorted('turns'), 0.5),
+    // Hand-backs per run: 2 means one round of fixes after a review.
+    medianRounds: quantile(sorted('rounds'), 0.5),
+    // Builders: runs a review agent judged, and those that passed the first round.
+    reviewed,
+    firstPass,
+    firstPassRate: reviewed ? firstPass / reviewed : undefined,
+    // Review agents that handed back with no verdict anyone could read.
+    noVerdict: runs.filter((r) => r.reviewAgent && r.handedBack && !(r.verdicts ?? []).length).length,
   };
 }
 
 // Score out of 100, always shown with its parts. Speed and efficiency are
 // judged against the same agent's own baseline, never against other agents:
 // a reviewer is not "slower" than a runner, it does a different job.
-//   reliability 40  finished / ended
-//   right first 20  1 - re-run rate
+//   reliability 40  finished / ended (a run stopped by its turn limit did not finish)
+//   right first 20  builders with 3+ reviewed runs: first review passed;
+//                   others: 1 - re-run rate
 //   speed       20  baseline median duration / this median, capped at 1
 //   efficiency  20  baseline median weighted tokens / this median, capped at 1
 //
@@ -500,7 +663,10 @@ function score(summary, baseline, byMode) {
   if (summary.successRate === undefined) return { value: undefined, reason: 'no run has ended yet' };
   const fraction = {
     reliability: summary.successRate,
-    rightFirst: summary.rerunRate === undefined ? undefined : 1 - summary.rerunRate,
+    // A builder that is reviewed is right first time when its first review
+    // passes; any other agent when it is not called again after failing.
+    rightFirst: summary.reviewed >= MIN_RUNS_FOR_SCORE ? summary.firstPassRate
+      : summary.rerunRate === undefined ? undefined : 1 - summary.rerunRate,
     speed: byMode ? byMode.speed : baseline ? ratio(baseline.medianMs, summary.medianMs) : undefined,
     efficiency: byMode ? byMode.efficiency : baseline ? ratio(baseline.medianWeighted, summary.medianWeighted) : undefined,
   };

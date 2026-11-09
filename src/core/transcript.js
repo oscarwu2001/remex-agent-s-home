@@ -89,7 +89,10 @@ function messageEvents(entry, ts, via) {
     }
     const stopReason = entry.message ? entry.message.stop_reason : undefined;
     if (!sawTool) {
-      events.push({ kind: 'assistant-text', ts, via, stopReason: stopReason || undefined });
+      // The text itself goes only to the report, which keeps one word of a
+      // helper's closing reply (its verdict) and nothing else.
+      const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+      events.push({ kind: 'assistant-text', ts, via, stopReason: stopReason || undefined, text });
     }
     return events;
   }
@@ -119,7 +122,19 @@ function messageEvents(entry, ts, via) {
     if (sawResult) return events;
     const first = blocks.find((b) => b && b.type === 'text');
     const text = first ? String(first.text) : '';
-    const origin = entry.origin && typeof entry.origin === 'object' ? entry.origin.kind : undefined;
+    const from = entry.origin && typeof entry.origin === 'object' ? entry.origin : {};
+    const origin = from.kind;
+
+    // In the Claude app a helper hands its report back as a message from a
+    // peer, which names the helper (its agent id) and carries the report.
+    if (origin === 'peer' && from.handback === true) {
+      events.push({
+        kind: 'handback', ts, via,
+        agentId: typeof from.from === 'string' ? from.from : undefined,
+        text: typeof from.handbackReportText === 'string' ? from.handbackReportText : '',
+      });
+      return events;
+    }
 
     // A background helper finishing is announced as a user-role message.
     if (origin === 'task-notification' || text.trimStart().startsWith('<task-notification>')) {

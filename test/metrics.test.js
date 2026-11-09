@@ -225,3 +225,133 @@ test('a resumed transcript repeating a Task call counts it once', () => {
   assert.equal(runs.length, 1);
   assert.equal(sessions[0].runs.length, 1);
 });
+
+// ---- hand-backs, rounds, turn limits, first review ------------------------
+
+// A .claude folder of invented transcripts, with agents beside projects.
+function claudeHome(files, agents = {}) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-home-'));
+  const root = path.join(base, 'projects');
+  for (const [rel, entries] of Object.entries(files)) {
+    const file = path.join(root, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  }
+  fs.mkdirSync(path.join(base, 'agents'), { recursive: true });
+  for (const [name, text] of Object.entries(agents)) fs.writeFileSync(path.join(base, 'agents', `${name}.md`), text);
+  return root;
+}
+const launched = (sec, id, agentId, extra) => toolResult(sec, id, `Async agent launched successfully.\nagentId: ${agentId} (internal ID)`, extra);
+// How the Claude app hands a helper's report back to the main session.
+const peerHandback = (sec, agentId, report) => ({
+  ...prompt(sec, 'Another Claude session sent a message'), isMeta: true,
+  origin: { kind: 'peer', from: agentId, name: 'helper', handback: true, handbackReportText: report },
+});
+const done = (sec, id) => ({ ...prompt(sec, `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>`), origin: { kind: 'task-notification' } });
+
+test('verdicts are read from a closing VERDICT line or the first word, BLOCKED included', () => {
+  assert.equal(verdictOf('Two findings below.\n\n1. a.js:3 ...\n\nVERDICT: FAIL findings=2 blocking=1 sha=abc1234'), 'FAIL');
+  assert.equal(verdictOf('PASS\n\nNothing found.\n**VERDICT: PASS findings=0 blocking=0 sha=none**'), 'PASS');
+  assert.equal(verdictOf('**BLOCKED**: the preview would not start'), 'BLOCKED');
+  assert.equal(verdictOf('Approve. Looks right.'), 'Approve');
+  assert.equal(verdictOf('The review passed in spirit'), undefined, 'no guessing from prose');
+});
+
+test('an app hand-back counts: one verdict per hand-back, rounds from SendMessage, timed to the first', () => {
+  const root = claudeHome({
+    'p/sess-1.jsonl': [
+      prompt(0, 'review it'),
+      toolUse(1, 't1', 'Agent', { subagent_type: 'reviewer', prompt: 'Review the diff' }),
+      launched(2, 't1', 'rev1'),
+      peerHandback(120, 'rev1', 'FAIL\n\n1. a.js:3 drops the last row'),
+      done(121, 't1'),
+      toolUse(300, 'sm1', 'SendMessage', { to: 'rev1', message: 'Fixed; re-check those findings' }),
+      peerHandback(360, 'rev1', 'All fixed.\nVERDICT: PASS findings=0 blocking=0 sha=abc1234'),
+    ],
+  });
+  const { runs } = collect([root], RANGE);
+  const [r] = runs;
+  assert.deepEqual(r.verdicts, ['FAIL', 'PASS']);
+  assert.equal(r.verdict, 'FAIL', 'the first verdict stays the run\'s own');
+  assert.equal(r.rounds, 2);
+  assert.equal(r.durationMs, 119_000, 'to the first hand-back, not to the re-check');
+  assert.deepEqual(summarise(runs).verdicts, { FAIL: 1, PASS: 1 });
+});
+
+test('a SubagentHandback call in the helper\'s own transcript gives its verdict', () => {
+  const p = 'Review the restyled sidebar';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'ui-reviewer', prompt: p }), launched(2, 't1', 'ui1'), done(90, 't1')],
+    'p/sess-1/subagents/agent-ui1.jsonl': [
+      prompt(3, p, sidechain('ui1')),
+      usage(toolUse(10, 'r1', 'Read', { file_path: 'x' }, sidechain('ui1')), 'm1', 10, 1),
+      toolResult(11, 'r1', 'ok', sidechain('ui1')),
+      usage(toolUse(80, 'hb', 'SubagentHandback', { message: 'Could not start the preview.\nVERDICT: BLOCKED findings=0 blocking=0 sha=none' }, sidechain('ui1')), 'm2', 10, 1),
+      toolResult(81, 'hb', 'delivered', sidechain('ui1')),
+      usage(say(82, 'Report handed back.', 'end_turn', sidechain('ui1')), 'm3', 10, 1),
+    ],
+  });
+  const { runs } = collect([root], RANGE);
+  assert.deepEqual([runs[0].verdict, runs[0].rounds, runs[0].turns], ['BLOCKED', 1, 2]);
+  assert.equal(summarise(runs).noVerdict, 0);
+});
+
+test('a helper cut off by its maxTurns did not finish, whatever the notification said', () => {
+  const p = 'Build the export, Done check: npm test';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'builder', prompt: p }), launched(2, 't1', 'b1'), done(200, 't1')],
+    'p/sess-1/subagents/agent-b1.jsonl': [
+      prompt(3, p, sidechain('b1')),
+      ...[1, 2, 3].flatMap((i) => [
+        usage(toolUse(10 * i, `e${i}`, 'Edit', { file_path: 'x' }, sidechain('b1')), `m${i}`, 10, 1),
+        toolResult(10 * i + 1, `e${i}`, 'ok', sidechain('b1')),
+      ]),
+    ],
+  }, { builder: '---\nname: builder\nmaxTurns: 3\n---\nBuild it.\n' });
+  const { runs } = collect([root], RANGE);
+  assert.deepEqual([runs[0].outcome, runs[0].turns, runs[0].maxTurns], ['turn limit', 3, 3]);
+  const sum = summarise(runs);
+  assert.deepEqual([sum.turnLimit, sum.successRate], [1, 0]);
+});
+
+test('a builder passes first time only when its first review round has no FAIL', () => {
+  const brief = (n) => `Build piece ${n}. Done check: npm test`;
+  const builder = (sess, n, agentId, handbacks) => [
+    prompt(3, brief(n), { ...sidechain(agentId), sessionId: sess }),
+    usage(toolUse(5, `${agentId}e`, 'Edit', { file_path: 'x' }, { ...sidechain(agentId), sessionId: sess }), `${agentId}m1`, 10, 1),
+    toolResult(6, `${agentId}e`, 'ok', { ...sidechain(agentId), sessionId: sess }),
+    ...handbacks.map((sec, i) => usage(say(sec, `Changed: x\nDone check: green (${i})`, 'end_turn', { ...sidechain(agentId), sessionId: sess }), `${agentId}h${i}`, 10, 1)),
+  ];
+  const root = claudeHome({
+    // Session 1: FAIL from the reviewer, fixed after SendMessage, then PASS.
+    'p/s1.jsonl': [
+      prompt(0, 'go', { sessionId: 's1' }),
+      toolUse(1, 'b1', 'Agent', { subagent_type: 'builder', prompt: brief(1) }, { sessionId: 's1' }), launched(2, 'b1', 'bA', { sessionId: 's1' }),
+      toolUse(60, 'r1', 'Agent', { subagent_type: 'reviewer', prompt: 'Review' }, { sessionId: 's1' }), toolResult(90, 'r1', 'FAIL\n\n1. x:1', { sessionId: 's1' }),
+      toolUse(100, 'sm', 'SendMessage', { to: 'bA', message: 'Fix finding 1' }, { sessionId: 's1' }),
+      toolUse(200, 'r2', 'Agent', { subagent_type: 'reviewer', prompt: 'Re-check' }, { sessionId: 's1' }), toolResult(220, 'r2', 'PASS', { sessionId: 's1' }),
+    ],
+    'p/s1/subagents/agent-bA.jsonl': builder('s1', 1, 'bA', [50, 150]),
+    // Session 2: the first review passes.
+    'p/s2.jsonl': [
+      prompt(0, 'go', { sessionId: 's2' }),
+      toolUse(1, 'b2', 'Agent', { subagent_type: 'builder', prompt: brief(2) }, { sessionId: 's2' }), launched(2, 'b2', 'bB', { sessionId: 's2' }),
+      toolUse(60, 'r3', 'Agent', { subagent_type: 'reviewer', prompt: 'Review' }, { sessionId: 's2' }), toolResult(90, 'r3', 'PASS', { sessionId: 's2' }),
+    ],
+    'p/s2/subagents/agent-bB.jsonl': builder('s2', 2, 'bB', [50]),
+  });
+  const { runs } = collect([root], RANGE);
+  const b1 = runs.find((r) => r.type === 'builder' && r.sessionId === 's1');
+  const b2 = runs.find((r) => r.type === 'builder' && r.sessionId === 's2');
+  assert.deepEqual([b1.reviewed, b1.firstPass, b1.rounds], [true, false, 2]);
+  assert.deepEqual([b2.reviewed, b2.firstPass, b2.rounds], [true, true, 1]);
+  const sum = summarise(runs.filter((r) => r.type === 'builder'));
+  assert.deepEqual([sum.reviewed, sum.firstPass, sum.firstPassRate], [2, 1, 0.5]);
+  assert.ok(runs.filter((r) => r.type === 'reviewer').every((r) => r.reviewed === undefined), 'a reviewer is not itself reviewed');
+});
+
+test('right first time uses the first review once 3 runs were reviewed', () => {
+  const sum = { runs: 4, successRate: 1, rerunRate: 0, reviewed: 4, firstPassRate: 0.25 };
+  assert.equal(score(sum, null).parts.rightFirst, 5);
+  assert.equal(score({ ...sum, reviewed: 2 }, null).parts.rightFirst, 20, 'too few reviews: the re-run rate stands in');
+});
