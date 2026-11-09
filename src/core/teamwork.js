@@ -95,7 +95,7 @@ function teamwork({ runs, sessions, skills }, inventory = { agents: new Set(), s
   // Hand-off chains: each session's steps in order, repeats folded (x2),
   // cut at MAX_CHAIN steps. Only sessions with two or more steps.
   const label = (st) => (st.kind === 'agent'
-    ? `${st.name}${st.verdict ? ` (${st.verdict})` : st.outcome === 'failed' || st.outcome === 'stopped' ? ` (${st.outcome})` : ''}`
+    ? `${st.name}${st.verdict ? ` (${st.verdict})` : st.outcome === 'failed' || st.outcome === 'stopped' || st.outcome === 'turn limit' ? ` (${st.outcome})` : ''}`
     : `/${st.name}`);
   const chainCounts = new Map();
   let withSteps = 0;

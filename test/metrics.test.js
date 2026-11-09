@@ -326,19 +326,19 @@ test('a builder passes first time only when its first review round has no FAIL',
     // Session 1: FAIL from the reviewer, fixed after SendMessage, then PASS.
     'p/s1.jsonl': [
       prompt(0, 'go', { sessionId: 's1' }),
-      toolUse(1, 'b1', 'Agent', { subagent_type: 'builder', prompt: brief(1) }, { sessionId: 's1' }), launched(2, 'b1', 'bA', { sessionId: 's1' }),
+      toolUse(1, 'b1', 'Agent', { subagent_type: 'builder', prompt: brief(1) }, { sessionId: 's1' }), launched(2, 'b1', 'bAAA1', { sessionId: 's1' }),
       toolUse(60, 'r1', 'Agent', { subagent_type: 'reviewer', prompt: 'Review' }, { sessionId: 's1' }), toolResult(90, 'r1', 'FAIL\n\n1. x:1', { sessionId: 's1' }),
-      toolUse(100, 'sm', 'SendMessage', { to: 'bA', message: 'Fix finding 1' }, { sessionId: 's1' }),
+      toolUse(100, 'sm', 'SendMessage', { to: 'bAAA1', message: 'Fix finding 1' }, { sessionId: 's1' }),
       toolUse(200, 'r2', 'Agent', { subagent_type: 'reviewer', prompt: 'Re-check' }, { sessionId: 's1' }), toolResult(220, 'r2', 'PASS', { sessionId: 's1' }),
     ],
-    'p/s1/subagents/agent-bA.jsonl': builder('s1', 1, 'bA', [50, 150]),
+    'p/s1/subagents/agent-bAAA1.jsonl': builder('s1', 1, 'bAAA1', [50, 150]),
     // Session 2: the first review passes.
     'p/s2.jsonl': [
       prompt(0, 'go', { sessionId: 's2' }),
-      toolUse(1, 'b2', 'Agent', { subagent_type: 'builder', prompt: brief(2) }, { sessionId: 's2' }), launched(2, 'b2', 'bB', { sessionId: 's2' }),
+      toolUse(1, 'b2', 'Agent', { subagent_type: 'builder', prompt: brief(2) }, { sessionId: 's2' }), launched(2, 'b2', 'bBBB2', { sessionId: 's2' }),
       toolUse(60, 'r3', 'Agent', { subagent_type: 'reviewer', prompt: 'Review' }, { sessionId: 's2' }), toolResult(90, 'r3', 'PASS', { sessionId: 's2' }),
     ],
-    'p/s2/subagents/agent-bB.jsonl': builder('s2', 2, 'bB', [50]),
+    'p/s2/subagents/agent-bBBB2.jsonl': builder('s2', 2, 'bBBB2', [50]),
   });
   const { runs } = collect([root], RANGE);
   const b1 = runs.find((r) => r.type === 'builder' && r.sessionId === 's1');
@@ -354,4 +354,116 @@ test('right first time uses the first review once 3 runs were reviewed', () => {
   const sum = { runs: 4, successRate: 1, rerunRate: 0, reviewed: 4, firstPassRate: 0.25 };
   assert.equal(score(sum, null).parts.rightFirst, 5);
   assert.equal(score({ ...sum, reviewed: 2 }, null).parts.rightFirst, 20, 'too few reviews: the re-run rate stands in');
+});
+
+// ---- the review's cases: one hand-back counted once, rounds, attribution ----
+
+const thinkingThenText = (sec, id, text, extra) => [
+  usage({ ...say(sec, '', 'end_turn', extra), message: { ...say(sec, '', 'end_turn', extra).message, content: [{ type: 'thinking', thinking: '…' }] } }, id, 10, 1),
+  usage(say(sec + 1, text, 'end_turn', extra), id, 10, 1),
+];
+const fromParent = (sec, extra) => ({ ...prompt(sec, 'The coordinator sent a follow-up', extra), isMeta: true, origin: { kind: 'coordinator' } });
+
+test('a reply written as a thinking line and a text line is one hand-back, its verdict read from the text', () => {
+  const p = 'Review the diff of the parser';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'reviewer', prompt: p }), toolResult(100, 't1', 'FAIL\n1. x')],
+    'p/sess-1/subagents/agent-rev00001.jsonl': [
+      prompt(2, p, sidechain('rev00001')),
+      usage(toolUse(10, 'r1', 'Read', { file_path: 'x' }, sidechain('rev00001')), 'm1', 10, 1),
+      toolResult(11, 'r1', 'ok', sidechain('rev00001')),
+      ...thinkingThenText(98, 'm2', 'FAIL\n1. x', sidechain('rev00001')),
+    ],
+  });
+  const [r] = collect([root], RANGE).runs;
+  assert.deepEqual([r.verdicts, r.rounds, r.durationMs], [['FAIL'], 1, 98_000]);
+});
+
+test('a helper transcript found twice, and a resumed main file, count each hand-back once', () => {
+  const p = 'Review the export change';
+  const helper = [prompt(3, p, sidechain('rev00002')), ...thinkingThenText(50, 'mA', 'VERDICT: FAIL findings=1 blocking=1 sha=abc1234', sidechain('rev00002'))];
+  const main = [
+    prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'reviewer', prompt: p }), launched(2, 't1', 'rev00002'),
+    toolUse(60, 'sm1', 'SendMessage', { to: 'rev00002', message: 're-check' }),
+    peerHandback(90, 'rev00002', 'PASS'),
+  ];
+  const root = claudeHome({
+    'p/sess-1.jsonl': [...main, ...main.slice(3)], // a resumed file repeats its earlier lines
+    'p/sess-1/subagents/agent-rev00002.jsonl': helper,
+    'q/sess-9/subagents/agent-rev00002.jsonl': helper, // the same helper, copied elsewhere
+  });
+  const [r] = collect([root], RANGE).runs;
+  assert.deepEqual([r.verdicts, r.rounds, r.resumes], [['FAIL'], 2, 1]);
+});
+
+test('a report sent again with no word from the parent replaces the first: one round, the later verdict', () => {
+  const p = 'Review the loader';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'reviewer', prompt: p }), launched(2, 't1', 'rev00003'), done(100, 't1')],
+    'p/sess-1/subagents/agent-rev00003.jsonl': [
+      prompt(3, p, sidechain('rev00003')),
+      usage(say(49, 'FAIL\n1. loader drops a row', 'end_turn', sidechain('rev00003')), 'm1', 10, 1),
+      // the user's hook asked for the VERDICT line; the same report again
+      usage(say(99, 'FAIL\n1. loader drops a row\nVERDICT: FAIL findings=1 blocking=1 sha=abc1234', 'end_turn', sidechain('rev00003')), 'm2', 10, 1),
+      // a real follow-up from the parent starts a second round
+      fromParent(150, sidechain('rev00003')),
+      usage(say(180, 'VERDICT: PASS findings=0 blocking=0 sha=def5678', 'end_turn', sidechain('rev00003')), 'm3', 10, 1),
+    ],
+  });
+  const [r] = collect([root], RANGE).runs;
+  assert.deepEqual([r.verdicts, r.rounds, r.durationMs], [['FAIL', 'PASS'], 2, 98_000]);
+});
+
+test('each review goes to the build that handed back last before the reviewer started', () => {
+  const brief = (n) => `Build part ${n}. Done check: npm test`;
+  const build = (id, handback) => [
+    prompt(3, brief(id), sidechain(id)),
+    usage(toolUse(5, `${id}e`, 'Edit', { file_path: 'x' }, sidechain(id)), `${id}m`, 10, 1),
+    toolResult(6, `${id}e`, 'ok', sidechain(id)),
+    usage(say(handback, 'Changed: x', 'end_turn', sidechain(id)), `${id}h`, 10, 1),
+  ];
+  const root = claudeHome({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'ba', 'Agent', { subagent_type: 'builder', prompt: brief('buildA1') }), launched(2, 'ba', 'buildA1'),
+      toolUse(1, 'bb', 'Agent', { subagent_type: 'builder', prompt: brief('buildB2') }), launched(2, 'bb', 'buildB2'),
+      // A hands back at 50 and its review starts at 55; B hands back at 70.
+      toolUse(55, 'ra', 'Agent', { subagent_type: 'reviewer', prompt: 'Review A' }), toolResult(90, 'ra', 'FAIL\n1. a'),
+      toolUse(75, 'rb', 'Agent', { subagent_type: 'reviewer', prompt: 'Review B' }), toolResult(95, 'rb', 'PASS'),
+    ],
+    'p/sess-1/subagents/agent-buildA1.jsonl': build('buildA1', 50),
+    'p/sess-1/subagents/agent-buildB2.jsonl': build('buildB2', 70),
+  });
+  const { runs } = collect([root], RANGE);
+  const a = runs.find((r) => r.agentId === 'buildA1');
+  const b = runs.find((r) => r.agentId === 'buildB2');
+  assert.deepEqual([a.reviewed, a.firstPass], [true, false]);
+  assert.deepEqual([b.reviewed, b.firstPass], [true, true]);
+});
+
+test('a runner answering "PASS" is not made a review agent, and other agents are never "with no verdict"', () => {
+  const root = claudeHome({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'r1', 'Agent', { subagent_type: 'runner', prompt: 'Run the tests' }), toolResult(20, 'r1', 'PASS, 228 tests'),
+      toolUse(30, 'g1', 'Agent', { subagent_type: 'general-purpose', prompt: 'Look around' }), toolResult(40, 'g1', 'Found three loaders'),
+    ],
+  });
+  const { runs } = collect([root], RANGE);
+  assert.ok(runs.every((r) => !r.reviewAgent));
+  assert.equal(summarise(runs).noVerdict, 0);
+});
+
+test('a reminder in the middle of a run does not hide that it hit its turn limit', () => {
+  const p = 'Build the importer, Done check: npm test';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [prompt(0, 'go'), toolUse(1, 't1', 'Agent', { subagent_type: 'builder', prompt: p }), launched(2, 't1', 'build0003'), done(200, 't1')],
+    'p/sess-1/subagents/agent-build0003.jsonl': [
+      prompt(3, p, sidechain('build0003')),
+      ...[1, 2].flatMap((i) => [usage(toolUse(10 * i, `e${i}`, 'Edit', { file_path: 'x' }, sidechain('build0003')), `m${i}`, 10, 1), toolResult(10 * i + 1, `e${i}`, 'ok', sidechain('build0003'))]),
+      prompt(35, '<system-reminder>a reminder</system-reminder>', sidechain('build0003')),
+      ...[3, 4].flatMap((i) => [usage(toolUse(10 * i, `e${i}`, 'Edit', { file_path: 'x' }, sidechain('build0003')), `m${i}`, 10, 1), toolResult(10 * i + 1, `e${i}`, 'ok', sidechain('build0003'))]),
+    ],
+  }, { builder: '---\nname: builder\nmaxTurns: 4\n---\n' });
+  assert.equal(collect([root], RANGE).runs[0].outcome, 'turn limit');
 });

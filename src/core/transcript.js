@@ -89,8 +89,9 @@ function messageEvents(entry, ts, via) {
     }
     const stopReason = entry.message ? entry.message.stop_reason : undefined;
     if (!sawTool) {
-      // The text itself goes only to the report, which keeps one word of a
-      // helper's closing reply (its verdict) and nothing else.
+      // The text is for the report, which keeps one word of a helper's
+      // closing reply (its verdict) and nothing else; the live tracker
+      // drops it.
       const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
       events.push({ kind: 'assistant-text', ts, via, stopReason: stopReason || undefined, text });
     }
@@ -133,6 +134,13 @@ function messageEvents(entry, ts, via) {
         agentId: typeof from.from === 'string' ? from.from : undefined,
         text: typeof from.handbackReportText === 'string' ? from.handbackReportText : '',
       });
+      return events;
+    }
+
+    // The parent's follow-up to a helper (SendMessage), as the helper's own
+    // transcript records it: it starts the helper's next round.
+    if (origin === 'coordinator') {
+      events.push({ kind: 'parent-message', ts, via });
       return events;
     }
 

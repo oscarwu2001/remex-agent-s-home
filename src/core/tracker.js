@@ -298,7 +298,8 @@ class Tracker {
 
   applySidechain(session, stream, ev) {
     if (stream.taskId === undefined) {
-      if (stream.buffer.length < BUFFER_LIMIT) stream.buffer.push(ev);
+      // A reply's text is not needed here; keep the buffer small.
+      if (stream.buffer.length < BUFFER_LIMIT) stream.buffer.push(ev.kind === 'assistant-text' ? { ...ev, text: undefined } : ev);
       if (ev.kind === 'user-prompt' && stream.prompt === undefined) stream.prompt = ev.text;
       this.tryLink(session, stream);
       return;

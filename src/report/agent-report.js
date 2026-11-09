@@ -624,6 +624,7 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
   const notes = [
     'Counts below cover every file read, which includes the period before this one (used for the comparisons).',
     stats.ambiguousHelpers ? `${stats.ambiguousHelpers} helper transcript${stats.ambiguousHelpers === 1 ? '' : 's'} matched more than one run with the same prompt and ${stats.ambiguousHelpers === 1 ? 'was' : 'were'} not counted, rather than guessed.` : '',
+    stats.unmatchedHandbacks ? `${stats.unmatchedHandbacks} hand-back${stats.unmatchedHandbacks === 1 ? '' : 's'} reached a session from a helper the report could not match to a run, and ${stats.unmatchedHandbacks === 1 ? 'its verdict is' : 'their verdicts are'} not counted.` : '',
     stats.unknownNotifications ? `${stats.unknownNotifications} background run${stats.unknownNotifications === 1 ? '' : 's'} ended with a status the report does not recognise and ${stats.unknownNotifications === 1 ? 'is' : 'are'} treated as unknown.` : '',
     stats.malformedLines ? `${stats.malformedLines} transcript line${stats.malformedLines === 1 ? '' : 's'} could not be read and were skipped.` : '',
     stats.unlinkedHelpers ? `${stats.unlinkedHelpers} helper transcript${stats.unlinkedHelpers === 1 ? '' : 's'} could not be matched to the call that started ${stats.unlinkedHelpers === 1 ? 'it' : 'them'}; their tokens and tool calls are not counted.` : '',

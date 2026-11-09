@@ -5,8 +5,9 @@ as figures in an isometric hospital drawn in a Monument Valley style, with a
 mini window and a project list with to-dos. It reads the local transcript
 files (`~/.claude/projects/**/*.jsonl`, WSL homes and the Claude app's Cowork
 task folders), the project list, the personal assistant's questions
-(`~/.agents-home/assistant/`, read only) and, when turned on, the shared
-status folder; nothing else.
+(`~/.agents-home/assistant/`, read only), for the report the agent
+definitions beside the transcripts and the user's own verdict ledger (counts
+only) and, when turned on, the shared status folder; nothing else.
 Vocabulary is in `CONTEXT.md`.
 
 ## Commands

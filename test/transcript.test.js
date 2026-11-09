@@ -94,3 +94,13 @@ test('a notification queued into a running turn is still recognised', () => {
   const [ev] = eventsFromEntry(entry).events;
   assert.deepEqual([ev.kind, ev.toolUseId, ev.status], ['task-notification', 'toolu_q', 'failed']);
 });
+
+test('the Claude app\'s hand-back, the parent\'s follow-up and a closing reply\'s text', () => {
+  const base = { type: 'user', isMeta: true, timestamp: '2026-01-01T09:00:00.000Z', message: { role: 'user', content: 'a message' } };
+  assert.deepEqual(eventsFromEntry({ ...base, origin: { kind: 'peer', from: 'agent0001', handback: true, handbackReportText: 'PASS' } }).events,
+    [{ kind: 'handback', ts: Date.parse(base.timestamp), via: undefined, agentId: 'agent0001', text: 'PASS' }]);
+  assert.equal(eventsFromEntry({ ...base, origin: { kind: 'peer', from: 'agent0001' } }).events[0].kind, 'activity', 'a peer message that is not a hand-back');
+  assert.equal(eventsFromEntry({ ...base, origin: { kind: 'coordinator' } }).events[0].kind, 'parent-message');
+  const reply = eventsFromEntry({ type: 'assistant', timestamp: base.timestamp, message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'FAIL' }, { type: 'text', text: 'VERDICT: FAIL' }] } });
+  assert.deepEqual(reply.events.map((e) => [e.kind, e.stopReason, e.text]), [['assistant-text', 'end_turn', 'FAIL\nVERDICT: FAIL']]);
+});
