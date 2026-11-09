@@ -1,11 +1,13 @@
-# Remex-RD · 2026-11-09 14:00
+# Remex-RD · 2026-11-09 14:30
 
-**2 running · 6 session(s) in the last hour**
+**2 running · 3 session(s) in the last hour**
 
-GPU RTX 2000E Ada Generation 2% · 0.9/16 GB · 52°C · CPU 20% · RAM 19.0/48 GB
+GPU RTX 2000E Ada Generation 46% · 3.2/16 GB · 68°C · CPU 82% · RAM 18.0/48 GB
 
-- · dataset
-- ▶ spine-sim · 5 sessions
+**Running work**
+- ▶ **real_truth.py** (scripts) · running for 6 min · GPU
+
+- ▶ spine-sim · 3 sessions
 
 | Project | Branch | Last commit | Uncommitted |
 |---|---|---|---|
