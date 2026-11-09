@@ -1,15 +1,15 @@
-# Remex-RD · 2026-11-09 17:00
+# Remex-RD · 2026-11-09 18:00
 
-**1 running · 1 session(s) in the last hour**
+**0 running · 2 session(s) in the last hour**
 
-GPU RTX 2000E Ada Generation 1% · 0.8/16 GB · 38°C · CPU 7% · RAM 15.8/48 GB
+GPU RTX 2000E Ada Generation 2% · 0.9/16 GB · 38°C · CPU 16% · RAM 16.7/48 GB
 
-- ▶ spine-sim
+- · spine-sim · 2 sessions
 
 | Project | Branch | Last commit | Uncommitted |
 |---|---|---|---|
-| spine-sim | handle-map-model | 14 min ago | – |
-| spine-seg2d | main | 8 h ago | – |
+| spine-sim | handle-map-model | 1 h ago | – |
+| spine-seg2d | main | 9 h ago | – |
 | spine-recon | main | 5 d ago | – |
 | spine-ct | handle-map-model | 5 d ago | – |
 | spine-demo | dev-demo | 10 d ago | – |
