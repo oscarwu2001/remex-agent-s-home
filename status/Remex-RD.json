@@ -3,7 +3,7 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794201301796,
+ "at": 1794202201856,
  "every": 900000,
  "sessions": [
   {
@@ -17,7 +17,35 @@
    "project": "spine-sim",
    "source": "code",
    "status": "working",
-   "lastAt": 1794201200465.9338,
+   "lastAt": 1794202072297,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1794202121816.4524,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1794202075563,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "working",
+   "lastAt": 1794202072646,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794201819364.7158,
    "agents": []
   }
  ],
@@ -71,21 +99,21 @@
    "name": "real_truth.py",
    "project": "scripts",
    "on": "gpu",
-   "startedAt": 1794193117428
+   "startedAt": 1794201645840
   }
  ],
  "machine": {
   "gpus": [
    {
     "name": "RTX 2000E Ada Generation",
-    "util": 47,
-    "memUsed": 3119,
+    "util": 22,
+    "memUsed": 3033,
     "memTotal": 16380,
-    "temp": 70
+    "temp": 64
    }
   ],
-  "cpu": 77,
-  "memUsed": 20512,
+  "cpu": 96,
+  "memUsed": 22117,
   "memTotal": 48916
  }
 }
