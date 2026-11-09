@@ -467,3 +467,51 @@ test('a reminder in the middle of a run does not hide that it hit its turn limit
   }, { builder: '---\nname: builder\nmaxTurns: 4\n---\n' });
   assert.equal(collect([root], RANGE).runs[0].outcome, 'turn limit');
 });
+
+test('a review that could be for either of two builders is counted, not guessed', () => {
+  const brief = (n) => `Build part ${n}. Done check: npm test`;
+  const build = (id, handback) => [
+    prompt(3, brief(id), sidechain(id)),
+    usage(toolUse(5, `${id}e`, 'Edit', { file_path: 'x' }, sidechain(id)), `${id}m`, 10, 1),
+    toolResult(6, `${id}e`, 'ok', sidechain(id)),
+    usage(say(handback, 'Changed: x', 'end_turn', sidechain(id)), `${id}h`, 10, 1),
+  ];
+  const root = claudeHome({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'ba', 'Agent', { subagent_type: 'builder', prompt: brief('buildC1') }), launched(2, 'ba', 'buildC1'),
+      toolUse(1, 'bb', 'Agent', { subagent_type: 'builder', prompt: brief('buildD2') }), launched(2, 'bb', 'buildD2'),
+      // Both hand back (50, 60) before either review starts (100, 140).
+      toolUse(100, 'ra', 'Agent', { subagent_type: 'reviewer', prompt: 'Review C' }), toolResult(130, 'ra', 'FAIL\n1. c'),
+      toolUse(140, 'rb', 'Agent', { subagent_type: 'reviewer', prompt: 'Review D' }), toolResult(170, 'rb', 'PASS'),
+    ],
+    'p/sess-1/subagents/agent-buildC1.jsonl': build('buildC1', 50),
+    'p/sess-1/subagents/agent-buildD2.jsonl': build('buildD2', 60),
+  });
+  const { runs, stats } = collect([root], RANGE);
+  assert.ok(runs.filter((r) => r.type === 'builder').every((r) => !r.reviewed));
+  assert.equal(stats.unplacedReviews, 2, 'the second follows the first, which could not be placed');
+});
+
+test('two reviewers on one build share it; hand-backs from no known helper are counted', () => {
+  const p = 'Build the parser. Done check: npm test';
+  const root = claudeHome({
+    'p/sess-1.jsonl': [
+      prompt(0, 'go'),
+      toolUse(1, 'b1', 'Agent', { subagent_type: 'builder', prompt: p }), launched(2, 'b1', 'buildE1'),
+      toolUse(60, 'r1', 'Agent', { subagent_type: 'reviewer', prompt: 'Review' }), toolResult(90, 'r1', 'PASS'),
+      toolUse(61, 's1', 'Agent', { subagent_type: 'silent-failure-hunter', prompt: 'Hunt' }), toolResult(95, 's1', 'FAIL\n1. swallowed error'),
+      peerHandback(200, 'nobody01', 'PASS'),
+    ],
+    'p/sess-1/subagents/agent-buildE1.jsonl': [
+      prompt(3, p, sidechain('buildE1')),
+      usage(toolUse(5, 'e1', 'Edit', { file_path: 'x' }, sidechain('buildE1')), 'm1', 10, 1),
+      toolResult(6, 'e1', 'ok', sidechain('buildE1')),
+      usage(say(50, 'Changed: x', 'end_turn', sidechain('buildE1')), 'm2', 10, 1),
+    ],
+  });
+  const { runs, stats } = collect([root], RANGE);
+  const b = runs.find((r) => r.type === 'builder');
+  assert.deepEqual([b.reviewed, b.firstPass], [true, false], 'the hunter\'s FAIL in the same round counts');
+  assert.equal(stats.unmatchedHandbacks, 1);
+});

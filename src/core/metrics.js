@@ -150,7 +150,7 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
   const sendIds = new Set(); // SendMessage tool_use ids seen (resumed files repeat lines)
   const stats = {
     files: 0, lines: 0, malformedLines: 0, unlinkedHelpers: 0, ambiguousHelpers: 0,
-    unknownNotifications: 0, untimedSessions: 0, unmatchedHandbacks: 0,
+    unknownNotifications: 0, untimedSessions: 0, unmatchedHandbacks: 0, unplacedReviews: 0,
     helperTranscripts: 0, matchedByAgentId: 0, matchedByPrompt: 0,
   };
   const sessions = new Map(); // sessionId -> session
@@ -526,7 +526,7 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
     if (r.outcome === undefined) r.outcome = 'unknown';
     delete r.prompt; // content never leaves this module
   }
-  firstReviews(allRuns);
+  firstReviews(allRuns, stats);
   stats.untimedSessions = [...sessions.values()].filter((s) => s.start === undefined).length;
   const allSessions = [...sessions.values()].filter((s) => inRange(s.start) || s.runs.some((r) => inRange(r.start)));
   for (const s of allSessions) s.runs = s.runs.filter((r) => inRange(r.start));
@@ -573,26 +573,34 @@ function rounds(handbacks, parentTimes) {
   return out;
 }
 
-// Builders' first review. Each review goes to one run that edited files:
-// the one in the same session that handed back last before the review
-// agent was started. Its round is how many times that run had handed back
-// by the verdict. A run passed first time when its earliest reviewed round
-// has no FAIL.
-function firstReviews(runs) {
+// Builders' first review. A review goes to the one run that edited files
+// and handed back after the session's previous review started and before
+// this one did. With none, it is a re-check of what the previous review
+// looked at. With several (builders running side by side), it cannot be
+// placed without guessing, so it is counted instead. A run's round is how
+// many times it had handed back by the verdict; it passed first time when
+// its earliest reviewed round has no FAIL.
+function firstReviews(runs, stats) {
   const reviewTypes = new Set([...REVIEW_AGENTS, ...runs.filter((r) => r.explicitVerdict).map((r) => r.type)]);
   for (const list of groupBy(runs, (r) => r.sessionId).values()) {
     const builds = list.filter((r) => !reviewTypes.has(r.type) && ((r.tools.Edit ?? 0) + (r.tools.Write ?? 0)) > 0)
       .map((b) => ({ b, times: b.handbackTimes.length ? b.handbackTimes : [b.end ?? b.start], seen: [] }));
-    for (const rev of list.filter((r) => reviewTypes.has(r.type))) {
-      let best;
-      for (const x of builds) {
-        const last = x.times.filter((t) => t <= rev.start).at(-1);
-        if (last !== undefined && (!best || last > best.last)) best = { x, last };
-      }
-      if (!best) continue;
+    let prevStart = -Infinity;
+    let prevTarget;
+    let prevUnplaced = false;
+    for (const rev of list.filter((r) => reviewTypes.has(r.type)).sort((a, b) => a.start - b.start)) {
+      const fresh = builds.filter((x) => x.times.some((t) => t > prevStart && t <= rev.start));
+      const target = fresh.length === 1 ? fresh[0] : fresh.length === 0 ? prevTarget : undefined;
+      // Unplaced: several candidates, or a re-check of a review that was.
+      const unplaced = !target && (fresh.length > 1 || (fresh.length === 0 && prevUnplaced));
+      if (unplaced && rev.verdictTimes.length) stats.unplacedReviews += 1;
+      prevStart = rev.start;
+      prevTarget = target;
+      prevUnplaced = unplaced;
+      if (!target) continue;
       for (const [t, v] of rev.verdictTimes) {
         if (v !== 'PASS' && v !== 'FAIL') continue;
-        best.x.seen.push({ round: best.x.times.filter((h) => h <= (t ?? Infinity)).length, v });
+        target.seen.push({ round: target.times.filter((h) => h <= (t ?? Infinity)).length, v });
       }
     }
     for (const { b, seen } of builds) {
