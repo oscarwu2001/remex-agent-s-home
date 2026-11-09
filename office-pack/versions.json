@@ -1,6 +1,7 @@
 {
   "agents/builder.md": [
-    "b9427a116bb9aecb3ae268b9e0cfd264"
+    "b9427a116bb9aecb3ae268b9e0cfd264",
+    "0717f4ca72c0487a11a415c3b1933f2c"
   ],
   "agents/checker.md": [
     "24549b498f0c80b41fc4a23179127d0d",
@@ -8,7 +9,8 @@
   ],
   "agents/code-reviewer.md": [
     "634722673c7eb7456aaf814f1fa15d74",
-    "20e463136a61600d0d8c74c965447cbb"
+    "20e463136a61600d0d8c74c965447cbb",
+    "03e38d52fc2ab9be89725351726e676a"
   ],
   "agents/data-helper.md": [
     "24e579b0201468f86e10cc28a263cb04",
@@ -35,7 +37,8 @@
   "agents/test-runner.md": [
     "f9ef060c55820a0cae942e0f157b4a4b",
     "34007ce717b15a23bdd8d7254f0e213e",
-    "ee47c0ac2b3ebcc5f0cb60b819309dbd"
+    "ee47c0ac2b3ebcc5f0cb60b819309dbd",
+    "bbdf05460150100858464f863d40c6b0"
   ],
   "agents/writer.md": [
     "259da62600629eb7443ec9f6b972249b",
@@ -48,7 +51,8 @@
     "32d03485114a9d028bf40bb1f0b17e27",
     "c8e04cf9e2f509956ec403a1c9f9bcd7",
     "a74ea42c2319769b6b8456319e5236c0",
-    "9a98d9003b1006c15bc880f2368ab7cf"
+    "9a98d9003b1006c15bc880f2368ab7cf",
+    "36a71809e28ed8b8e3a6653bf49148a7"
   ],
   "skills/break-down/SKILL.md": [
     "8393a4e2ba1ac1605df384631a634fe1",

@@ -16,6 +16,8 @@ input="$(cat)"
 prompt="$(printf '%s' "$input" | tr '\n' ' ' | sed -En 's/.*"prompt"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' \
   | sed -E 's/\\[nrt]/ /g' | tr '[:upper:]' '[:lower:]')"
 [ -n "$prompt" ] || exit 0
+# A background helper reporting back is not the user asking for something.
+case "$prompt" in '<task-notification'*) exit 0 ;; esac
 
 tips=""
 fired=""
@@ -27,12 +29,13 @@ tip() { [ -f "$dir/agents/$1.md" ] && tips="$tips
 # prompt of a debugging loop, and a review after each small fix costs a
 # review per round for the same change.
 fits '\b(implement|refactor|bug|feature|endpoint|pull request|merge request|commit|change the code|add (a|an|the) (function|method|class|test))\b' \
-  && tip code-reviewer 'When the whole code change is finished (not after each small fix), review it once: the code-reviewer agent or the /code-review skill, not both. Fix what it finds and ask it to re-check only those findings.'
+  && tip code-reviewer 'When the whole code change is finished (not after each small fix), have the code-reviewer agent review it once (not also /code-review): give it what was asked and the diff, not the builder'"'"'s report. Send all its findings back to whoever built it in one round (the same builder, with SendMessage), then ask it to re-check only those.'
 # The report showed general-purpose helpers taking most of the cost: whole
-# changes handed off on the biggest model. A typed builder on Sonnet with a
-# narrow brief does the same job.
+# changes handed off on the biggest model. One typed builder on Sonnet per
+# change, with a brief that says how to tell it is done, does the same job;
+# splitting a change into many helpers loses what each piece knew.
 fits '\b(implement|refactor|migrate|migration|port (it|this|the)|scaffold|build (the|a|an) (feature|page|screen|module|app)|in the background|across (the|all|every) files?)\b' \
-  && tip builder 'To hand off a whole code change, use the builder agent (Sonnet), not a general-purpose helper: give it what to change, which files, and the check that proves it is done.'
+  && tip builder 'For anything bigger than a small edit, hand the whole change to one builder agent (not a general-purpose helper, not one helper per piece). Its brief: the goal, Done check: (how to tell it works), Scope: (which files) and Checked by: (code-reviewer). Small edits stay here.'
 fits '\b(run (the )?tests?|tests? (fail|fails|failing|failed|pass)|test suite|unit tests?|pytest|jest|vitest|npm (run )?test|lint(er|ing)?|eslint|ruff|mypy|tsc|(the )?build (fails|failed|failing|is broken|breaks))\b' \
   && tip test-runner 'Run tests, builds and linters through the test-runner agent: the tests for this change first, the full suite only when needed.'
 fits '\b(e-?mails?|letter|draft|rewrite|reword|announcement|reply|translate|tone)\b' \
@@ -43,9 +46,11 @@ fits '\b(where (are|is) (we|it|this|the project)|project status|status of (the|t
   && tip project-manager 'For where this project stands, what is next, or its to-do list, use the project-manager agent (it keeps the list Agent'"'"'s Home shows).'
 fits '\b(my day|today.s (plan|work)|this week|what should i (do|work on)|what am i working on|scan (my |the )?(computer|pc|laptop|drive|disk|folders?)|(organi[sz]e|list|find) (all )?(my )?projects|all my projects|daily (plan|log))\b' \
   && tip personal-assistant 'For your day across projects, or to scan and organise your projects, use the personal-assistant agent (it follows the scan-projects skill and asks you to confirm before saving).'
-fits '\b(plan|schedule|timeline|checklist|roadmap|milestones?)\b' \
+# Planner and data-helper only on an explicit ask: "plan" and "calculate"
+# are in many coding prompts, where these helpers do not fit.
+fits '\b((make|write|draft|build|prepare|create) (me )?(a |an |the )?(project |work |weekly |study )?(plan|schedule|timeline|checklist|roadmap)|meeting schedule|milestones)\b' \
   && tip planner 'For a plan, schedule or checklist, use the planner agent.'
-fits '\b(spreadsheet|excel|csv|formula|calculate|average|percent(age)?|pivot)\b' \
+fits '\b(spreadsheet|excel|formulas?|pivot( table)?|vlookup|xlookup)\b' \
   && tip data-helper 'For tables, numbers and formulas, use the data-helper agent.'
 fits '\b(proofread|double-check|check (this|my|it)|before (i )?send)\b' \
   && tip checker 'Before this goes out, have the checker agent give it a second look.'

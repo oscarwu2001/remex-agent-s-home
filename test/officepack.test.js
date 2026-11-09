@@ -275,6 +275,17 @@ test('the coding reminders fire on a finished change or a test run, not on every
     /once/, 'the reviewer is asked for once per change');
 });
 
+test('the reminders stay quiet on background reports, and planner and data-helper wait to be asked', { skip: !hasBash && 'no bash here' }, () => {
+  const claude = tmp();
+  installPack(PACK, claude, ['builder', 'code-reviewer', 'planner', 'data-helper', 'team-reminders']);
+  const out = (prompt) => spawnSync('bash', [path.join(claude, 'hooks', 'agents-home-router.sh')], { input: JSON.stringify({ prompt }), encoding: 'utf8' }).stdout;
+  assert.equal(out('<task-notification>\n<status>completed</status>\nimplement the refactor'), '', 'a helper reporting back is not a request');
+  assert.equal(out('plan how to fix the parser, then calculate the offsets'), '', 'coding words, no office helper');
+  assert.match(out('make me a plan for the launch week'), /planner/);
+  assert.match(out('add a pivot table to the spreadsheet'), /data-helper/);
+  assert.match(out('implement the export feature'), /Done check:.*Scope:.*Checked by:/, 'the builder brief asks for the done check, scope and checker');
+});
+
 test('the reminder hook exits 0 on empty or broken input, and reads past an escaped line break', { skip: !hasBash && 'no bash here' }, () => {
   const claude = tmp();
   installPack(PACK, claude, ['test-runner', 'team-reminders']);

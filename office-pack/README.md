@@ -12,9 +12,9 @@ and never overwrites anything already there.
 | `planner` | plans, schedules, checklists | Vision Clinic |
 | `data-helper` | tables, calculations, formulas | Laboratory |
 | `checker` | a second look before anything goes out | Operating Room |
-| `code-reviewer` | checks a code change before it is called done | Operating Room |
+| `code-reviewer` | checks a finished change from the request and the diff | Operating Room |
 | `test-runner` | runs tests and builds, reports only what matters | Laboratory |
-| `builder` | carries out one scoped code change, on Sonnet | General Ward |
+| `builder` | builds one whole change and checks itself, on Sonnet | General Ward |
 | `project-manager` | where one project stands, its to-do list | General Ward |
 | `personal-assistant` | your day across projects; finds and organises them | General Ward |
 

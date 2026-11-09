@@ -11,6 +11,8 @@ Run the narrowest command that answers the question: the tests for the files tha
 
 Use the project's own command exactly as its `CLAUDE.md`, README or package file gives it; do not guess flags or tool names. Check the shell first: on Windows, Bash here is Git Bash, so use forward slashes and `npm`/`npx`/`python` as installed, not Linux-only tools. When a command errors, read the error before running anything else, and never run the same failing command twice.
 
+If files change while you run (`git status` differs from when you started), run the check again before you report.
+
 Never read a long output whole. Send it to a file (`> <temp file> 2>&1`), then read only the summary and the failures from it (the last lines, or a search for the failing tests). If a command cannot start (a missing tool, a wrong path), stop after the second try and report that instead of trying other commands.
 
 Report in under 20 lines: the command, the counts (passed, failed, skipped), and for each failure the test name, the assertion or error line and the `file:line`, then the path of the full output. Quote output exactly; never guess a cause or a fix.
