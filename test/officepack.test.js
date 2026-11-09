@@ -13,9 +13,9 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'office-pack-'));
 
 test('the pack lists its agents and skills with a one-line summary each', () => {
   const items = listPack(PACK);
-  assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['builder', 'checker', 'code-reviewer', 'data-helper', 'personal-assistant', 'planner', 'project-manager', 'summariser', 'test-runner', 'writer']);
+  assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['builder', 'checker', 'code-reviewer', 'data-helper', 'personal-assistant', 'planner', 'project-manager', 'researcher', 'silent-failure-hunter', 'summariser', 'test-runner', 'ui-reviewer', 'writer']);
   assert.deepEqual(items.filter((i) => i.kind === 'hook').map((i) => i.name), ['team-reminders']);
-  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'handover', 'question-me', 'scan-projects', 'teach-me']);
+  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'find-the-bug', 'handover', 'question-me', 'scan-projects', 'teach-me']);
   for (const i of items) assert.ok(i.summary.length > 10 && i.summary.length <= 120, i.name);
 });
 
@@ -284,6 +284,20 @@ test('the reminders stay quiet on background reports, and planner and data-helpe
   assert.match(out('make me a plan for the launch week'), /planner/);
   assert.match(out('add a pivot table to the spreadsheet'), /data-helper/);
   assert.match(out('implement the export feature'), /Done check:.*Scope:.*Checked by:/, 'the builder brief asks for the done check, scope and checker');
+});
+
+test('data and screen changes bring their own reviewer; bugs and questions get theirs', { skip: !hasBash && 'no bash here' }, () => {
+  const claude = tmp();
+  installPack(PACK, claude, ['code-reviewer', 'silent-failure-hunter', 'ui-reviewer', 'researcher', 'find-the-bug', 'team-reminders']);
+  const fired = (prompt) => {
+    const out = spawnSync('bash', [path.join(claude, 'hooks', 'agents-home-router.sh')], { input: JSON.stringify({ prompt }), encoding: 'utf8' }).stdout;
+    return ['silent-failure-hunter', 'ui-reviewer', 'find-the-bug', 'researcher'].filter((a) => out.includes(a));
+  };
+  assert.deepEqual(fired('implement the CSV export for the results'), ['silent-failure-hunter']);
+  assert.deepEqual(fired('refactor the sidebar layout and its colours'), ['ui-reviewer']);
+  assert.deepEqual(fired('the export crashes with a traceback'), ['find-the-bug']);
+  assert.deepEqual(fired('which library should we use for PDF parsing? find out which version is current'), ['researcher']);
+  assert.deepEqual(fired('save the file as a csv'), [], 'data words alone, with no code change, ask for no reviewer');
 });
 
 test('the reminder hook exits 0 on empty or broken input, and reads past an escaped line break', { skip: !hasBash && 'no bash here' }, () => {

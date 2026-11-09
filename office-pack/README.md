@@ -13,7 +13,10 @@ and never overwrites anything already there.
 | `data-helper` | tables, calculations, formulas | Laboratory |
 | `checker` | a second look before anything goes out | Operating Room |
 | `code-reviewer` | checks a finished change from the request and the diff | Operating Room |
+| `silent-failure-hunter` | finds errors a change would hide, on data paths | Radiology |
+| `ui-reviewer` | checks how a screen looks and reads | Vision Clinic |
 | `test-runner` | runs tests and builds, reports only what matters | Laboratory |
+| `researcher` | answers one question from sources, with citations | Research Office |
 | `builder` | builds one whole change and checks itself, on Sonnet | General Ward |
 | `project-manager` | where one project stands, its to-do list | General Ward |
 | `personal-assistant` | your day across projects; finds and organises them | General Ward |
@@ -24,6 +27,7 @@ and never overwrites anything already there.
 | `teach-me` | short lessons with a recall quiz | `teach` |
 | `handover` | a handover note for a colleague | `handoff` |
 | `break-down` | a project split into small tasks | `to-tickets` |
+| `find-the-bug` | a failing command first, then cause, fix and test | `diagnosing-bugs` |
 | `scan-projects` | finds your projects, groups copies, asks you, saves the list | — |
 
 Every agent and skill follows the same few rules:

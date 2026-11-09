@@ -15,8 +15,12 @@ flowchart LR
   B --> SC[builder checks its own diff<br/>against the reviewer's list]
   SC --> R[code-reviewer, once<br/>sees the request and the diff]
   C --> R
+  SC -. data path .-> SF[silent-failure-hunter<br/>same diff, alongside]
+  SC -. a screen .-> UI[ui-reviewer<br/>same diff, alongside]
   R -- FAIL: every finding at once --> B
-  R -- PASS --> D[Done]
+  SF -- FAIL --> B
+  UI -- FAIL --> B
+  R -- all PASS --> D[Done]
 ```
 
 - **Small edits stay in the main session.** Anything bigger goes to *one*
@@ -36,8 +40,21 @@ flowchart LR
   a missing value), which an ordinary review often passes. All findings
   come in one round, go back to the same builder, and only those are
   re-checked. The last line is `VERDICT: PASS` or `VERDICT: FAIL`.
+- **Two more reviewers, only where they pay off,** on the same diff and at
+  the same time as the code review: `silent-failure-hunter` when a change
+  touches how data is read, converted or saved (in the fuller set-up it
+  failed changes the code review had passed, and nearly all its findings
+  were real), and `ui-reviewer` when a change is about how a screen looks.
+  Their findings go back to the builder in the same round.
+- **A bug with no known cause** goes through the `find-the-bug` skill
+  first: one command that shows it failing before any theory, then the
+  cause, then the fix with a test. A bigger fix goes to the builder, with
+  that test as its Done check.
 - **Tests and builds** go to `test-runner`, which reports in a few lines
   instead of flooding the conversation.
+- **A question that needs looking up** (which library or version, what
+  the docs say) goes to `researcher`, one question each, answered with
+  sources, so the searching stays out of the main conversation.
 
 ## Everything else: one helper when one fits
 
@@ -50,6 +67,9 @@ flowchart LR
 | a second look before it goes out | `checker` |
 | anything bigger than a small code edit | `builder` (Sonnet), one per change |
 | a finished code change | `code-reviewer`, once per change |
+| ... that touches data, or a screen | `silent-failure-hunter` or `ui-reviewer` alongside it |
+| a bug whose cause is not known | the `find-the-bug` skill |
+| a question that needs looking up | `researcher`, one question each |
 | running tests, a build or a linter | `test-runner`: the tests for the change first |
 | where this project stands, its to-do list | `project-manager` |
 | your day across projects, scanning for projects | `personal-assistant` (with `scan-projects`) |
@@ -79,12 +99,14 @@ The fuller set-up adds these. Each needs its own hooks or upkeep, so add
 them yourself if your work calls for it:
 
 - a hook that sends a builder's brief back when it has no done check or scope;
-- a ledger of every review verdict, and track records per agent from it;
+- a ledger of every review verdict, and track records per agent from it
+  (the reviewers' `VERDICT:` lines are there for it);
 - a context cap that asks for a handoff file past a set size;
 - a shared board so two chats in one repository see each other's edits
   (Agent's Home warns when two sessions work in one folder);
-- separate reviewers for data paths and for screens, alongside the code review;
-- several builders trying different approaches on a piece that failed twice.
+- several builders trying different approaches on a piece that failed twice;
+- house design rules, a planning flow (idea, spec, tickets) and a weekly
+  step back.
 
 ## Worth knowing
 

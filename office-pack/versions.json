@@ -30,6 +30,12 @@
     "2caf299ae8e4c22cda37be2b157b53b2",
     "202e39c69461672ce0685ab6b39e7f22"
   ],
+  "agents/researcher.md": [
+    "1f8781a76c330a7a866623b88fe16b6d"
+  ],
+  "agents/silent-failure-hunter.md": [
+    "45d833ec0948ff81be0339fadaf09b36"
+  ],
   "agents/summariser.md": [
     "324bdee7ad0c273482ae412226bb60c7",
     "493ee832e0129b4045e525920076841a"
@@ -39,6 +45,9 @@
     "34007ce717b15a23bdd8d7254f0e213e",
     "ee47c0ac2b3ebcc5f0cb60b819309dbd",
     "bbdf05460150100858464f863d40c6b0"
+  ],
+  "agents/ui-reviewer.md": [
+    "070c94c48403c4d20f70ba36b976951d"
   ],
   "agents/writer.md": [
     "259da62600629eb7443ec9f6b972249b",
@@ -52,11 +61,15 @@
     "c8e04cf9e2f509956ec403a1c9f9bcd7",
     "a74ea42c2319769b6b8456319e5236c0",
     "9a98d9003b1006c15bc880f2368ab7cf",
-    "36a71809e28ed8b8e3a6653bf49148a7"
+    "36a71809e28ed8b8e3a6653bf49148a7",
+    "010c69b6afefb746f71719c8f84e7af4"
   ],
   "skills/break-down/SKILL.md": [
     "8393a4e2ba1ac1605df384631a634fe1",
     "083cdb03a343a4ab9340327a6a496fa2"
+  ],
+  "skills/find-the-bug/SKILL.md": [
+    "6a341a697e3c69267252c32692e68d8f"
   ],
   "skills/handover/SKILL.md": [
     "0ef0815e7eae53cd5904e1f2b464caea",

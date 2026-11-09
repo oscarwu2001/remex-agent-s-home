@@ -24,6 +24,8 @@ fired=""
 fits() { printf '%s' "$prompt" | grep -Eq "$1"; }
 tip() { [ -f "$dir/agents/$1.md" ] && tips="$tips
 - $2" && fired="$fired${fired:+,}$1"; }
+skilltip() { [ -f "$dir/skills/$1/SKILL.md" ] && tips="$tips
+- $2" && fired="$fired${fired:+,}$1"; }
 
 # Coding reminders. "fix" alone is left out on purpose: it is in almost every
 # prompt of a debugging loop, and a review after each small fix costs a
@@ -34,6 +36,18 @@ fits '\b(implement|refactor|bug|feature|endpoint|pull request|merge request|comm
 # changes handed off on the biggest model. One typed builder on Sonnet per
 # change, with a brief that says how to tell it is done, does the same job;
 # splitting a change into many helpers loses what each piece knew.
+# A change that touches data, or a screen, gets a second reviewer alongside,
+# on the same diff: each catches what the code review passes.
+if fits '\b(implement|refactor|bug|feature|endpoint|pull request|merge request|commit|change the code|migrat(e|ion))\b'; then
+  fits '\b(pars(e|er|ing)|loader|load(s|ing)? (the )?(data|file)|import(er)?|export(er)?|convert(er|ing)?|serialis|serializ|csv|json|dataset|pipeline|database|sav(e|es|ing) (the )?(file|data|results?)|calculat(e|ion))' \
+    && tip silent-failure-hunter 'This change touches how data is read, converted or saved: have the silent-failure-hunter agent look at the same diff alongside the code-reviewer, for errors that would stay hidden.'
+  fits '\b(ui|ux|screens?|layout|css|styl(e|es|ing)|restyle|buttons?|colou?rs?|fonts?|dark mode|responsive|landing page|dialog|sidebar|menu)\b' \
+    && tip ui-reviewer 'This change is about how something looks: have the ui-reviewer agent check it (a screenshot if the project can make one) alongside the code-reviewer.'
+fi
+fits '\b(bug|crash(es|ed|ing)?|traceback|stack trace|exception|regression|broken|(doesn.t|does not|stopped|isn.t) work(ing)?)\b' \
+  && skilltip find-the-bug 'If the cause is not known yet, follow the find-the-bug skill: first one command that shows it failing, then the cause, then the fix and a test.'
+fits '\b(research|look (it |this |that )?up|find out (if|whether|how|which)|which (library|package|tool|version|model)|compare (the )?(libraries|packages|tools|options|frameworks)|latest version|official doc(s|umentation))\b' \
+  && tip researcher 'For a question that needs looking up, send it to the researcher agent (one question each), so the searching stays out of this conversation.'
 fits '\b(implement|refactor|migrate|migration|port (it|this|the)|scaffold|build (the|a|an) (feature|page|screen|module|app)|in the background|across (the|all|every) files?)\b' \
   && tip builder 'For anything bigger than a small edit, hand the whole change to one builder agent (not a general-purpose helper, not one helper per piece). Its brief: the goal, Done check: (how to tell it works), Scope: (which files) and Checked by: (code-reviewer). Small edits stay here.'
 fits '\b(run (the )?tests?|tests? (fail|fails|failing|failed|pass)|test suite|unit tests?|pytest|jest|vitest|npm (run )?test|lint(er|ing)?|eslint|ruff|mypy|tsc|(the )?build (fails|failed|failing|is broken|breaks))\b' \
