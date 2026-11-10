@@ -3,18 +3,73 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794304801735,
+ "at": 1794308401742,
  "every": 3600000,
  "sessions": [
   {
    "project": "spine-sim",
    "source": "code",
+   "status": "idle",
+   "lastAt": 1794305461617,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794305461361,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794305461241,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
    "status": "working",
-   "lastAt": 1794304697618.11,
+   "lastAt": 1794308384678.571,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794305460725,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794305817326,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794305463253,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1794306986334.052,
    "agents": []
   }
  ],
  "repos": [
+  {
+   "project": "spine-demo",
+   "branch": "dev-demo",
+   "lastCommit": 1794308383000,
+   "changed": 0
+  },
   {
    "project": "spine-recon",
    "branch": "main",
@@ -40,12 +95,6 @@
    "changed": 0
   },
   {
-   "project": "spine-demo",
-   "branch": "dev-demo",
-   "lastCommit": 1793352892000,
-   "changed": 0
-  },
-  {
    "project": "remex-agent-s-home",
    "branch": "claude/agent-map-monument-valley-8d8nhz",
    "lastCommit": 1793342883000,
@@ -64,14 +113,14 @@
   "gpus": [
    {
     "name": "RTX 2000E Ada Generation",
-    "util": 1,
-    "memUsed": 453,
+    "util": 0,
+    "memUsed": 492,
     "memTotal": 16380,
     "temp": 35
    }
   ],
-  "cpu": 6,
-  "memUsed": 12948,
+  "cpu": 13,
+  "memUsed": 13357,
   "memTotal": 48916
  }
 }
