@@ -3,63 +3,28 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794308401742,
+ "at": 1794358801237,
  "every": 3600000,
  "sessions": [
   {
    "project": "spine-sim",
    "source": "code",
-   "status": "idle",
-   "lastAt": 1794305461617,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794305461361,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794305461241,
+   "status": "working",
+   "lastAt": 1794358695880.6292,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "working",
-   "lastAt": 1794308384678.571,
+   "lastAt": 1794358712002.5298,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
-   "status": "idle",
-   "lastAt": 1794305460725,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794305817326,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794305463253,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794306986334.052,
+   "status": "working",
+   "lastAt": 1794358727919.6067,
    "agents": []
   }
  ],
@@ -67,20 +32,20 @@
   {
    "project": "spine-demo",
    "branch": "dev-demo",
-   "lastCommit": 1794308383000,
+   "lastCommit": 1794309425000,
    "changed": 0
   },
   {
    "project": "spine-recon",
    "branch": "main",
    "lastCommit": 1794295030000,
-   "changed": 0
+   "changed": 2
   },
   {
    "project": "spine-ct",
    "branch": "handle-map-model",
    "lastCommit": 1794295001000,
-   "changed": 0
+   "changed": 1
   },
   {
    "project": "spine-sim",
@@ -114,13 +79,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 492,
+    "memUsed": 580,
     "memTotal": 16380,
-    "temp": 35
+    "temp": 37
    }
   ],
-  "cpu": 13,
-  "memUsed": 13357,
+  "cpu": 17,
+  "memUsed": 14403,
   "memTotal": 48916
  }
 }
