@@ -3,17 +3,9 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794459601749,
+ "at": 1794463201752,
  "every": 3600000,
- "sessions": [
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794456008073.6938,
-   "agents": []
-  }
- ],
+ "sessions": [],
  "repos": [
   {
    "project": "spine-recon",
@@ -71,7 +63,7 @@
    }
   ],
   "cpu": 7,
-  "memUsed": 14271,
+  "memUsed": 14268,
   "memTotal": 48916
  }
 }
