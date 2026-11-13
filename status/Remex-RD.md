@@ -1,17 +1,17 @@
-# Remex-RD · 2026-11-13 18:15
+# Remex-RD · 2026-11-13 18:30
 
 **0 running · 1 session(s) in the last hour**
 
-GPU RTX 2000E Ada Generation 29% · 3.1/16 GB · 57°C · CPU 77% · RAM 17.7/48 GB
+GPU RTX 2000E Ada Generation 20% · 3.1/16 GB · 59°C · CPU 80% · RAM 17.8/48 GB
 
 **Running work**
-- ▶ **real_truth.py** (scripts) · running for 43 min · GPU
+- ▶ **real_truth.py** (scripts) · running for 58 min · GPU
 
 - · spine-sim
 
 | Project | Branch | Last commit | Uncommitted |
 |---|---|---|---|
-| spine-sim | handle-map-model | 47 min ago | – |
+| spine-sim | handle-map-model | 1 h ago | – |
 | spine-recon | main | 33 h ago | – |
 | spine-ct | handle-map-model | 33 h ago | – |
 | spine-demo | dev-demo | 3 d ago | – |
