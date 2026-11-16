@@ -14,7 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith } from './field-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, age as fieldAge } from './field-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1181,7 +1181,7 @@ function renderSessions(s) {
         ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}
         ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
   }).join('');
-  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: Settings → Other computers.</p>';
+  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: <button type="button" class="link-btn inline" data-settings="fleet-h">Settings → Other computers</button>.</p>';
   return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
 }
 
@@ -1286,6 +1286,7 @@ function renderProblems(s) {
   const list = (s.problems || []).map((p) => ({
     label: p.count > 1 ? `${p.label} (×${p.count})` : p.label,
     detail: p.detail,
+    fix: FIXES[p.fix] ? p.fix : null,
   }));
   for (const r of s.watcher.roots || []) {
     if (r.state !== 'ok' && r.state !== 'missing' && r.state !== 'pending') {
@@ -1365,7 +1366,8 @@ function render(force = false) {
   if (chart) $('chart-body').innerHTML = chart;
   $('problems').hidden = problems.length === 0;
   $('problem-list').innerHTML = problems
-    .map((p) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}</li>`)
+    // A fix button keeps its focus across redraws by its data-key.
+    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
@@ -2346,6 +2348,7 @@ async function showUpdateInfo() {
   if (!bridge.updateInfo) {
     $('update-version').textContent = 'The desktop app updates itself from its git clone; this preview cannot.';
     $('update-run').disabled = true;
+    updateSummary = 'Updates come with the desktop app';
     return;
   }
   const info = await bridge.updateInfo();
@@ -2353,6 +2356,8 @@ async function showUpdateInfo() {
     ? `Version ${info.version}, ${info.branch} at ${info.commit}. Pulls the newest code from GitHub, then restarts.`
     : `Version ${info.version}. ${info.reason}`;
   $('update-run').disabled = !info.available;
+  updateSummary = info.available ? `Version ${info.version} · update when you like` : `Version ${info.version} · updates off here`;
+  if (!$('settings').hidden) renderGroupSummaries();
 }
 
 $('update-run').addEventListener('click', async () => {
@@ -2552,8 +2557,7 @@ loadPack();
   button.addEventListener('click', async () => {
     // The browser preview cannot build it: show where it lives instead.
     if (!bridge.buildReport) {
-      setSettings(true);
-      $('report-h').scrollIntoView({ block: 'center' });
+      showInSettings('report-h', 'center');
       return;
     }
     button.disabled = true;
@@ -2563,9 +2567,8 @@ loadPack();
     button.textContent = 'Report';
     if (!res.ok) {
       // Shown where the report's other messages go, not lost.
-      setSettings(true);
       $('report-status').textContent = res.error;
-      $('report-h').scrollIntoView({ block: 'center' });
+      showInSettings('report-h', 'center');
     }
   });
 }
@@ -2642,13 +2645,12 @@ function setFieldSheet(open) {
 }
 function openFieldCheck() {
   setFieldSheet(false);
-  setSettings(true);
-  // With privacy mode on the step only reads: go to the switch that opens it.
+  showInSettings('field-check-h');
+  // With privacy mode on the step only reads: its link to the switch that opens it.
   if (prefs.private) {
-    $('opt-private')?.focus();
+    $('field-goto-switch')?.focus({ preventScroll: true });
     return;
   }
-  $('field-check-h')?.scrollIntoView({ block: 'start' });
   // The first row that needs a choice, else the first one not checked.
   const rows = stepRows(snapshot.field, fieldUi.draft);
   const row = rows.find((r) => r.missing) ?? rows.find((r) => !r.c.confirmed);
@@ -2657,9 +2659,10 @@ function openFieldCheck() {
 async function fieldAction(act) {
   if (act === 'open') setFieldSheet(true);
   else if (act === 'check') openFieldCheck();
-  else if (act === 'settings') {
-    setSettings(true);
-    $('field-settings-h').scrollIntoView({ block: 'start' });
+  else if (act === 'settings') showInSettings('field-settings-h');
+  else if (act === 'privacy-switch') {
+    showInSettings('screen-h');
+    $('opt-private').focus();
   } else if (act === 'change-link') {
     fieldUi.editing = true;
     renderFieldSettings();
@@ -2691,7 +2694,7 @@ async function fieldAction(act) {
     setTimeout(renderFieldSettings, 600);
   }
 }
-for (const id of ['field-body', 'field-settings', 'field-sheet-body']) {
+for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-list']) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('[data-field]');
     if (b && !b.disabled) fieldAction(b.dataset.field);
@@ -2832,16 +2835,95 @@ $('fleet-off').addEventListener('click', async () => {
 });
 setInterval(() => { if (!$('settings').hidden) showFleet(); }, 1000);
 
+// ---- settings groups -----------------------------------------------------------
+//
+// Settings is five groups (index.html), each closed to its name and a
+// one-line summary of what is set; one opens at a time, and the last one
+// opened opens again next time.
+
+const SETTINGS_GROUPS = ['look', 'privacy', 'connect', 'agents', 'app'];
+const GROUP_KEY = 'agents-home-settings-group';
+let updateSummary = 'Updates and the system log';
+
+function rememberedGroup() {
+  try {
+    const g = localStorage.getItem(GROUP_KEY);
+    return SETTINGS_GROUPS.includes(g) ? g : null;
+  } catch {
+    return null; // storage blocked: Settings just opens with every group closed
+  }
+}
+// name: the group to open, or null for all closed.
+function openGroup(name, { remember = true } = {}) {
+  for (const g of SETTINGS_GROUPS) {
+    const open = g === name;
+    $(`group-${g}-body`).hidden = !open;
+    $(`group-${g}-btn`).setAttribute('aria-expanded', String(open));
+  }
+  if (!remember) return;
+  try {
+    localStorage.setItem(GROUP_KEY, name ?? '');
+  } catch {
+    // Storage blocked or full: the group is not remembered for next time,
+    // which changes nothing else.
+  }
+}
+for (const g of SETTINGS_GROUPS) {
+  $(`group-${g}-btn`).addEventListener('click', (e) => {
+    openGroup(e.currentTarget.getAttribute('aria-expanded') === 'true' ? null : g);
+  });
+}
+// Settings opened at the group holding an element, scrolled to it.
+function showInSettings(id, block = 'start') {
+  if ($('settings').hidden) setSettings(true);
+  const group = $(id)?.closest('[data-group]')?.dataset.group;
+  if (group) openGroup(group);
+  $(id)?.scrollIntoView({ block });
+}
+// Any button with data-settings="<id>" (outside the field section's own
+// actions) is a link into Settings.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-settings]');
+  if (b && !b.disabled) showInSettings(b.dataset.settings);
+});
+
+// What each closed group says. Only settings and states, never a file,
+// sheet or folder name, so privacy mode changes nothing here.
+function groupSummaries() {
+  const theme = document.querySelector(`input[name="theme"][value="${CSS.escape(prefs.theme)}"]`)?.parentElement?.textContent.trim() || prefs.theme;
+  const time = prefs.time === 'auto' ? 'follows your clock' : ($('opt-time').selectedOptions[0]?.textContent.toLowerCase() ?? prefs.time);
+  const wait = Number(prefs.waitMin ?? 5);
+  const f = snapshot?.field;
+  const field = !f?.enabled ? 'Field feedback off'
+    : f.demo ? 'Field feedback on · sample answers'
+      : !f.sheetUrl || !f.keyName ? 'Field feedback on · not set up yet'
+        : f.error ? 'Field feedback on · the last update failed'
+          : f.fetchedAt ? `Field feedback on · updated ${fieldAge(f.fetchedAt)}` : 'Field feedback on · not updated yet';
+  return {
+    look: `${theme} · ${time}`,
+    privacy: `Privacy ${prefs.private ? 'on' : 'off'} · ${wait ? `tell me after ${wait} min waiting` : 'no waiting alerts'}`,
+    connect: `${field} · ${snapshot?.fleet?.on ? 'sharing with other computers' : 'other computers off'}`,
+    agents: `Report for the ${$('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? 'last 28 days'}`,
+    app: updateSummary,
+  };
+}
+function renderGroupSummaries() {
+  for (const [g, words] of Object.entries(groupSummaries())) $(`group-${g}-summary`).textContent = words;
+}
+setInterval(() => { if (!$('settings').hidden) renderGroupSummaries(); }, 1000);
+
 // ---- settings panel ------------------------------------------------------------
 
 function setSettings(open) {
   $('settings').hidden = !open;
   $('settings-open').setAttribute('aria-expanded', String(open));
   if (open) {
+    openGroup(rememberedGroup(), { remember: false });
     showUpdateInfo();
     showLogStatus();
     showFleet();
     renderFieldSettings();
+    renderGroupSummaries();
     $('settings-close').focus();
   }
   else {

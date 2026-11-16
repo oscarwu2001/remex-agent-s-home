@@ -481,8 +481,30 @@ details > summary h2 { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .settings, .live-map, .field-sheet { animation: none; } }
 .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-2); }
 .settings-head h2 { margin: 0; font: 400 22px var(--font-display); letter-spacing: -0.015em; color: var(--ink); }
+/* Five groups, each closed to its name and a one-line summary of what is
+   set; one opens at a time. The sections inside keep their own hairlines. */
+.settings-cat { border-top: 1px solid var(--line); }
+.settings-cat:last-of-type { border-bottom: 1px solid var(--line); }
+.group-h { margin: 0; font: inherit; }
+.group-toggle {
+  display: flex; align-items: flex-start; gap: var(--s-2); width: 100%; min-height: 44px;
+  padding: var(--s-3) 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer;
+  font: 400 15px var(--font); border-radius: var(--r-sm);
+}
+.group-toggle:hover .group-name { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.group-chevron { margin-top: 3px; color: var(--ink-muted); transition: transform 0.2s; }
+.group-toggle[aria-expanded="true"] .group-chevron { transform: rotate(90deg); }
+.group-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.group-name { letter-spacing: var(--track-tight); }
+.group-summary { font-size: 12px; color: var(--ink-muted); overflow-wrap: anywhere; }
+.group-toggle[aria-expanded="true"] .group-summary { display: none; }
+.group-body { padding: 0 0 var(--s-3) calc(15px + var(--s-2)); }
+/* A link into Settings scrolls its target to the top with room above it. */
+.settings h4, .settings h5, .group-h { scroll-margin-top: var(--s-4); }
+@media (prefers-reduced-motion: reduce) { .group-chevron { transition: none; } }
 .settings-group { padding: var(--s-4) 0; border-top: 1px solid var(--line); }
-.settings-group h3 { margin: 0 0 var(--s-2); font: 400 15px var(--font); letter-spacing: var(--track-tight); color: var(--ink); }
+.group-body > .settings-group:first-child { border-top: 0; padding-top: var(--s-1); }
+.settings-group h4 { margin: 0 0 var(--s-2); font: 400 15px var(--font); letter-spacing: var(--track-tight); color: var(--ink); }
 
 /* ---- time of day ----------------------------------------------------------- */
 
@@ -738,6 +760,8 @@ body.no-select, body.no-select * { user-select: none; }
 /* ---- projects ------------------------------------------------------------- */
 
 .link-btn.small { min-height: 32px; font-size: 12px; color: var(--ink-muted); }
+/* A link inside a sentence, and a fix after a Needs attention line. */
+.link-btn.inline, #problem-list .link-btn, .field-check-step .hint .link-btn { min-height: 0; padding: 0; font-size: inherit; }
 .proj-section .title-row h2 { margin: 0; }
 .proj-git { display: block; font-size: 11.5px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .proj .proj-name { min-width: 0; }
@@ -771,7 +795,7 @@ body.no-select, body.no-select * { user-select: none; }
 .field-robot { color: var(--ink); overflow-wrap: anywhere; }
 .field-check-step { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
 .field-check-step .hint { margin: 0 0 var(--s-2); }
-.field-check-step h4 { margin: 0 0 var(--s-1); font: 400 14px var(--font); color: var(--ink); }
+.field-check-step h5 { margin: 0 0 var(--s-1); font: 400 14px var(--font); color: var(--ink); }
 .field-cols { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
 .field-col { padding: var(--s-2) 0; border-top: 1px solid var(--line); }
 .field-col:first-child { border-top: 0; }

@@ -198,3 +198,9 @@ test('no flags is one calm line; no flags computed is no list at all', async () 
   assert.match(fieldSheetHtml(calm), /Nothing to flag/);
   assert.equal(flagsHtml(field(F.summarise(rows))), '');
 });
+
+test('the read-only step links to the privacy switch that opens it', async () => {
+  const { fieldColumnsHtml, FIXES } = await view();
+  assert.match(fieldColumnsHtml(field(F.summarise(rows)), { privacy: true }), /<button type="button" class="link-btn" id="field-goto-switch" data-field="privacy-switch">Go to the switch<\/button>/);
+  assert.deepEqual(Object.keys(FIXES), ['check', 'settings', 'refresh']);
+});

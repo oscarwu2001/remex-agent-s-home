@@ -1033,21 +1033,23 @@ function columnsReply(summary) {
 function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
   if (!enabled) return [];
   const out = [];
-  const add = (label, detail = '') => out.push({ label: `Field feedback: ${label}`, detail });
+  // fix: what the board links the line to ('check' the columns, open the
+  // 'settings', or 'refresh' now), as the flags do.
+  const add = (label, detail = '', fix = null) => out.push({ label: `Field feedback: ${label}`, detail, ...(fix ? { fix } : {}) });
   const err = cache?.lastError;
-  if (err) add(err.message, err.detail ?? '');
-  if (keyError && keyError !== err?.message) add(keyError);
-  if (summaryError) add(summaryError);
+  if (err) add(err.message, err.detail ?? '', err.kind !== 'share' && TRANSIENT.has(err.kind) ? 'refresh' : 'settings');
+  if (keyError && keyError !== err?.message) add(keyError, '', 'settings');
+  if (summaryError) add(summaryError, '', 'refresh');
   if (summary) {
     const unread = unreadableText(summary);
     if (unread) add(unread);
     const n = summary.newColumns?.length ?? 0;
-    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Field feedback → Check the columns)`);
+    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Field feedback → Check the columns)`, '', 'check');
     // Privacy mode keeps the step read-only, so this is the reminder.
     const unsure = summary.needsChoice ?? 0;
-    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`);
+    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`, '', 'check');
     const doubt = summary.doubtful?.length ?? 0;
-    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`);
+    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`, '', 'check');
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);

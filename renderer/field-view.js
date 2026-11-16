@@ -112,7 +112,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
     ? `answers from ${esc(boardDay(Date.parse(s.oldest)))} to ${esc(boardTime(Date.parse(s.newest), now))}`
     : 'no answer has a date';
   const head = `<p class="field-line">${f.demo ? '<span class="tag">Sample</span>' : ''}${plural(s.responses, 'response')} · ${s.responses ? range : 'none yet'}${f.fetchedAt ? ` · updated ${esc(age(f.fetchedAt, now))}` : ''}${!privacy && f.tab ? ` · tab “${esc(f.tab)}”` : ''}</p>`;
-  const hint = privacy ? `<p class="hint">Question wording, comments and chosen answers are hidden while ${PRIVACY_SWITCH} is on (Settings → On screen).</p>` : '';
+  const hint = privacy ? `<p class="hint">Question wording, comments and chosen answers are hidden while ${PRIVACY_SWITCH} is on (Settings → Privacy &amp; alerts).</p>` : '';
 
   const questions = s.questions.length
     ? `<ol class="field-qs">${s.questions.map((q) => {
@@ -232,7 +232,7 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
   const nameOf = (c) => (privacy ? (c.role === 'timestamp' ? 'Timestamp' : `Question ${qNo.get(c.index)}`) : c.header);
   const guess = (r) => (r.missing && r.c.needsChoice && r.c.suggested ? `<p class="muted">The app’s guess: ${esc(guessWords(r.c))}.</p>` : '');
   const left = missing ? `${plural(missing, 'column')} still ${missing === 1 ? 'needs' : 'need'} a choice.` : '';
-  const head = '<h4 id="field-check-h">Check the columns</h4>';
+  const head = '<h5 id="field-check-h">Check the columns</h5>';
 
   if (privacy) {
     const items = rows.map((r) => {
@@ -243,7 +243,8 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
     }).join('');
     return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
     <p class="hint">The app guessed what each column is.${left ? ` ${left}` : ''}</p>
-    <p class="hint">Turn off ${PRIVACY_SWITCH} (Settings → On screen) to check the columns.</p>
+    <p class="hint">Turn off ${PRIVACY_SWITCH} (Settings → Privacy &amp; alerts) to check the columns.
+      <button type="button" class="link-btn" id="field-goto-switch" data-field="privacy-switch">Go to the switch</button></p>
     <ol class="field-cols">${items}</ol>${reply}
   </section>`;
   }
@@ -332,7 +333,8 @@ const FLAG_GLYPHS = {
   setup: '<path d="M12 4.5 20.5 19h-17zM12 10v4M12 16.5v.5"/>', // a warning sign
 };
 const flagGlyph = (kind) => `<svg class="ico flag-glyph flag-${kind}" viewBox="0 0 24 24" aria-hidden="true">${FLAG_GLYPHS[kind] ?? FLAG_GLYPHS.setup}</svg>`;
-const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
+// What a flag or a Needs attention line links to (app.js fieldAction).
+export const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
 const SETUP_WORDS = {
   choose: (n) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice`,
   doubt: (n) => `${plural(n, 'checked column')} now ${n === 1 ? 'looks' : 'look'} like emails or phone numbers`,

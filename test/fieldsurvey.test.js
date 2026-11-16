@@ -1024,3 +1024,12 @@ test('an empty or never-read cache, or a read with nothing new, raises no flags 
   // The first read: no "since" at all.
   assert.deepEqual(F.fieldFlags({ summary: F.summarise(rows) }), []);
 });
+
+test('Needs attention lines for field feedback carry the fix the board links to', () => {
+  const s = F.summarise(form(['How satisfied are you overall?'], [[6], [7], [5]]));
+  const fixes = (o) => F.fieldProblems({ enabled: true, ...o }).map((p) => p.fix ?? null);
+  assert.deepEqual(fixes({ summary: s }), ['check']);
+  assert.deepEqual(fixes({ cache: { lastError: { kind: 'share', message: 'Share the sheet…' } } }), ['settings']);
+  assert.deepEqual(fixes({ cache: { lastError: { kind: 'network', message: 'No network' } } }), ['refresh']);
+  assert.deepEqual(fixes({ keyError: 'The key file…' }), ['settings']);
+});
