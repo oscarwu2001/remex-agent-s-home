@@ -34,7 +34,7 @@ class FieldSurveyError extends Error {
 // Failures that may pass by themselves, so the schedule tries again after
 // RETRY_MS. Every other refusal waits for the next slot, a new link or key,
 // or Refresh now: trying again sooner would only fail again.
-const TRANSIENT = new Set(['network', 'busy', 'google', 'answer']);
+const TRANSIENT = new Set(['network', 'busy', 'google', 'answer', 'keyfile']);
 
 // ---- the sheet link -------------------------------------------------------------
 
@@ -96,6 +96,14 @@ function readKey(text) {
   }
   if (privateKey.asymmetricKeyType !== 'rsa') throw new TypeError('The key file’s private key is not an RSA key, which Google’s service accounts use.');
   return { clientEmail: k.client_email, keyId: typeof k.private_key_id === 'string' ? k.private_key_id : undefined, privateKey };
+}
+
+// The key file could not be read -> why, and whether waiting helps: a file
+// that is gone waits for the user; a busy or locked one (a synced drive, a
+// virus scan) passes.
+function keyFileError(err) {
+  if (err?.code === 'ENOENT') return new FieldSurveyError('key', 'The key file is no longer where it was chosen; choose it again in Settings.');
+  return new FieldSurveyError('keyfile', `The key file could not be read just now (${err?.code || err?.message}); it tries again in half an hour.`);
 }
 
 const b64 = (s) => Buffer.from(s).toString('base64url');
@@ -167,7 +175,7 @@ function pickTab(meta, gid) {
 
 const API_OFF = /has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i;
 const RATE = /RATE_LIMIT|quota|rateLimitExceeded|userRateLimit/i;
-const BUSY = () => new FieldSurveyError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now later.');
+const BUSY = () => new FieldSurveyError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.');
 const DOWN = (status) => new FieldSurveyError('google', `Google's service had a problem (${status}); it tries again in half an hour.`);
 
 // Google's refusal -> a sentence with what to try.
@@ -192,7 +200,7 @@ function refusal(step, status, body, key) {
   if (status === 403 && RATE.test(said)) return BUSY();
   // The address itself is the detail: it shows only with privacy off.
   if (status === 403) {
-    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (shown in Settings) as Viewer, then press Refresh now.', key.clientEmail);
+    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (copy it in Settings → Field feedback) as Viewer, then press Refresh now.', key.clientEmail);
   }
   if (status === 404) return new FieldSurveyError('missing', 'No sheet was found at this link. Open it in your browser to check it, then paste it again in Settings → Field feedback.');
   if (status === 401) return new FieldSurveyError('token', 'Google did not accept the sign-in for the sheet (401); press Refresh now.');
@@ -284,7 +292,12 @@ const PERSON = "(?:your|my|full|first|last|given|family|sur|respondent'?s?|user|
 const ID_LABEL = new RegExp(`^(?:${PERSON} )?(?:name|e-?mail(?: address)?|phone(?: number| no)?|mobile(?: number| phone| no)?|cell ?phone|telephone(?: number)?|tel|contact(?: details| info| number)?|address|user ?name|line id|employee (?:id|number|no)|id number)$`, 'i');
 const PERSON_ROLE = /^(?:surgeon|doctor|physician|nurse|respondent|reporter|interviewer|filled in by|submitted by)$/i;
 const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|number|#)|medical records?)\b|\b(?:case|chart) ?#/i;
-const ID_CJK = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機|手机|聯絡|联络|聯繫|联系|地址|身分證|身份证|工號|工号|員工編號|员工编号|填寫人|填写人|填表人|醫師|医师|醫生|医生|護理師|护理师|病歷|病历|病人|病患|患者|個案|个案|病例/;
+const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
+const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者)(?:姓名)?$/;
+const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
+// A header that speaks of a person: only then can name-shaped answers be
+// names. Without it, "Easy Setup" or "方便" are just short answers.
+const NAME_HINT = /\b(?:who|whom|names?|by|persons?|people|staff|respondents?|reporters?|surgeons?|doctors?|physicians?|nurses?|operators?|testers?|interviewers?|contact)\b|填寫|填写|填表|填答|姓名|名字|名前|氏名|醫師|医师|醫生|医生|護理|护理|人員|人员|操作者|受訪|受访/i;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
@@ -380,12 +393,17 @@ const onScale = (n) => Number.isInteger(n) && n >= 0 && n <= 10;
 // -> "Email".
 const headerLabel = (header) => header.replace(/[(（【[][^)）】\]]*[)）】\]]/g, ' ').replace(/[?？:：*.,，、!！。]/g, ' ').replace(/\s+/g, ' ').trim();
 
+// 'label': a short label that is surely personal ("Email address", "Patient
+// ID", "電話"); 'word': a title with a patient or case word alone ("Patient
+// positioning issues"), which may be a question about patients; else null.
 function idByHeader(header) {
   const label = headerLabel(header);
-  if (!label) return false;
-  if (ID_LABEL.test(label) || PERSON_ROLE.test(label)) return true;
-  if (CASE_ID.test(label) && label.split(' ').length <= 4) return true;
-  return ID_CJK.test(label) && label.length <= 10;
+  if (!label) return null;
+  if (ID_LABEL.test(label) || PERSON_ROLE.test(label) || ID_CJK_ROLE.test(label)) return 'label';
+  if (ID_CJK_DATA.test(label) && label.length <= 10) return 'label';
+  const caseWord = (CASE_ID.test(label) && label.split(' ').length <= 4) || (ID_CJK_CASE.test(label) && label.length <= 10);
+  if (caseWord) return ID_WORD.test(label) ? 'label' : 'word';
+  return null;
 }
 
 // An email address, or a phone number (eight digits or more, not a date).
@@ -395,11 +413,12 @@ function looksPersonal(v) {
   return typeof v === 'string' && PHONE.test(s) && (s.match(/\d/g) ?? []).length >= 8 && !Number.isFinite(dateOf(s));
 }
 
-// "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape.
+// "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape. Only ever
+// asked under a header that speaks of a person (NAME_HINT).
 function looksLikeName(v) {
   if (typeof v !== 'string') return false;
   const s = v.trim();
-  if (/^\p{Script=Han}{2,4}$/u.test(s)) return SURNAMES.includes(s[0]);
+  if (/^\p{Script=Han}{2,3}$/u.test(s)) return SURNAMES.includes(s[0]);
   const words = s.split(/\s+/);
   return words.length >= 2 && words.length <= 3 && words.every((w) => NAME_WORD.test(w));
 }
@@ -423,64 +442,68 @@ function guessedScale(ints) {
   return { low: ints.includes(0) ? 0 : 1, high: [5, 7, 10].find((h) => h >= max) ?? 10 };
 }
 
-// The suggested role of one column, from its header and its answers.
+// The suggested role of one column, from its header and its answers, and
+// how sure it is. 'low': a guessed scale, names by their shape, a title word
+// alone, a 0 with no scale: the user must choose before the columns save,
+// and a low-confidence identifying column's answers stay in the cache
+// (kept off the board) until then.
+const HIGH = 'high';
+const LOW = 'low';
 function suggest(header, values, untitled) {
-  if (!values.length) return { role: 'ignore', reason: 'no answers' };
+  if (!values.length) return { role: 'ignore', reason: 'no answers', confidence: HIGH };
   const ints = values.map(intOf);
   // A score: 80% whole numbers on a small scale; or, on a small form where
   // one "n/a" weighs a lot, at least half, the rest short placeholders.
   const scored = share(ints, onScale);
   const scoreLike = scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => onScale(ints[k]) || text(v).length <= 20));
-  const byHeader = !untitled && idByHeader(header);
+  const byHeader = untitled ? null : idByHeader(header);
   // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
-  if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header' };
-  if (share(values, looksPersonal) >= 0.5) return { role: 'identifying', reason: 'answers' };
+  if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header', confidence: byHeader === 'label' ? HIGH : LOW };
+  if (share(values, looksPersonal) >= 0.5) return { role: 'identifying', reason: 'answers', confidence: HIGH };
   const answers = values.map(text);
   const counts = new Map();
   for (const a of answers) counts.set(a, (counts.get(a) ?? 0) + 1);
-  // Names are mostly different from one answer to the next; choices repeat.
-  if (share(values, looksLikeName) >= 0.7 && (values.length < 4 || counts.size >= values.length / 2)) return { role: 'identifying', reason: 'answers' };
+  // Names are mostly different from one answer to the next; Title Case
+  // answers that repeat are choices.
+  if (NAME_HINT.test(header) && share(values, looksLikeName) >= 0.7 && (values.length < 4 || counts.size >= values.length / 2)) {
+    return { role: 'identifying', reason: 'names', confidence: LOW };
+  }
   if (scoreLike) {
     const stated = statedScale(header);
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
-    if (COUNT_HEADER.test(header) || (!stated && ints.includes(0))) return { role: 'number', reason: 'count' };
-    if (stated) return { role: 'score', ...stated, scaleFrom: 'header' };
-    return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers' };
+    if (COUNT_HEADER.test(header)) return { role: 'number', reason: 'count', confidence: HIGH };
+    if (!stated && ints.includes(0)) return { role: 'number', reason: 'count', confidence: LOW };
+    if (stated) return { role: 'score', ...stated, scaleFrom: 'header', confidence: HIGH };
+    return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers', confidence: LOW };
   }
   const dayFirst = dayFirstColumn(values);
-  if (share(values, (v) => Number.isFinite(dateOf(v, { dayFirst }))) >= 0.8) return { role: 'ignore', reason: 'dates' };
-  if (share(values, (v) => Number.isFinite(numberOf(v))) >= 0.8) return { role: 'number' };
+  if (share(values, (v) => Number.isFinite(dateOf(v, { dayFirst }))) >= 0.8) return { role: 'ignore', reason: 'dates', confidence: HIGH };
+  if (share(values, (v) => Number.isFinite(numberOf(v))) >= 0.8) return { role: 'number', confidence: HIGH };
   // A few answers, repeated, are a choice; but one answer of more than a few
   // words, given once, makes it free text ("No", "No", "The holder slips").
   const wordy = answers.some((a) => counts.get(a) === 1 && (a.split(/\s+/).length > 3 || a.length > 20));
-  if (answers.length >= 5 && counts.size <= 6 && counts.size <= answers.length / 2 && answers.every((a) => a.length <= 60) && !wordy) return { role: 'choice' };
-  return { role: 'comment' };
+  if (answers.length >= 5 && counts.size <= 6 && counts.size <= answers.length / 2 && answers.every((a) => a.length <= 60) && !wordy) return { role: 'choice', confidence: HIGH };
+  return { role: 'comment', confidence: HIGH };
 }
 
-// The confirmed role of each column: by its header at the same place first,
-// then by its header anywhere (the nearest place), so a column the form
-// moved keeps its role and a new one has none.
+// The confirmed role of each column, by its header: a column the form moved
+// keeps its role and a new one has none. Columns that share a title are
+// matched in their order among themselves, so one added before them does
+// not swap their roles.
 function matchRoles(headers, roles) {
   const list = Array.isArray(roles) ? roles : [];
-  const used = new Set();
   const pick = headers.map(() => null);
-  headers.forEach((h, i) => {
-    const k = list.findIndex((r, j) => !used.has(j) && r.header === h && r.index === i);
-    if (k >= 0) {
-      used.add(k);
-      pick[i] = list[k];
-    }
+  const byTitle = new Map();
+  list.forEach((r) => {
+    if (!byTitle.has(r.header)) byTitle.set(r.header, []);
+    byTitle.get(r.header).push(r);
   });
+  for (const saved of byTitle.values()) saved.sort((a, b) => a.index - b.index);
+  const seen = new Map();
   headers.forEach((h, i) => {
-    if (pick[i]) return;
-    let best = -1;
-    list.forEach((r, j) => {
-      if (!used.has(j) && r.header === h && (best < 0 || Math.abs(r.index - i) < Math.abs(list[best].index - i))) best = j;
-    });
-    if (best >= 0) {
-      used.add(best);
-      pick[i] = list[best];
-    }
+    const k = seen.get(h) ?? 0;
+    seen.set(h, k + 1);
+    pick[i] = byTitle.get(h)?.[k] ?? null;
   });
   return pick;
 }
@@ -502,6 +525,14 @@ function checkRoles(list) {
     }
     return out;
   });
+}
+
+// The roles from Settings against the columns shown: how many columns have
+// none (a low-confidence row the user has not chosen yet). Save is refused
+// while any is missing.
+function checkSubmission(summary, roles) {
+  const given = new Set((Array.isArray(roles) ? roles : []).map((r) => `${r.index}\u0000${r.header}`));
+  return { missing: (summary?.columns ?? []).filter((c) => !given.has(`${c.index}\u0000${c.header}`)).length };
 }
 
 function findTimestamp(headers, columns, timeZone, candidate) {
@@ -548,7 +579,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
     timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
-    checked: false, newColumns: [], columns: [],
+    checked: false, needsChoice: 0, newColumns: [], columns: [],
     questions: [], numbers: [], overall: null, scalesGuessed: 0, comments: [], commentCount: 0, choices: [],
     identifying: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
@@ -569,12 +600,14 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   // A hidden column's answers are not here to look at.
   const columns = headers.map((_, i) => (hidden.has(i) ? [] : data.map((r) => r[i]).filter((v) => !isEmpty(v))));
   const saved = matchRoles(headers, roles);
-  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden' } : suggest(h, columns[i], untitled[i])));
+  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden', confidence: HIGH } : suggest(h, columns[i], untitled[i])));
+  const titles = new Map();
+  for (const h of headers) titles.set(h, (titles.get(h) ?? 0) + 1);
 
   // When each answer came in: the column the user named, or the one found.
   let tsCol = saved.findIndex((r) => r?.role === 'timestamp');
   const found = findTimestamp(headers, columns, zone, (k) => !hidden.has(k) && (!saved[k] || saved[k].role === 'timestamp') && suggested[k].reason !== 'header');
-  if (found >= 0) suggested[found] = { role: 'timestamp' };
+  if (found >= 0) suggested[found] = { role: 'timestamp', confidence: HIGH };
   if (tsCol < 0 && found >= 0 && !saved[found]) tsCol = found;
   const times = data.map(() => null);
   if (tsCol >= 0) {
@@ -604,7 +637,9 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     if (role === 'timestamp' && i !== tsCol) role = 'ignore'; // one timestamp only
     const col = {
       index: i, header, role, confirmed: Boolean(conf), isNew: roles.length > 0 && !conf, suggested: sug, answers: columns[i].length,
-      ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}),
+      // Not sure enough to save as it stands: the user chooses.
+      needsChoice: !conf && sug.confidence === LOW,
+      ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}), ...(titles.get(header) > 1 ? { repeated: true } : {}),
     };
     if (role === 'score') {
       const scale = conf?.role === 'score' ? { low: conf.low, high: conf.high, scaleFrom: 'confirmed' }
@@ -644,6 +679,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     }
   });
   out.checked = headers.length > 0 && saved.every(Boolean);
+  out.needsChoice = out.columns.filter((c) => c.needsChoice).length;
 
   // One scale for all: a plain average. Several: each answer put on 0–10.
   if (scored.length) {
@@ -740,9 +776,14 @@ function planFetch({ now, settings, cache, busy = false }) {
 // A good read -> the cache to keep. Identifying columns' answers are not
 // kept. "New since" counts answers after the newest one of the last read
 // that brought something new, so pressing Refresh twice does not reset it.
+// The columns whose answers the cache drops: identifying ones the user
+// confirmed or the app is sure of. A low-confidence guess keeps its answers
+// (the board leaves them out) until the user chooses.
+const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying' && (c.confirmed || c.suggested.confidence === HIGH)).map((c) => c.index);
+
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const first = summarise(got.rows, { timeZone: got.timeZone, roles });
-  const hide = first.columns.filter((c) => c.role === 'identifying').map((c) => c.index);
+  const hide = toRedact(first);
   const same = sameSheet(prev, link) && Array.isArray(prev.rows);
   const before = same ? prev.newest ?? null : null;
   const changed = same && first.newest !== before;
@@ -775,7 +816,7 @@ function afterFailure(prev, err, { now, started, link }) {
 function reroleCache(cache, roles) {
   if (!cache?.rows) return cache;
   const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [] });
-  const hide = [...new Set([...(cache.redacted ?? []), ...s.columns.filter((c) => c.role === 'identifying').map((c) => c.index)])].sort((a, b) => a - b);
+  const hide = [...new Set([...(cache.redacted ?? []), ...toRedact(s)])].sort((a, b) => a - b);
   return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide };
 }
 
@@ -805,6 +846,9 @@ function validCache(raw, link) {
     && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
     && !(raw.rows && raw.fetchedAt == null);
   if (!ok) return bad;
+  // No usable link: nothing to compare with, and the next read says what is
+  // wrong with the link; the cache is set aside without a word of its own.
+  if (!link) return { cache: null, problem: null };
   if (!sameSheet(raw, link)) return { cache: null, problem: 'The saved field feedback was for another sheet; it was set aside and this sheet is read again.' };
   return { cache: raw, problem: null };
 }
@@ -819,12 +863,22 @@ function changeSettings(current, change) {
   if (change && 'sheetUrl' in change) {
     const url = String(change.sheetUrl ?? '').trim();
     if (url) {
+      let link;
       try {
-        parseSheetLink(url);
+        link = parseSheetLink(url);
       } catch (err) {
         return { error: err.message };
       }
-      next.sheetUrl = url;
+      let saved = null;
+      try {
+        saved = next.sheetUrl ? parseSheetLink(next.sheetUrl) : null;
+      } catch {
+        saved = null; // a saved link that no longer reads is simply replaced
+      }
+      // The same sheet and tab (a sharing link of it, or one naming no tab):
+      // the saved link, which names the tab, stays, and so do the columns.
+      const same = saved && saved.spreadsheetId === link.spreadsheetId && (link.gid == null || link.gid === saved.gid);
+      if (!same) next.sheetUrl = url;
     }
   }
   if (change && 'columns' in change) {
@@ -835,8 +889,9 @@ function changeSettings(current, change) {
     }
   }
   const sheetChanged = next.sheetUrl !== (current?.sheetUrl ?? '');
-  // Another sheet is another form: its columns are checked afresh.
-  if (sheetChanged && !(change && 'columns' in change)) next.columns = [];
+  // Another sheet is another form: its columns are checked afresh. Turned
+  // off, nothing is kept, the question titles in the roles included.
+  if ((sheetChanged || (current?.enabled && !next.enabled)) && !(change && 'columns' in change)) next.columns = [];
   return { settings: next, sheetChanged };
 }
 
@@ -865,6 +920,6 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  summarise, unreadableText, checkRoles, redactRows, nextRun, dateOf,
+  summarise, unreadableText, checkRoles, checkSubmission, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };

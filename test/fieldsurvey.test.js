@@ -189,7 +189,7 @@ test("Google's refusals become plain sentences with what to try", async () => {
   };
   const share = await fail({ meta: [403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED' } }] });
   // The reader address is the detail, shown only with privacy off.
-  assert.equal(share.message, 'Share the sheet with the key’s reader address (shown in Settings) as Viewer, then press Refresh now.');
+  assert.equal(share.message, 'Share the sheet with the key’s reader address (copy it in Settings → Field feedback) as Viewer, then press Refresh now.');
   assert.equal(share.detail, ROBOT);
   assert.equal(share.kind, 'share');
   const api = await fail({ meta: [403, { error: { code: 403, message: 'Google Sheets API has not been used in project 0 before or it is disabled.', status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED' }] } }] });
@@ -612,7 +612,8 @@ test('Settings changes: an empty link keeps the saved one; a bad link or roles a
   // Another sheet is another form: its columns are checked afresh.
   const checked = { ...now, columns: [{ header: 'Q', index: 1, role: 'comment' }] };
   assert.deepEqual(F.changeSettings(checked, { sheetUrl: other }).settings.columns, []);
-  assert.deepEqual(F.changeSettings(checked, { enabled: false }).settings.columns, checked.columns);
+  // Turned off, nothing is kept: the checked columns go too.
+  assert.deepEqual(F.changeSettings(checked, { enabled: false }).settings.columns, []);
 });
 
 test('an unknown time zone and day-or-month dates are said under Needs attention', () => {
@@ -663,6 +664,108 @@ test("Google's busy and down answers at sign-in, a quota 403 and a body that tim
   const slow = await run([tok, meta, res(200, null, true)]);
   assert.deepEqual([slow.kind, /did not answer in time/.test(slow.message)], ['network', true]);
   assert.equal((await run([tok, res(403, { error: { message: 'Quota exceeded for quota metric', status: 'PERMISSION_DENIED', details: [{ reason: 'RATE_LIMIT_EXCEEDED' }] } })])).kind, 'busy');
+});
+
+// ---- how sure a suggestion is ------------------------------------------------------------------
+
+const col = (s, header) => s.columns.find((c) => c.header === header);
+
+test('a guessed scale is a low-confidence suggestion that needs the user\'s choice; a stated one does not', () => {
+  const s = F.summarise(form(['How satisfied are you overall?', 'Ease (1-5)'], [[6], [7], [5]].map((v) => [...v, 4])));
+  assert.deepEqual([col(s, 'How satisfied are you overall?').suggested.confidence, col(s, 'How satisfied are you overall?').needsChoice], ['low', true]);
+  assert.deepEqual([col(s, 'Ease (1-5)').suggested.confidence, col(s, 'Ease (1-5)').needsChoice], ['high', false]);
+  assert.equal(col(s, 'Timestamp').suggested.confidence, 'high');
+  assert.equal(s.needsChoice, 1);
+  // Saving every column but the unchosen one leaves it missing: Save is refused.
+  const roles = s.columns.filter((c) => !c.needsChoice).map((c) => ({ header: c.header, index: c.index, role: c.role, ...(c.role === 'score' ? { low: c.low, high: c.high } : {}) }));
+  assert.deepEqual(F.checkSubmission(s, roles), { missing: 1 });
+  // Once chosen, all are there, and only then is the scale confirmed.
+  const chosen = [...roles, { header: 'How satisfied are you overall?', index: 1, role: 'score', low: 1, high: 10 }];
+  assert.deepEqual(F.checkSubmission(s, chosen), { missing: 0 });
+  const after = F.summarise(form(['How satisfied are you overall?', 'Ease (1-5)'], [[6], [7], [5]].map((v) => [...v, 4])), { roles: F.checkRoles(chosen) });
+  assert.equal(after.needsChoice, 0);
+  assert.deepEqual(after.questions.map((q) => [q.scaleFrom, q.high]), [['confirmed', 10], ['confirmed', 5]]);
+});
+
+test('short comments in Chinese and Title Case phrases stay comments', () => {
+  const zh = F.summarise(form(['使用心得'], [['方便'], ['高效'], ['周到'], ['很好'], ['方便快速']]));
+  assert.equal(roleOf(zh, '使用心得'), 'comment');
+  assert.equal(zh.commentCount, 5);
+  const en = F.summarise(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['the holder']]));
+  assert.equal(roleOf(en, 'What did you like most?'), 'comment');
+  const all = F.summarise(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]));
+  assert.equal(roleOf(all, 'Best part'), 'comment');
+});
+
+test('names found by their shape need a header that speaks of a person, and are only a low-confidence guess', () => {
+  const names = [['Ann Lee'], ['Bo Chan'], ['Cy Wu'], ['Di Ho'], ['Ed Ng']];
+  const s = F.summarise(form(['Who filled this in?'], names));
+  assert.deepEqual([roleOf(s, 'Who filled this in?'), col(s, 'Who filled this in?').suggested.confidence], ['identifying', 'low']);
+  assert.equal(roleOf(F.summarise(form(['Notes'], names)), 'Notes'), 'comment');
+  const zh = F.summarise(form(['填寫人'], [['王小明'], ['陳大文'], ['林美玲']]));
+  assert.deepEqual([roleOf(zh, '填寫人'), col(zh, '填寫人').suggested.confidence], ['identifying', 'high']);
+  // Clear labels and email-shaped answers are sure.
+  const sure = F.summarise(form(['Email address', 'Reach you at', 'Patient ID', '病歷號碼'], [['a@example.com', 'b@example.com', 'P-1', 'X1']]));
+  assert.deepEqual(sure.columns.slice(1).map((c) => [c.role, c.suggested.confidence]), [['identifying', 'high'], ['identifying', 'high'], ['identifying', 'high'], ['identifying', 'high']]);
+});
+
+test('a free-text question titled "Patient …" is a low-confidence guess, and its answers stay in the cache until chosen', () => {
+  const rows = [['Timestamp', 'Patient positioning issues', 'Email address', 'Patient comfort (1-5)'],
+    ['2026-11-10T09:00:00Z', 'Arm board slipped', 'a@example.com', 4], ['2026-11-11T09:00:00Z', 'Had to re-drape', 'b@example.com', 5]];
+  const s = F.summarise(rows);
+  assert.deepEqual([roleOf(s, 'Patient positioning issues'), col(s, 'Patient positioning issues').suggested.confidence], ['identifying', 'low']);
+  assert.equal(roleOf(s, 'Patient comfort (1-5)'), 'score');
+  // Kept out of the board, but not dropped from the cache before the user says.
+  assert.equal(s.commentCount, 0);
+  const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
+  assert.deepEqual(c.redacted, [2]);
+  assert.ok(JSON.stringify(c.rows).includes('Arm board slipped'));
+  assert.ok(!JSON.stringify(c.rows).includes('@example.com'));
+  // Chosen as a comment: it shows. Chosen as identifying: now it is dropped.
+  const asComment = [{ header: 'Patient positioning issues', index: 1, role: 'comment' }];
+  assert.equal(F.summariseCache(c, asComment).commentCount, 2);
+  const re = F.reroleCache(c, [{ header: 'Patient positioning issues', index: 1, role: 'identifying' }]);
+  assert.ok(!JSON.stringify(re.rows).includes('Arm board slipped'));
+});
+
+test('repeated titles keep their roles in order when a column is added before them, and are flagged', () => {
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Rate it', index: 1, role: 'score', low: 1, high: 5 }, { header: 'Rate it', index: 2, role: 'score', low: 1, high: 10 }]);
+  const moved = [['Timestamp', 'Site', 'Rate it', 'Rate it'], ['2026-11-10 09:00', 'x', 4, 9], ['2026-11-11 09:00', 'x', 5, 8]];
+  const s = F.summarise(moved, { roles });
+  assert.deepEqual(s.questions.map((q) => [q.index, q.high, q.unreadable]), [[2, 5, 0], [3, 10, 0]]);
+  assert.deepEqual(s.columns.map((c) => Boolean(c.repeated)), [false, false, true, true]);
+  assert.deepEqual(s.newColumns, ['Site']);
+});
+
+test('the same sheet pasted again keeps its checked columns; turning off keeps no columns', () => {
+  const id = 'A'.repeat(30);
+  const cur = { enabled: true, sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit#gid=0`, keyPath: 'k', columns: [{ header: 'Timestamp', index: 0, role: 'timestamp' }] };
+  const again = F.changeSettings(cur, { sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit?usp=sharing#gid=0` });
+  assert.deepEqual([again.sheetChanged, again.settings.columns.length], [false, 1]);
+  // No tab named: the saved one, which names it, stays.
+  const plain = F.changeSettings(cur, { sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit?usp=sharing` });
+  assert.deepEqual([plain.sheetChanged, plain.settings.sheetUrl], [false, cur.sheetUrl]);
+  const otherTab = F.changeSettings(cur, { sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit#gid=5` });
+  assert.deepEqual([otherTab.sheetChanged, otherTab.settings.columns.length], [true, 0]);
+  const off = F.changeSettings(cur, { enabled: false });
+  assert.deepEqual([off.settings.enabled, off.settings.columns], [false, []]);
+});
+
+test('a key file that is busy is a passing trouble; one that is gone waits for the user', () => {
+  const gone = Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  const busy = Object.assign(new Error('resource busy or locked'), { code: 'EBUSY' });
+  assert.equal(F.keyFileError(gone).kind, 'key');
+  assert.match(F.keyFileError(gone).message, /no longer where it was chosen/);
+  assert.equal(F.keyFileError(busy).kind, 'keyfile');
+  const mon0805 = local(2026, 11, 16, 8, 5).getTime();
+  const cache = (kind) => ({ fetchedAt: local(2026, 11, 13, 9).getTime(), lastAttemptAt: mon0805, lastError: { kind, message: 'x' } });
+  assert.equal(F.planFetch({ now: local(2026, 11, 16, 10).getTime(), settings: SETTINGS, cache: cache('keyfile') }).fetch, true);
+  assert.equal(F.planFetch({ now: local(2026, 11, 16, 10).getTime(), settings: SETTINGS, cache: cache('key') }).fetch, false);
+});
+
+test('a cache kept while the saved link does not read is set aside without blaming another sheet', () => {
+  const failed = F.afterFailure(null, new F.FieldSurveyError('setup', 'bad link'), { now: 1, started: 1, link: null });
+  assert.deepEqual(F.validCache(JSON.parse(JSON.stringify(failed)), null), { cache: null, problem: null });
 });
 
 // ---- the schedule: Monday, Wednesday and Friday at 08:00 ---------------------------------
