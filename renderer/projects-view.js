@@ -103,7 +103,7 @@ export function projectsHtml(projects, sessions, opts) {
   // With the assistant's list showing, its "found N to check" line sits in it.
   const head = checkText && !asks ? `<p class="proj-check">${icon('agent')}<span>${checkText}</span></p>` : '';
   const privacyNote = opts.privacy && (list.some((p) => p.todos.length) || projects?.assistant?.questions?.length)
-    ? '<p class="hint">Question and to-do wording is hidden while “Hide file names, commands and survey answers” is on.</p>' : '';
+    ? '<p class="hint">Question and to-do wording is hidden while “Hide file names, commands, survey answers and LINE chats” is on.</p>' : '';
   const cards = list.map((p) => {
     const live = sessions.filter((s) => s.projectId === p.id);
     const running = live.filter((s) => isRunning(s.status)).length;

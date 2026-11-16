@@ -40,7 +40,7 @@ test('with privacy on the board shows counts, times and reasons, and no chat, se
   assert.match(html, /You said you would/);
   assert.match(html, />10:00</);
   assert.doesNotMatch(html, /data-line="(add|send|dismiss)"/);
-  assert.match(html, /Turn off “Hide file names, commands and survey answers”/);
+  assert.match(html, /Turn off “Hide file names, commands, survey answers and LINE chats”/);
 });
 
 test('with privacy off each item shows chat, sender, time, text and reason, with its three buttons', async () => {

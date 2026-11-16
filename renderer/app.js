@@ -1236,7 +1236,7 @@ const TODO_WORDS = { completed: 'Done', in_progress: 'Doing now', pending: 'To d
 function todoListHtml(todos) {
   if (!todos?.total) return '';
   const head = `<p class="todo-head">To-do list · ${todos.done} of ${todos.total} done${todos.doing ? ` · ${todos.doing} in progress` : ''}</p>`;
-  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names, commands and survey answers” to see what each item says.</p>`;
+  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names, commands, survey answers and LINE chats” to see what each item says.</p>`;
   const items = todos.items.map((t) => `<li class="todo ${t.status}"><span class="todo-mark" aria-hidden="true"></span>
       <span>${escapeXml(t.status === 'in_progress' && t.active ? t.active : t.text || 'Untitled')}</span><span class="visually-hidden"> (${TODO_WORDS[t.status]})</span></li>`).join('');
   return `${head}<ol class="todos">${items}</ol>`;

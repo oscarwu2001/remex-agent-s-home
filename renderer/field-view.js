@@ -15,7 +15,7 @@ import { boardTime, boardDay } from './dates.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const DASH = '<span class="none"><span aria-hidden="true">–</span><span class="visually-hidden">none</span></span>';
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const PRIVACY_SWITCH = '“Hide file names, commands and survey answers”';
+const PRIVACY_SWITCH = '“Hide file names, commands, survey answers and LINE chats”';
 export const ROLE_WORDS = {
   timestamp: 'When answered', score: 'Score', number: 'Number (not a score)', choice: 'Multiple choice',
   comment: 'Comment', identifying: 'Identifying (hidden)', ignore: 'Ignore',

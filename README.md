@@ -289,7 +289,7 @@ waiting for a choice, are flagged under **Needs attention** until you check
 them. Turning field feedback off deletes the answers kept and your checked
 columns; turned on again, the columns are checked afresh. Answers the app cannot read, such as
 a word in a score question, are counted under **Needs attention**, never
-dropped quietly. With **Hide file names, commands and survey answers** on,
+dropped quietly. With **Hide file names, commands, survey answers and LINE chats** on,
 the section shows only counts, scores and dates; question wording, comments
 and chosen answers show when it is off.
 
@@ -590,7 +590,7 @@ but never writes there. There are three exceptions, and each happens only when y
   your sessions. The answers it read are kept in the app's data folder
   (`field-survey-cache.json`) without the identifying columns, so the board
   shows them after a restart; turning the feature off deletes them.
-- **Update and restart** pulls the newest code with git. **Hide file names, commands and survey answers** is on by default. With
+- **Update and restart** pulls the newest code with git. **Hide file names, commands, survey answers and LINE chats** is on by default. With
 it on, the board shows "Reading a file" but not the file's name, and it hides
 task descriptions and folder paths too. Error messages never quote the
 contents of a transcript line. Turn privacy off when you're not sharing your

@@ -19,7 +19,7 @@ test('with privacy on, the step is read-only: roles in words, no form and no Sav
   const { fieldColumnsHtml } = await view();
   const html = fieldColumnsHtml(field(F.summarise(rows)), { privacy: true });
   assert.doesNotMatch(html, /<form|<select|field-check-save/);
-  assert.match(html, /Turn off “Hide file names, commands and survey answers”[^<]* to check the columns/);
+  assert.match(html, /Turn off “Hide file names, commands, survey answers and LINE chats”[^<]* to check the columns/);
   assert.match(html, /Score, 1–5/);
   assert.match(html, /Needs a choice/);
   assert.doesNotMatch(html, /How satisfied|Anything else/); // wording stays hidden

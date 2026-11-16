@@ -17,7 +17,7 @@ import { boardTime } from './dates.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const PRIVACY_SWITCH = '“Hide file names, commands and survey answers”';
+const PRIVACY_SWITCH = '“Hide file names, commands, survey answers and LINE chats”';
 const LIMIT = 5; // items shown before "Show N more"
 // A message longer than this is cut at six lines on the board, with its own Show all.
 const LONG = 280;
