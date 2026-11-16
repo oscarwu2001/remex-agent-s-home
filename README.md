@@ -313,24 +313,34 @@ update):
   placed in the 7 days), a failed update, a sheet not shared, an unreadable
   key. They are under **Needs attention** too, and each links to its fix.
 
+Low scores and averages are flagged only for score columns you have
+checked: until you press **Save the columns** once (and for a column added
+to the form later, until you check it), the section says "Score flags
+start once the columns are checked · Check the columns" and lists only
+comments and set-up problems, since the app's guess of a scale or of which
+end is better can be wrong.
+
 **Higher is worse.** On a question such as "How difficult was setup?
 (1-5)", a high answer is the bad one. In Check the columns each score
 column has its direction beside the scale: **Higher is better** or
 **Higher is worse**, saved with the column either way. It starts on
-Higher is better, except when the title speaks of difficulty, effort,
-pain, discomfort, fatigue or problems (also 困難, 難, 麻煩, 痛, 疼, 不適):
-the app only guesses those, since "Pain relief achieved" is the other way
-round, so the direction starts on "Choose…" and the column stays marked
-**Needs a choice** and "Direction guessed", even after you choose Score,
-until you set it. Until then the column is out of the flags and the
+Higher is better only on a score the app is sure of. On a column you turn
+into a score yourself it starts on "Choose direction…" (a saved score keeps
+its saved direction), and so it does when the title speaks of difficulty,
+effort, pain, a symptom or problems (discomfort, fatigue, anxiety, nausea,
+swelling, bleeding, stress, errors; also 困難, 難, 麻煩, 痛, 疼, 不適, 焦慮,
+噁心, 腫, 出血, 錯誤): the app only guesses those, since "Pain relief
+achieved" is the other way round, so the column stays marked **Needs a
+choice** and "Direction guessed", even after you choose Score, until you
+set it. Until then the column is out of the flags and the
 average, and Save waits. A score checked before the direction was asked
 is asked again the same way when its title has those words. For a column
 set to Higher is worse the flags count the top quarter of the scale ("3
 high scores … (4 or more on 1–5, higher is worse)") and flag an average
 going up, and the headline average counts its answers turned round (5 on
-1–5 counts as 1). In the sheet it is tagged **Higher is worse**, its bar
-fills from the right, and it says what it counts as ("higher is worse:
-counts as 1.6 in the average"). With privacy on, Check the columns shows
+1–5 counts as 1). In the sheet it is tagged **Higher is worse** and says
+what it counts as ("higher is worse: counts as 1.6 in the average"); its
+bar shows that value, so every bar there means how good. With privacy on, Check the columns shows
 the direction in words ("Score, 1–5, higher is better").
 
 "Nothing to flag" shows only when the 7 days were compared. Otherwise the
