@@ -976,6 +976,10 @@ const stamp = (ms) => {
 // rows: [daysAgo, ...answers]
 const dated = (headers, rows) => [['Timestamp', ...headers], ...rows.map(([ago, ...v]) => [stamp(NOW - ago * DAY), ...v])];
 const flagsOf = (rows, opts = {}) => F.fieldFlags({ summary: F.summarise(rows, { now: NOW, ...opts }), ...opts.flags });
+// The app's own guesses saved as the user's check (Save the columns as shown):
+// scores never checked raise no score flags.
+const checkedAs = (rows) => F.checkRoles(F.summarise(rows).columns.map((c) => ({ header: c.header, index: c.index, role: c.role, ...(c.role === 'score' ? { low: c.low, high: c.high, worse: c.worse === true } : {}) })));
+const flagsChecked = (rows, opts = {}) => flagsOf(rows, { roles: checkedAs(rows), ...opts });
 const earlier = (v, n = 10) => Array.from({ length: n }, (_, k) => [20 + k, ...v]);
 
 test('the low mark: the bottom quarter of the scale, rounded up', () => {
@@ -985,7 +989,7 @@ test('the low mark: the bottom quarter of the scale, rounded up', () => {
 
 test('low scores in the last 7 days are counted per question, by its low mark', () => {
   const rows = dated(['Ease (1-5)', 'Clarity (1-10)'], [...earlier([4, 9]), [3, 1, 3], [2, 2, 4], [1, 3, 2], [0.5, 5, 10]]);
-  const { why, list } = flagsOf(rows);
+  const { why, list } = flagsChecked(rows);
   assert.equal(why, null);
   assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => [f.no, f.count, f.mark, f.worse]), [[1, 2, 2, false], [2, 2, 3, false]]);
   assert.deepEqual(list.filter((f) => f.kind === 'falling').map((f) => f.no), [1, 2]);
@@ -994,20 +998,21 @@ test('low scores in the last 7 days are counted per question, by its low mark', 
 test('a low score from 5 days ago is still flagged after a later read brought one good answer', () => {
   const first = dated(['Ease (1-5)'], [...earlier([4]), [5, 1]]);
   const later = dated(['Ease (1-5)'], [...earlier([4]), [5, 1], [1, 5]]);
-  let cache = F.afterFetch(null, got(first), { now: NOW - 4 * DAY, started: NOW - 4 * DAY, link: LINK });
-  cache = F.afterFetch(cache, got(later), { now: NOW, started: NOW, link: LINK });
-  const { list } = F.fieldFlags({ summary: F.summariseCache(cache, [], { now: NOW }) });
+  const roles = checkedAs(first);
+  let cache = F.afterFetch(null, got(first), { now: NOW - 4 * DAY, started: NOW - 4 * DAY, link: LINK, roles });
+  cache = F.afterFetch(cache, got(later), { now: NOW, started: NOW, link: LINK, roles });
+  const { list } = F.fieldFlags({ summary: F.summariseCache(cache, roles, { now: NOW }) });
   assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => f.count), [1]);
 });
 
 test('a falling average is flagged at exactly a tenth of the scale, and not with only two answers in the window', () => {
   // The window's answers average 3.6: 0.4 below 4.0 on 1–5, exactly 10% of its range.
-  const falling = flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 3], [2, 3]])).list.filter((f) => f.kind === 'falling');
+  const falling = flagsChecked(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 3], [2, 3]])).list.filter((f) => f.kind === 'falling');
   assert.deepEqual(falling.map((f) => [f.no, f.recentN, Number(f.recentMean.toFixed(2)), Number(f.earlierMean.toFixed(2))]), [[1, 5, 3.6, 4]]);
   // 3.8 is only 0.2 lower.
-  assert.deepEqual(flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 4], [2, 3]])).list.filter((f) => f.kind === 'falling'), []);
+  assert.deepEqual(flagsChecked(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 4], [2, 3]])).list.filter((f) => f.kind === 'falling'), []);
   // Two answers, far lower: too few to call a trend.
-  assert.deepEqual(flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [2, 1], [1, 1]])).list.filter((f) => f.kind === 'falling'), []);
+  assert.deepEqual(flagsChecked(dated(['Ease (1-5)'], [...earlier([4]), [2, 1], [1, 1]])).list.filter((f) => f.kind === 'falling'), []);
 });
 
 test('comments in the window are counted; a guessed scale raises no score flags', () => {
@@ -1033,10 +1038,10 @@ test('flags say why they could not compare, instead of nothing to flag', () => {
   const share = { kind: 'share', message: 'x' };
   assert.deepEqual(F.fieldFlags({ summary: null, lastError: share }).list.map((f) => f.what), ['share']);
   // Nothing before the window: averages are not compared, low scores still are.
-  const fresh = flagsOf(dated(['Ease (1-5)'], [[3, 1], [2, 1], [1, 1]]));
+  const fresh = flagsChecked(dated(['Ease (1-5)'], [[3, 1], [2, 1], [1, 1]]));
   assert.deepEqual([fresh.why, fresh.earlier, fresh.list.map((f) => f.kind)], [null, false, ['low']]);
   // Compared, and all is well: an empty list.
-  const calm = flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [3, 4], [1, 5]]));
+  const calm = flagsChecked(dated(['Ease (1-5)'], [...earlier([4]), [3, 4], [1, 5]]));
   assert.deepEqual([calm.why, calm.earlier, calm.list], [null, true, []]);
 });
 
@@ -1192,4 +1197,27 @@ test('a tab with no rows at all says the sheet has no answers yet', () => {
   const blank = F.summariseCache(F.afterFetch(null, got([]), { now: NOW, started: NOW, link: LINK }), [], { now: NOW });
   assert.equal(blank.empty, true);
   assert.equal(F.fieldFlags({ summary: blank }).why, 'empty');
+});
+
+test('scores never checked raise no score flags until the columns are saved; comments and set-up flags still show', () => {
+  const head = ['Anxiety level (0-10)', 'Grip comfort (1-5)', 'Anything else?'];
+  // Anxiety rose from 1 to 9, 9, 8 and grip comfort fell from 4 to 1, 1, 2.
+  const rows = dated(head, [...earlier([1, 4, '']), [3, 9, 1, 'The strap pinched at the start'], [2, 9, 1, 'Slow to warm up today'], [1, 8, 2, 'Battery ran low near the end']]);
+  const unchecked = flagsOf(rows);
+  assert.deepEqual(unchecked.list.map((f) => [f.kind, f.what ?? null]), [['comments', null], ['setup', 'choose']]);
+  assert.equal(unchecked.unchecked, 2);
+  // Saved once, anxiety as higher is worse: both move.
+  const saved = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10, worse: true },
+    { header: head[1], index: 2, role: 'score', low: 1, high: 5, worse: false }, { header: head[2], index: 3, role: 'comment' }]);
+  const checked = flagsOf(rows, { roles: saved });
+  assert.deepEqual(checked.list.map((f) => [f.kind, f.index ?? null, f.worse ?? null]), [['low', 1, true], ['falling', 1, true], ['low', 2, false], ['falling', 2, false], ['comments', null, null]]);
+  assert.equal(checked.unchecked, undefined);
+});
+
+test('symptom titles ask which end is better', () => {
+  for (const h of ['Anxiety level (0-10)', 'Nausea (1-5)', 'Swelling (1-5)', 'Bleeding (1-5)', 'Stress level (1-5)', 'Errors seen (0-10)',
+    '焦慮程度 (1-5)', '焦虑程度 (1-5)', '噁心 (1-5)', '恶心 (1-5)', '腫脹 (1-5)', '肿胀 (1-5)', '出血量 (1-5)', '錯誤程度 (0-10)', '错误 (0-10)']) {
+    const c = F.summarise(dated([h], [[1, 2]]), { now: NOW }).columns[1];
+    assert.deepEqual([c.suggested.worse, c.needsChoice, c.askDirection], [true, true, true], h);
+  }
 });

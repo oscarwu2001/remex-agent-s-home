@@ -122,13 +122,14 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const questions = s.questions.length
     ? `<ol class="field-qs">${s.questions.map((q) => {
       const m = mean1(q.mean);
-      // Higher is worse: tagged, and its meter fills from the right, so a
-      // long bar does not read as a good one.
+      // Higher is worse: tagged, and its bar shows what it counts as
+      // (low + high - average), so every bar means how good.
+      const counts = q.worse && q.mean != null ? q.low + q.high - q.mean : null;
       return `<li class="field-q">
         <p class="field-q-top"><span class="field-q-name">${label(q)}${q.worse ? ' <span class="tag">Higher is worse</span>' : ''}</span>
           <span class="field-q-n">${m != null ? `${m}<small> / ${q.high}</small>` : DASH}</span></p>
-        <div class="meter${q.worse ? ' from-right' : ''}" role="img" aria-label="${m != null ? `${m} of ${q.high}${q.worse ? ', higher is worse' : ''}` : 'no answers'}"><span style="width:${along(q)}%"></span></div>
-        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${q.mean != null ? `: counts as ${mean1(q.low + q.high - q.mean)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
+        <div class="meter" role="img" aria-label="${m != null ? `${m} of ${q.high}${counts != null ? `, higher is worse: counts as ${mean1(counts)}` : ''}` : 'no answers'}"><span style="width:${along(counts != null ? { ...q, mean: counts } : q)}%"></span></div>
+        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${counts != null ? `: counts as ${mean1(counts)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
       </li>`;
     }).join('')}</ol>`
     : '<p class="empty">No question with scores was found yet.</p>';
@@ -181,8 +182,9 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
 // to choose. A low-confidence guess (c.needsChoice) is never preselected,
 // and a scale is preselected only when the user confirmed it or the
 // question states it; anything else waits for the user, and Save with it.
-// The direction (worse) too: preselected "Higher is better" unless the
-// title speaks of pain or difficulty and nobody has said (c.askDirection).
+// The direction (worse) too: the saved one stays; a row the user turns into
+// a score, or whose title speaks of pain or difficulty (c.askDirection), is
+// asked; only the app's own sure score starts on "Higher is better".
 export function stepRows(f, draft = {}) {
   return (f?.summary?.columns ?? []).map((c) => {
     const d = draft[c.index] ?? {};
@@ -192,7 +194,13 @@ export function stepRows(f, draft = {}) {
     const low = role === 'score' ? (d.low ?? (sure ? c.low : null)) : null;
     const high = role === 'score' ? (d.high ?? (sure ? c.high : null)) : null;
     // Higher is worse: the user's choice, else the saved one; null while asked.
-    const worse = role === 'score' ? (d.worse ?? (c.askDirection ? null : c.worse === true)) : null;
+    const saved = c.confirmed && c.role === 'score' && !c.askDirection;
+    let worse = null;
+    if (role === 'score') {
+      if (d.worse !== undefined) worse = d.worse;
+      else if (saved) worse = c.worse === true;
+      else if (d.role !== 'score' && !c.askDirection) worse = c.worse === true;
+    }
     const missing = !role || (role === 'score' && (low == null || high == null || worse == null));
     return { c, role, low, high, worse, missing, touched: Object.keys(d).length > 0 };
   });
@@ -227,8 +235,8 @@ function rowTags(r) {
   ].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
 }
 
-// "Higher is better" or "Higher is worse", with "Choose…" until one is.
-const directionOpts = (worse) => `${worse == null ? '<option value="" selected>Choose…</option>' : ''}<option value="better"${worse === false ? ' selected' : ''}>Higher is better</option><option value="worse"${worse === true ? ' selected' : ''}>Higher is worse</option>`;
+// "Higher is better" or "Higher is worse", with "Choose direction…" until one is.
+const directionOpts = (worse) => `${worse == null ? '<option value="" selected>Choose direction…</option>' : ''}<option value="better"${worse === false ? ' selected' : ''}>Higher is better</option><option value="worse"${worse === true ? ' selected' : ''}>Higher is worse</option>`;
 const directionWords = (r) => (r.role !== 'score' ? '' : r.worse == null ? ', direction not chosen' : r.worse ? ', higher is worse' : ', higher is better');
 const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>Choose…</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
 
@@ -401,17 +409,20 @@ export function flagsHtml(f, { privacy = true, said = [], now = Date.now() } = {
   const days = f.summary?.window?.days ?? 7;
   const fixOf = (why) => (WHY_FIX[why] ? `<p class="field-fix"><button type="button" class="link-btn" data-field="${WHY_FIX[why]}">${FIXES[WHY_FIX[why]]}</button></p>` : '');
   const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)(info, days)}</p>${fixOf(info.why)}` : '';
-  const scored = (f.summary?.questions ?? []).some((q) => !q.guessed && !q.directionGuessed);
+  const scored = (f.summary?.questions ?? []).some((q) => q.confirmed && !q.guessed && !q.directionGuessed);
+  // Scores never checked raise no score flags until the columns are saved.
+  const wait = !info.why && info.unchecked > 0
+    ? `<p class="field-calm">Score flags start once the columns are checked · <button type="button" class="link-btn inline" data-field="check">${FIXES.check}</button></p>` : '';
   const noEarlier = !info.why && !info.earlier && scored ? `<p class="field-calm">No answers from before the last ${days} days, so averages are not compared yet.</p>` : '';
   // After a failed update the answers are older than they look.
   const calm = f.error && f.fetchedAt ? `Nothing to flag in the answers read ${age(f.fetchedAt, now)}` : 'Nothing to flag';
-  if (!list.length) return why || `<p class="field-calm">${esc(calm)}</p>${noEarlier}`;
+  if (!list.length) return why || wait || `<p class="field-calm">${esc(calm)}</p>${noEarlier}`;
   const items = list.map((x) => {
     const fix = x.fix && FIXES[x.fix] ? `<button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
     const glyph = x.kind === 'falling' && x.worse ? 'rising' : x.kind;
     return `<li class="field-flag">${flagGlyph(glyph)}<span class="field-flag-text">${esc(flagText(x, { privacy, days }))}</span>${fix}</li>`;
   }).join('');
-  return `${why}<ul class="field-flags">${items}</ul>${noEarlier}`;
+  return `${why}${wait}<ul class="field-flags">${items}</ul>${noEarlier}`;
 }
 // The block with its heading. While dates are waiting the note above says
 // so, so the block shows only for set-up flags.

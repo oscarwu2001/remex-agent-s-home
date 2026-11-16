@@ -684,8 +684,6 @@ details > summary h2 { margin: 0; }
 .usage-row strong { font-variant-numeric: tabular-nums; }
 .meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin: var(--s-2) 0 var(--s-1); }
 .meter span { display: block; height: 100%; background: var(--accent); }
-/* Higher is worse: filled from the right, so a long bar does not read as good. */
-.meter.from-right span { margin-left: auto; }
 .row .ctx-warn { grid-column: 2 / -1; font-size: 12px; font-weight: 500; color: var(--warn); }
 
 /* ---- decorating: pictures of each piece ------------------------------------------- */

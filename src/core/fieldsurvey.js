@@ -298,12 +298,12 @@ const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
-// A score whose title speaks of difficulty, effort, pain or problems: higher
+// A score whose title speaks of difficulty, effort, pain, a symptom or problems: higher
 // is worse. Only a guess ("Pain relief achieved" is the other way round),
 // so it is low confidence: such a score's direction is asked in Check the
 // columns (askDirection), and the column stays out of the flags and the
 // average until the user chooses, even a score saved before it was asked.
-const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适/i;
+const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired|anxiety|nausea|swelling|bleeding|stress(?:ful)?|errors?)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适|焦慮|焦虑|噁心|恶心|腫|肿|出血|錯誤|错误/i;
 const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
@@ -734,7 +734,7 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
-        worse: !askDirection && col.worse === true, directionGuessed: askDirection,
+        worse: !askDirection && col.worse === true, directionGuessed: askDirection, confirmed: Boolean(conf),
         ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
@@ -1030,20 +1030,29 @@ const FALL_MIN_NEW = 3;
 // answers), 'waiting' (the timestamp's dates come with the next read),
 // 'no-dates' (no timestamp column) or 'quiet' (no answer in the window);
 // set-up flags show either way. earlier: some score had answers before the window, so averages
-// could be compared.
+// could be compared. unchecked: how many scores the user has not checked,
+// left out of the score flags.
 function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) {
   const out = [];
   const s = summary ?? null;
   const why = !s ? 'unread' : s.empty || !s.responses ? 'empty' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates'
     : !s.window ? 'unread' : !s.window.answers ? 'quiet' : null;
   let earlier = false;
+  let unchecked = 0;
   if (!why) {
-    // Guessed scales and directions are left out, as they are of the
+    // Scores the user never checked are left out until the columns are
+    // saved (the app's sure guess of a scale or its direction can still be
+    // wrong), and so are guessed scales and directions, as they are of the
     // average: a low mark on the wrong scale or end would flag the wrong
     // answers.
     for (const q of s.questions ?? []) {
       const w = q.window;
-      if (q.guessed || q.directionGuessed || !w) continue;
+      if (!w) continue;
+      if (!q.confirmed) {
+        unchecked += 1;
+        continue;
+      }
+      if (q.guessed || q.directionGuessed) continue;
       if (w.earlierN > 0) earlier = true;
       const who = { index: q.index, no: q.no, question: q.question, low: q.low, high: q.high, worse: q.worse === true };
       if (w.bad > 0) out.push({ kind: 'low', ...who, count: w.bad, mark: w.mark });
@@ -1066,7 +1075,8 @@ function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) 
   if (keyError && keyError !== lastError?.message) out.push({ kind: 'setup', what: 'key', fix: 'settings' });
   // 'quiet': answers, but none in the window (a paused survey, or a form now
   // writing to another tab); the newest says how long.
-  return { why, earlier, list: out, ...(why === 'quiet' ? { newest: s.newest } : {}) };
+  // unchecked: scores left out until the columns are checked.
+  return { why, earlier, list: out, ...(why === 'quiet' ? { newest: s.newest } : {}), ...(unchecked ? { unchecked } : {}) };
 }
 
 // The reply to a columns save: a checked column whose answers read as

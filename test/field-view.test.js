@@ -43,7 +43,7 @@ test('with privacy off, an unchosen low-confidence row starts on "Choose…" and
   assert.doesNotMatch(html, /suggested/i);
 });
 
-test('choosing the role alone is not enough for a guessed scale; choosing the scale too lets Save through', async () => {
+test('choosing the role alone is not enough for a guessed scale; choosing the scale and the direction too lets Save through', async () => {
   const { fieldColumnsHtml, rolesFrom, draftWith } = await view();
   const f = field(F.summarise(rows));
   let draft = draftWith({}, GUESSED, 'role', 'score');
@@ -52,6 +52,8 @@ test('choosing the role alone is not enough for a guessed scale; choosing the sc
   assert.match(half, /aria-label="How satisfied are you overall\?: scale from"/);
   assert.equal(rolesFrom(f, draft).missing, 1);
   draft = draftWith(draftWith(draft, GUESSED, 'low', '1'), GUESSED, 'high', '7');
+  assert.equal(rolesFrom(f, draft).missing, 1); // the direction, asked of a row turned into a score
+  draft = draftWith(draft, GUESSED, 'worse', 'better');
   const done = fieldColumnsHtml(f, { privacy: false, draft });
   assert.doesNotMatch(done, /<button[^>]*id="field-check-save"[^>]*disabled/);
   assert.doesNotMatch(done, /still needs? a choice/);
@@ -168,8 +170,10 @@ const flagRows = (() => {
     .map(([v, t], k) => [`2026-11-${12 + k} 09:00`, v, t]);
   return [head, ...old, ...fresh];
 })();
+// Checked as the app guessed: scores never checked raise no score flags.
+const flagRoles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: flagRows[0][1], index: 1, role: 'score', low: 1, high: 5, worse: false }, { header: flagRows[0][2], index: 2, role: 'comment' }]);
 const flagged = () => {
-  const s = F.summarise(flagRows, { now: NOW });
+  const s = F.summarise(flagRows, { now: NOW, roles: flagRoles });
   return { ...field(s), flags: F.fieldFlags({ summary: s, lastError: { kind: 'share', message: 'x' } }) };
 };
 
@@ -224,8 +228,10 @@ test('nothing to flag only when the window was compared; otherwise the board say
   for (const why of ['unread', 'waiting', 'no-dates']) assert.doesNotMatch(said(why), /Nothing to flag/, why);
   // A set-up problem still shows under any of them.
   assert.match(flagsHtml({ ...field(s), flags: { why: 'unread', earlier: false, list: [{ kind: 'setup', what: 'share', fix: 'settings' }] } }), /not shared/);
-  // Nothing from before the window: averages wait, and the board says so.
-  assert.match(flagsHtml({ ...field(s), flags: { why: null, earlier: false, list: [] } }), /No answers from before the last 7 days/);
+  // Nothing from before the window: averages wait, and the board says so (of scores the user checked).
+  const checked = F.summarise(rows, { roles: F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: rows[0][1], index: 1, role: 'score', low: 1, high: 7, worse: false },
+    { header: rows[0][2], index: 2, role: 'score', low: 1, high: 5, worse: false }, { header: rows[0][3], index: 3, role: 'comment' }]) });
+  assert.match(flagsHtml({ ...field(checked), flags: { why: null, earlier: false, list: [] } }), /No answers from before the last 7 days/);
 });
 
 test('a set-up flag for unchosen columns replaces the note above the numbers, and says the numbers are guesses', async () => {
@@ -252,10 +258,10 @@ test('a guessed direction needs a choice: choosing Score alone does not settle i
   assert.match(painRow(before), /The app’s guess: Score, 0–10, higher is worse\./);
   // A score whose title says nothing of pain starts on "Higher is better".
   assert.match(before, /<select id="fc-worse-2" data-col="2" data-part="worse" aria-label="Ease \(1-5\): higher is better or worse"><option value="better" selected>Higher is better<\/option><option value="worse">Higher is worse<\/option><\/select>/);
-  // Score chosen alone: the direction starts on "Choose…", the row still needs a choice, Save stays refused.
+  // Score chosen alone: the direction starts on "Choose direction…", the row still needs a choice, Save stays refused.
   const score = draftWith({}, 1, 'role', 'score');
   const half = fieldColumnsHtml(f, { privacy: false, draft: score });
-  assert.match(painRow(half), /<select id="fc-worse-1" data-col="1" data-part="worse" aria-label="Pain relief achieved \(0-10\): higher is better or worse"><option value="" selected>Choose…<\/option><option value="better">Higher is better<\/option><option value="worse">Higher is worse<\/option><\/select>/);
+  assert.match(painRow(half), /<select id="fc-worse-1" data-col="1" data-part="worse" aria-label="Pain relief achieved \(0-10\): higher is better or worse"><option value="" selected>Choose direction…<\/option><option value="better">Higher is better<\/option><option value="worse">Higher is worse<\/option><\/select>/);
   assert.match(painRow(half), /Needs a choice/);
   assert.match(painRow(half), /Direction guessed/);
   assert.match(half, /<button[^>]*id="field-check-save"[^>]*disabled/);
@@ -272,6 +278,8 @@ test('a guessed direction needs a choice: choosing Score alone does not settle i
     { header: 'Ease (1-5)', index: 2, role: 'score', low: 1, high: 5, worse: false },
   ], missing: 0 });
   assert.equal(rolesFrom(f, draftWith(score, 1, 'worse', 'worse')).roles[1].worse, true);
+  // With privacy on the step only reads, and says the guess.
+  assert.match(painRow(fieldColumnsHtml(f, { privacy: true })), /Not chosen[\s\S]*The app’s guess: Score, 0–10, higher is worse\./);
   assert.deepEqual(F.checkSubmission(s, F.checkRoles(rolesFrom(f, better).roles)), { missing: 0 });
 });
 
@@ -282,7 +290,7 @@ test('a score saved before the direction was asked keeps its role and scale, and
   const r = painRow(fieldColumnsHtml(f, { privacy: false }));
   assert.match(r, /<option value="score" selected>/);
   assert.match(r, /<option selected>10<\/option>/);
-  assert.match(r, /data-part="worse"[^>]*><option value="" selected>Choose…/);
+  assert.match(r, /data-part="worse"[^>]*><option value="" selected>Choose direction…/);
   assert.match(r, /Needs a choice/);
   assert.match(r, /Direction guessed/);
   assert.match(r, /The app’s guess: higher is worse\./);
@@ -345,7 +353,7 @@ test('the board says why the window could not be compared, each in its own words
   for (const why of ['empty', 'quiet', 'no-dates']) assert.doesNotMatch(said({ why }), /Nothing to flag/, why);
 });
 
-test('in the sheet a higher-is-worse question is tagged, says what it counts as, and fills from the right; a guessed direction is left out', async () => {
+test('in the sheet a higher-is-worse question is tagged, says what it counts as, and its bar shows that; a guessed direction is left out', async () => {
   const { fieldSheetHtml } = await view();
   const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true }]);
   const head = [['Timestamp', 'How difficult was setup? (1-5)', 'Pain relief achieved (0-10)'], ['2026-11-10 09:00', 2, 8], ['2026-11-11 09:00', 1, 9]];
@@ -354,8 +362,9 @@ test('in the sheet a higher-is-worse question is tagged, says what it counts as,
   // Difficulty 2 and 1: 1.5 of 5, counted as 4.5 (1 + 5 - 1.5).
   assert.match(hard, /<span class="field-q-name">Question 1 <span class="tag">Higher is worse<\/span><\/span>/);
   assert.match(hard, /higher is worse: counts as 4\.5 in the average/);
-  assert.match(hard, /<div class="meter from-right" role="img" aria-label="1\.5 of 5, higher is worse"><span style="width:13%"><\/span><\/div>/);
-  assert.doesNotMatch(pain, /class="tag"|from-right|counts as/);
+  // The bar, like every other, is how good: 4.5 of 1–5.
+  assert.match(hard, /<div class="meter" role="img" aria-label="1\.5 of 5, higher is worse: counts as 4\.5"><span style="width:88%"><\/span><\/div>/);
+  assert.doesNotMatch(pain, /class="tag"|counts as/);
   assert.match(pain, /direction guessed<\/span>, not in the average/);
 });
 
@@ -373,4 +382,34 @@ test('the average\'s dash says why when only a direction is guessed', async () =
   const s = F.summarise([['Timestamp', 'Pain relief achieved (0-10)'], ['2026-11-10 09:00', 2], ['2026-11-11 09:00', 3]]);
   assert.deepEqual([s.overall, s.scalesGuessed, s.directionsGuessed], [null, 0, 1]);
   assert.match(fieldHtml(field(s)), /<dt class="stat-label" title="[^"]+">Average score<\/dt>/);
+});
+
+test('scores never checked raise no score flags; the board says when they start, with a link', async () => {
+  const { flagsHtml } = await view();
+  const s = F.summarise(flagRows, { now: NOW });
+  const html = flagsHtml({ ...field(s), flags: F.fieldFlags({ summary: s }) });
+  assert.match(html, /<p class="field-calm">Score flags start once the columns are checked · <button type="button" class="link-btn inline" data-field="check">Check the columns<\/button><\/p>/);
+  assert.doesNotMatch(html, /low score|average down|Nothing to flag/);
+  assert.match(html, /3 comments in the last 7 days/);
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: flagRows[0][1], index: 1, role: 'score', low: 1, high: 5, worse: false }, { header: flagRows[0][2], index: 2, role: 'comment' }]);
+  const c = F.summarise(flagRows, { now: NOW, roles });
+  const checked = flagsHtml({ ...field(c), flags: F.fieldFlags({ summary: c }) });
+  assert.doesNotMatch(checked, /Score flags start/);
+  assert.match(checked, /2 low scores on Question 1/);
+});
+
+test('a row turned into a score asks its direction, unless it was saved as a score with one', async () => {
+  const { stepRows, draftWith, fieldColumnsHtml } = await view();
+  const head = [['Timestamp', 'Ease (1-5)'], ['2026-11-10 09:00', 4], ['2026-11-11 09:00', 5]];
+  const back = draftWith(draftWith({}, 1, 'role', 'choice'), 1, 'role', 'score');
+  // Never saved: score, choice, score again asks.
+  const fresh = field(F.summarise(head));
+  const row = stepRows(fresh, back)[1];
+  assert.deepEqual([row.role, row.worse, row.missing], ['score', null, true]);
+  assert.match(fieldColumnsHtml(fresh, { privacy: false, draft: back }), /id="fc-worse-1"[^>]*><option value="" selected>Choose direction…/);
+  // Saved as a score with a direction: it comes back as saved.
+  for (const worse of [false, true]) {
+    const saved = field(F.summarise(head, { roles: F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5, worse }]) }));
+    assert.deepEqual([stepRows(saved, back)[1].worse, stepRows(saved, back)[1].missing], [worse, false]);
+  }
 });
