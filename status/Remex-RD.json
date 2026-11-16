@@ -3,46 +3,24 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794819601734,
+ "at": 1794823201899,
  "every": 3600000,
  "sessions": [
   {
-   "project": "spine-seg2d",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794817832932,
-   "agents": []
-  },
-  {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1794817489795.015,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794817819871,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794818982526.4907,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1794816626428.787,
+   "lastAt": 1794820498240.8342,
    "agents": []
   }
  ],
  "repos": [
+  {
+   "project": "spine-seg2d",
+   "branch": "main",
+   "lastCommit": 1794819637000,
+   "changed": 0
+  },
   {
    "project": "spine-demo",
    "branch": "dev-demo",
@@ -68,12 +46,6 @@
    "changed": 0
   },
   {
-   "project": "spine-seg2d",
-   "branch": "main",
-   "lastCommit": 1794187338000,
-   "changed": 0
-  },
-  {
    "project": "remex-agent-s-home",
    "branch": "claude/agent-map-monument-valley-8d8nhz",
    "lastCommit": 1793342883000,
@@ -93,13 +65,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 814,
+    "memUsed": 831,
     "memTotal": 16380,
-    "temp": 41
+    "temp": 40
    }
   ],
-  "cpu": 13,
-  "memUsed": 16144,
+  "cpu": 14,
+  "memUsed": 16734,
   "memTotal": 48916
  }
 }
