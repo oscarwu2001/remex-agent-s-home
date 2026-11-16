@@ -92,12 +92,19 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
     ? `<div class="field-failed"><p class="form-error" role="status">The last update failed: ${esc(f.error)}</p>${refreshBtn('field-try', 'link-btn')}</div>`
     : '';
   const avg = s.overall ? mean1(s.overall.mean) : null;
-  const guessedOnly = !s.overall && s.scalesGuessed + (s.directionsGuessed ?? 0) + (s.scoresUnchecked ?? 0) > 0;
+  // Why the average is a dash: guessed scales or directions, or new scores
+  // not checked yet.
+  const guesses = (s.scalesGuessed ?? 0) + (s.directionsGuessed ?? 0);
+  const unchecked = s.scoresUnchecked ?? 0;
+  const dashWhy = s.overall ? ''
+    : guesses && unchecked ? 'Scores with a guessed scale or direction, and new scores, are not in the average until the columns are checked'
+      : guesses ? 'Every score’s scale or direction is a guess until the columns are checked'
+        : unchecked ? 'New scores are not in the average until the columns are checked' : '';
   const newLabel = f.sinceFetchedAt ? `New since <span class="nowrap">${esc(boardDay(f.sinceFetchedAt))}</span>` : 'New since the last update';
   // Each label comes first for screen readers; the number shows above it.
   const stats = `<dl class="stats">
       <div class="stat"><dt class="stat-label">Responses</dt><dd class="stat-n">${s.responses}</dd></div>
-      <div class="stat"><dt class="stat-label"${guessedOnly ? ' title="Every score’s scale or direction is a guess until the columns are checked"' : ''}>Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
+      <div class="stat"><dt class="stat-label"${dashWhy ? ` title="${dashWhy}"` : ''}>Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
       <div class="stat"><dt class="stat-label">${newLabel}</dt><dd class="stat-n">${s.newSince != null ? s.newSince : DASH}</dd></div>
     </dl>`;
   const open = s.responses
@@ -415,7 +422,7 @@ export function flagsHtml(f, { privacy = true, said = [], now = Date.now() } = {
   const fixOf = (why) => (WHY_FIX[why] ? `<p class="field-fix"><button type="button" class="link-btn" data-field="${WHY_FIX[why]}">${FIXES[WHY_FIX[why]]}</button></p>` : '');
   const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)(info, days)}</p>${fixOf(info.why)}` : '';
   const scored = (f.summary?.questions ?? []).some((q) => q.confirmed && !q.guessed && !q.directionGuessed);
-  const saved = (f.summary?.columns ?? []).some((c) => c.confirmed);
+  const saved = f.summary?.saved === true;
   // The note above the numbers gives way to the choose flag, so the flag
   // counts the other new columns too.
   const more = saved ? (f.summary?.columns ?? []).filter((c) => c.isNew && !c.needsChoice).length : 0;

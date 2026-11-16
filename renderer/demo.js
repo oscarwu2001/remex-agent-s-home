@@ -195,7 +195,8 @@ export function demoSnapshot(nowMs, epochMs) {
       { name: 'ui-reviewer', room: 'vision-clinic', summary: 'Independent interface reviewer.' },
     ],
     // The line the main process adds for the sample's unchosen column (fieldProblems).
-    problems: [{ label: 'Field feedback: 1 column needs a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)', detail: '', count: 1, fix: 'check' }],
+    problems: [{ label: 'Field feedback: 1 column needs a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)',
+      labelPrivacyOff: 'Field feedback: 1 column needs a choice (Settings → Connections → Field feedback → Check the columns)', detail: '', count: 1, fix: 'check' }],
     field: demoField(nowMs),
     usage: {
       last5h: { input: 41_000, output: 96_000, cacheRead: 2_310_000, cacheWrite: 180_000, total: 2_627_000, fresh: 317_000, replies: 214 },
@@ -239,7 +240,7 @@ function demoField(nowMs) {
       newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,
       // Checked once, with a column added since: the board's flag says so
       // and links to Settings → Check the columns.
-      checked: false, needsChoice: 1, newColumns: ['Sample: how clear was the screen in theatre?'],
+      checked: false, saved: true, needsChoice: 1, newColumns: ['Sample: how clear was the screen in theatre?'],
       columns: [
         col(0, 'Timestamp', 'timestamp'),
         col(1, 'Email address', 'identifying', { reason: 'header' }),

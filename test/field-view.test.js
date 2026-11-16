@@ -459,3 +459,40 @@ test('once the columns are saved, the sheet names a score added later as not che
   const checked = F.summarise(head, { roles: F.checkRoles([ts, tracking, { header: head[0][2], index: 2, role: 'score', low: 0, high: 10, worse: false }]) });
   assert.doesNotMatch(fieldSheetHtml(field(checked), { privacy: true }), /not checked/);
 });
+
+test('Needs attention counts what is not checked as the flag does, with one link', async () => {
+  const { flagsHtml } = await view();
+  const ts = { header: 'Timestamp', index: 0, role: 'timestamp' };
+  // Saved with the timestamp and ease; since then one column to choose and two more.
+  const head = [['Timestamp', 'Ease (1-5)', 'How satisfied are you overall?', 'Rate the screen (0-10)', 'Anything else?'],
+    ['2026-11-12 09:00', 4, 6, 7, 'Smooth setup'], ['2026-11-13 09:00', 5, 7, 8, 'The holder wobbles'], ['2026-11-14 09:00', 3, 5, 6, 'Fine']];
+  const s = F.summarise(head, { now: NOW, roles: F.checkRoles([ts, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: false }]) });
+  const flag = flagsHtml({ ...field(s), flags: F.fieldFlags({ summary: s }) });
+  assert.match(flag, /1 column needs a choice and 2 more are not checked yet: not in the average or the score flags until then/);
+  const problems = F.fieldProblems({ enabled: true, summary: s });
+  const check = problems.filter((p) => p.fix === 'check');
+  assert.equal(check.length, 1);
+  assert.equal(check[0].label, 'Field feedback: 1 column needs a choice and 2 more are not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off)');
+  // With privacy mode off the line does not ask for it.
+  assert.equal(check[0].labelPrivacyOff, 'Field feedback: 1 column needs a choice and 2 more are not checked yet (Settings → Connections → Field feedback → Check the columns)');
+});
+
+test('after a save, columns all renamed since are counted as new, as the core says', async () => {
+  const { flagsHtml } = await view();
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: false },
+    { header: 'How satisfied?', index: 2, role: 'score', low: 1, high: 7, worse: false }]);
+  const head = [['Submitted at', 'Ease of use (1-5)', 'How satisfied are you overall?'], ['2026-11-12 09:00', 4, 6], ['2026-11-13 09:00', 5, 7], ['2026-11-14 09:00', 3, 5]];
+  const s = F.summarise(head, { now: NOW, roles });
+  assert.equal(s.saved, true);
+  assert.equal(s.columns.some((c) => c.confirmed), false);
+  assert.match(flagsHtml({ ...field(s), flags: F.fieldFlags({ summary: s }) }), /1 column needs a choice and 2 more are not checked yet: not in the average or the score flags until then/);
+  assert.equal(F.summarise(head, { now: NOW }).saved, false);
+});
+
+test('the average\'s dash says new scores wait for their check when that is the only reason', async () => {
+  const { fieldHtml } = await view();
+  const head = [['Timestamp', 'Rate the screen (0-10)'], ['2026-11-12 09:00', 7], ['2026-11-13 09:00', 8]];
+  const s = F.summarise(head, { roles: F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }]) });
+  assert.deepEqual([s.overall, s.scoresUnchecked, s.scalesGuessed, s.directionsGuessed], [null, 1, 0, 0]);
+  assert.match(fieldHtml(field(s)), /<dt class="stat-label" title="New scores are not in the average until the columns are checked">Average score/);
+});

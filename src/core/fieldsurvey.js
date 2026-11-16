@@ -611,7 +611,8 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
     timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
-    checked: false, needsChoice: 0, newColumns: [], columns: [],
+    // saved: the columns were saved at least once (a column not among them is new).
+    checked: false, saved: Array.isArray(roles) && roles.length > 0, needsChoice: 0, newColumns: [], columns: [],
     questions: [], numbers: [], overall: null, scalesGuessed: 0, directionsGuessed: 0, scoresUnchecked: 0, comments: [], commentCount: 0, choices: [],
     identifying: [], doubtful: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
@@ -1098,7 +1099,10 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
   const out = [];
   // fix: what the board links the line to ('check' the columns, open the
   // 'settings', or 'refresh' now), as the flags do.
-  const add = (label, detail = '', fix = null) => out.push({ label: `Field feedback: ${label}`, detail, ...(fix ? { fix } : {}) });
+  // labelPrivacyOff: the same line for a board with privacy mode already off.
+  const add = (label, detail = '', fix = null, labelPrivacyOff = null) => out.push({
+    label: `Field feedback: ${label}`, detail, ...(fix ? { fix } : {}), ...(labelPrivacyOff ? { labelPrivacyOff: `Field feedback: ${labelPrivacyOff}` } : {}),
+  });
   const err = cache?.lastError;
   if (err) add(err.message, err.detail ?? '', err.kind !== 'share' && TRANSIENT.has(err.kind) ? 'refresh' : 'settings');
   if (keyError && keyError !== err?.message) add(keyError, '', 'settings');
@@ -1106,11 +1110,16 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
   if (summary) {
     const unread = unreadableText(summary);
     if (unread) add(unread);
-    const n = summary.newColumns?.length ?? 0;
-    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
-    // Privacy mode keeps the step read-only, so this is the reminder.
+    // What is not checked, in one line counted as the board's flag counts it:
+    // the columns to choose, and the new ones that need no choice besides.
+    // Privacy mode keeps the step read-only, so the line says to turn it off.
+    const where = 'Settings → Connections → Field feedback → Check the columns';
     const unsure = summary.needsChoice ?? 0;
-    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)`, '', 'check');
+    const fresh = (summary.columns ?? []).filter((c) => c.isNew && !c.needsChoice).length;
+    if (unsure) {
+      const words = `${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice${fresh ? ` and ${fresh} more ${fresh === 1 ? 'is' : 'are'} not checked yet` : ''}`;
+      add(`${words} (${where}, with privacy mode off)`, '', 'check', `${words} (${where})`);
+    } else if (fresh) add(`${fresh === 1 ? 'a new column' : `${fresh} new columns`} in the sheet, not checked yet (${where})`, '', 'check');
     const doubt = summary.doubtful?.length ?? 0;
     if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);

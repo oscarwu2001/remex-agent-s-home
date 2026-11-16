@@ -326,7 +326,7 @@ needs a choice, its flag says the same instead of the note. After a save, a
 column added to the form later gets one line, "A new column is not checked
 yet: it is not in the average or the score flags · Check the columns" (or,
 when it needs a choice, its flag says so). Either way the section has one
-**Check the columns** link.
+**Check the columns** link for what is not checked.
 
 **Higher is worse.** On a question such as "How difficult was setup?
 (1-5)", a high answer is the bad one. In Check the columns each score

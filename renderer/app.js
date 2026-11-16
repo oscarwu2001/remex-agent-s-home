@@ -1367,7 +1367,7 @@ function render(force = false) {
   $('problems').hidden = problems.length === 0;
   $('problem-list').innerHTML = problems
     // A fix button keeps its focus across redraws by its data-key.
-    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
+    .map((p, i) => `<li>${escapeXml(!prefs.private && p.labelPrivacyOff ? p.labelPrivacyOff : p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
