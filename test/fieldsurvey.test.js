@@ -296,6 +296,22 @@ test('a word in a score column is counted as unreadable, not averaged and not dr
   assert.deepEqual(off.questions.map((q) => [q.n, q.mean, q.unreadable]), [[4, 17 / 4, 1]]);
 });
 
+test('a small form with one "n/a" keeps its score question; numbers never become comments', () => {
+  const rows = [
+    ['Timestamp', 'How easy was the setup? (1-5)', 'Anything to improve?'],
+    ['2026-11-10 09:00', 4, 'Bigger buttons'],
+    ['2026-11-11 09:00', 5, ''],
+    ['2026-11-12 09:00', 'n/a', 'Faster start-up'],
+  ];
+  const s = F.summarise(rows);
+  assert.deepEqual(s.questions.map((q) => [q.question, q.n, q.mean, q.unreadable]), [['How easy was the setup? (1-5)', 2, 4.5, 1]]);
+  assert.deepEqual(s.comments.map((c) => c.text), ['Faster start-up', 'Bigger buttons']);
+  // Mostly words: free text, even with a number among them.
+  const words = F.summarise([['Timestamp', 'Notes'], ['2026-11-10 09:00', 'fine'], ['2026-11-11 09:00', 4], ['2026-11-12 09:00', 'works well']]);
+  assert.deepEqual(words.questions, []);
+  assert.equal(words.commentCount, 3);
+});
+
 test('ragged rows: short rows are blanks, extra cells become a column of their own', () => {
   const rows = [
     ['Timestamp', 'Rating', 'Comments'],

@@ -353,8 +353,13 @@ function classify(header, values, untitled) {
   if (!values.length) return { kind: 'skipped', reason: 'no answers' };
   if (!untitled && ID_HEADER.test(header)) return { kind: 'identifying' };
   if (share(values, looksPersonal) >= 0.5) return { kind: 'identifying' };
+  // A score: 80% whole numbers on a small scale; or, on a small form where
+  // one "n/a" weighs a lot, at least half, the rest short placeholders.
+  // Either way the other cells are counted as unreadable.
   const ints = values.map(intOf);
-  if (share(ints, (n) => Number.isInteger(n) && n >= 0 && n <= 10) >= 0.8) {
+  const onScale = (n) => Number.isInteger(n) && n >= 0 && n <= 10;
+  const scored = share(ints, onScale);
+  if (scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => onScale(ints[k]) || text(v).length <= 20))) {
     return { kind: 'score', ...scaleOf(header, ints.filter((n) => Number.isInteger(n) && n >= 0 && n <= 10)) };
   }
   const dayFirst = dayFirstColumn(values);
