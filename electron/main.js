@@ -219,7 +219,7 @@ function createWindow() {
 // Local only: Chromium's own background fetches (component updates and the
 // like) are turned off before the app is ready, as a backstop to the spell
 // checker being switched off below. Nothing leaves the machine unless the
-// user turns on the real weather or presses Update.
+// user turns on the real weather or field feedback, or presses Update.
 app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-domain-reliability');

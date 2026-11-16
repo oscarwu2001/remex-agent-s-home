@@ -69,7 +69,7 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **Wind:** every minute or two a gust blows through. The garden trees and flowers bend, and petals blow off the cherry and blossom trees and drift across the hospital (leaves, if nothing is in flower). It doesn't happen if Windows is set to reduce motion. Your choices are saved in `%APPDATA%\Agents Home\decor.json`.
 - **Room style** (in Settings): **Simple** is the storybook furniture. **Detailed** furnishes every room with realistic hospital equipment, still in the same flat-colour style. That means a real operating table with padded sections and arm boards, twin surgical lights on ceiling arms, and an anaesthesia machine with gas cylinders. The ward gets hospital beds with rails, IV poles and privacy curtains. The lab gets a bench with a sink, a microscope and a fume hood. Radiology gets an MRI gantry with a patient cradle, and the Vision Clinic an exam chair with a phoropter and a slit lamp. The Nurses' Station gets a two-level counter with monitors and chairs, and departments get a navigation camera tower on wheels.
 - **Weather** (in Settings): clear, cloudy, rain, snow or fog, or **Changes through the day**, which picks new weather every three hours (snow in winter, rain otherwise). Rain and snow fall over the hospital and the sun hides behind the clouds. The time, the part of the day and the weather are shown at the bottom right of the map.
-- **Real weather** (in Settings, off by default): turn on **Use the real weather**, type your town and pick it from the list. The hospital then shows the weather outside, checked every 30 minutes, and the clock shows the temperature in °C or °F. This is the app's only trip online. It asks the free Open-Meteo service and sends only the place you chose. If the service can't be reached, the weather you chose by hand stands in, and the clock says so.
+- **Real weather** (in Settings, off by default): turn on **Use the real weather**, type your town and pick it from the list. The hospital then shows the weather outside, checked every 30 minutes, and the clock shows the temperature in °C or °F. This is one of the app's few trips online (see **Privacy** below). It asks the free Open-Meteo service and sends only the place you chose. If the service can't be reached, the weather you chose by hand stands in, and the clock says so.
 - **Update and restart** (Settings → Updates): if you run the app from a git clone (`npm start`), this pulls the newest code from GitHub and restarts the app. It won't pull if you have uncommitted changes in the clone. If an update changes the app's packages, it asks you to close the app and run `npm ci` instead of restarting. An installed copy is updated by running the newest setup file.
 - **Time of day:** by default the hospital follows your computer's clock. Early morning (5–8) has a lavender-to-peach sky and a low rosy sun. Morning (8–11) and noon (11–14) are bright, with the sun climbing. Afternoon (14–18) turns golden, with the sun going down on the other side. Night (18–5) brings stars, a moon and lit windows. You can also pin one part of the day in Settings.
 - **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
@@ -228,6 +228,52 @@ has run once. **To turn it off**, run
 `powershell -File ~/.claude/assistant/install.ps1 -Remove`; the list stays
 as it was last left until you remove `~/.agents-home/assistant/`.
 
+## Field feedback
+
+The **Field feedback** section (under Projects, off by default) shows your
+field survey's answers from a Google Form's response sheet: how many
+responses, the average score, and how many are new since the last update.
+**See each question and the comments** opens each score question's average
+and the newest comments. The sheet is read on Monday, Wednesday and Friday at
+08:00, and when the app starts after missing one of those times; **Refresh
+now** in Settings reads it at once. The section says when it was last read.
+
+The app reads the sheet as a Google Cloud *service account* of your own,
+which you share the sheet with, so the sheet stays private:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), pick or
+   create a project.
+2. **APIs & Services → Library**: find **Google Sheets API** and press
+   **Enable**.
+3. **IAM & Admin → Service accounts → Create service account**. Give it a
+   name (for example `survey-reader`); it needs no roles.
+4. Open it, then **Keys → Add key → Create new key → JSON**. A `.json` file
+   downloads. Keep it somewhere private, not in a shared or synced folder:
+   the app reads it from there and never copies it.
+5. Open the response sheet (in the form: **Responses → View in Sheets**),
+   press **Share** and add the service account's email (it ends in
+   `iam.gserviceaccount.com`) as **Viewer**.
+6. In Agent's Home, open **Settings → Field feedback (Google Sheet)**, turn on
+   **Show field feedback**, paste the sheet's link from the browser's address
+   bar and press **Save**, then press **Choose key file…** and pick the
+   `.json` file. Settings then shows the service account's email, so you can
+   check the sheet is shared with it.
+
+The app works out the form's columns by itself: the timestamp; score
+questions (whole numbers on a small scale such as 1–5 or 1–10; a scale
+written in the question, like "(1-5)", is used when there is one);
+multiple-choice questions, which are counted; and free text, which become the
+comments. Columns with names, email addresses or phone numbers are never
+shown. Answers it cannot read, such as a word in a score question, are
+counted under **Needs attention**, never dropped quietly. With **Hide file
+names and commands** on, the section shows only counts, scores and dates;
+question wording, comments and chosen answers show when it is off.
+
+When something goes wrong, the section and **Needs attention** say what to
+try, for example "Share the sheet with … as Viewer" or "The sheet link points
+to nothing — check it". After a failed read the app tries again 30 minutes
+later, and the last answers it read stay on the board.
+
 ## The Report button
 
 The **Report** button at the top of the map builds the performance report
@@ -369,11 +415,17 @@ writes to `.claude`. It writes only its own files: its settings and logs,
 your project list (`~/.agents-home/projects.json`) when you change a to-do,
 and, if you turn on **Other computers**, one status file in the folder you
 picked. It reads the personal assistant's questions (`~/.agents-home/assistant/`)
-but never writes there. There are two exceptions, and both happen only when you ask:
+but never writes there. There are three exceptions, and each happens only when you ask:
 - **Use the real weather**, switched on in Settings, asks
   [Open-Meteo](https://open-meteo.com) for the weather and temperature every
   30 minutes. It sends only the place you chose, never anything from your
   sessions.
+- **Field feedback**, switched on in Settings, reads one Google Sheet that you
+  shared with your own service account, on Monday, Wednesday and Friday at
+  08:00 and when you press **Refresh now**. It sends Google only a sign-in
+  request signed with your key, the sheet's id and its tab name, never
+  anything from your sessions. The answers it read are kept in the app's data
+  folder (`field-survey-cache.json`) so the board shows them after a restart.
 - **Update and restart** pulls the newest code with git. **Hide file names and commands** is on by default. With
 it on, the board shows "Reading a file" but not the file's name, and it hides
 task descriptions and folder paths too. Error messages never quote the
