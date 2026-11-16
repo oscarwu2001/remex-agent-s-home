@@ -189,7 +189,7 @@ test("Google's refusals become plain sentences with what to try", async () => {
   };
   const share = await fail({ meta: [403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED' } }] });
   // The reader address is the detail, shown only with privacy off.
-  assert.equal(share.message, 'Share the sheet with the key’s reader address (copy it in Settings → Field feedback) as Viewer, then press Refresh now.');
+  assert.equal(share.message, 'Share the sheet with the key’s reader address (copy it in Settings → Connections → Field feedback) as Viewer, then press Refresh now.');
   assert.equal(share.detail, ROBOT);
   assert.equal(share.kind, 'share');
   const api = await fail({ meta: [403, { error: { code: 403, message: 'Google Sheets API has not been used in project 0 before or it is disabled.', status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED' }] } }] });
@@ -504,7 +504,7 @@ test('a column that appears after the check is flagged under Needs attention', (
   const s = F.summarise(form(['Rating (1-5)', 'New question'], [[4, 'yes']]), { roles });
   assert.deepEqual(s.columns.map((c) => [c.header, c.confirmed, c.isNew]), [['Timestamp', true, false], ['Rating (1-5)', true, false], ['New question', false, true]]);
   assert.deepEqual(F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label),
-    ['Field feedback: a new column in the sheet, not checked yet (Settings → Field feedback → Check the columns)']);
+    ['Field feedback: a new column in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)']);
   // Never checked: nothing is "new", the board says the columns are not checked yet.
   assert.deepEqual(F.summarise(form(['Rating (1-5)'], [[4]])).newColumns, []);
 });
@@ -710,9 +710,8 @@ test('short answers shaped like names: Title Case phrases are an unsure guess, m
   assert.deepEqual([roleOf(zh, '使用心得'), col(zh, '使用心得').suggested.confidence, zh.commentCount], ['comment', 'high', 5]);
   unsureHidden(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Quick Setup'], ['Fast Boot'], ['the holder']]), 'What did you like most?');
   unsureHidden(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Quick Setup'], ['Fast Boot'], ['Helpful Support']]), 'Best part');
-  // With scale words in two of five ("Easy Setup", "Good Support"), under the 70% a guess needs: comments.
-  const some = F.summarise(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]));
-  assert.deepEqual([roleOf(some, 'Best part'), col(some, 'Best part').suggested.confidence, some.commentCount], ['comment', 'high', 5]);
+  // A scale word next to another word ("Easy Setup", "Good Support") still has a name's shape: an unsure guess.
+  unsureHidden(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]), 'Best part');
 });
 
 test('names found by their shape are an unsure guess under any title, repeated or not; person titles are sure', () => {
@@ -787,7 +786,7 @@ test('a checked column whose answers turn into emails is kept off the board, out
     assert.deepEqual([col(s, 'Anything else?').role, col(s, 'Anything else?').doubt], [role, true], role);
     assert.deepEqual([s.commentCount, s.choices.length, s.questions.length, s.numbers.length, s.doubtful], [0, 0, 0, 0, ['Anything else?']], role);
     const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
-    assert.ok(lines.includes('Field feedback: 1 column you checked now looks like emails or phone numbers; its answers are hidden and not stored (Settings → Field feedback → Check the columns)'), `${role}: ${lines.join('\n')}`);
+    assert.ok(lines.includes('Field feedback: 1 column you checked now looks like emails or phone numbers; its answers are hidden and not stored (Settings → Connections → Field feedback → Check the columns)'), `${role}: ${lines.join('\n')}`);
     // Saved like that, the reply says it stays hidden.
     assert.equal(F.columnsReply(s), 'Kept hidden: its answers look like emails or phone numbers; choose Identifying or Ignore.');
     const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
@@ -832,7 +831,7 @@ test('columns waiting for a choice are a Needs attention line, privacy mode or n
   const s = F.summarise(form(['How satisfied are you overall?', 'Who filled this in?'], [[6, 'Ann Lee'], [7, 'Bo Chan'], [5, 'Cy Wu']]));
   assert.equal(s.needsChoice, 2);
   const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
-  assert.ok(lines.includes('Field feedback: 2 columns need a choice (Settings → Field feedback → Check the columns, with privacy mode off)'), lines.join('\n'));
+  assert.ok(lines.includes('Field feedback: 2 columns need a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)'), lines.join('\n'));
 });
 
 test('a link to the same sheet that names no tab keeps the saved tab, and says so', () => {
@@ -932,8 +931,8 @@ test('Title Case scale and frequency answers are choices; names, repeated or not
   assert.deepEqual([roleOf(agree, 'The setup was quick'), col(agree, 'The setup was quick').suggested.confidence], ['choice', 'high']);
   const happy = F.summarise(form(['Overall'], six(['Very Satisfied', 'Satisfied', 'Very Satisfied', 'Very Satisfied', 'Satisfied', 'Not Satisfied', 'Very Satisfied', 'Satisfied'])));
   assert.equal(roleOf(happy, 'Overall'), 'choice');
-  const often = F.summarise(form(['How often?'], six(['Always', 'Usually Not', 'Sometimes', 'Rarely Ever', 'Usually Not', 'Always'])));
-  assert.notEqual(roleOf(often, 'How often?'), 'identifying');
+  const often = F.summarise(form(['How often?'], six(['Always', 'Usually Not', 'Sometimes', 'Usually Not', 'Always', 'Sometimes', 'Always', 'Usually Not'])));
+  assert.deepEqual([roleOf(often, 'How often?'), col(often, 'How often?').suggested.confidence], ['choice', 'high']);
   const zh = F.summarise(form(['整體'], six(['非常滿意', '滿意', '非常滿意', '普通', '滿意', '非常滿意'])));
   assert.equal(roleOf(zh, '整體'), 'choice');
   // Names that repeat, with titles and initials, in English and Chinese.
@@ -964,65 +963,122 @@ test('a timestamp column whose answers the cache does not keep waits for the nex
 });
 
 // ---- flags ------------------------------------------------------------------------------------
+//
+// Flags look at a fixed window: the last 7 days of answers by their date,
+// against the answers before it. NOW is the moment they are worked out.
 
-// Rows answered on 1–15 November at 09:00 local time, with the last read's newest answer on the 10th.
-const flagForm = (headers, values) => [['Timestamp', ...headers], ...values.map((v, i) => [`2026-11-${String(1 + i).padStart(2, '0')} 09:00`, ...v])];
-const SINCE = new Date(2026, 10, 10, 12, 0).toISOString();
+const NOW = new Date(2026, 10, 20, 12, 0).getTime();
+const DAY = 86_400_000;
+const stamp = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:00`;
+};
+// rows: [daysAgo, ...answers]
+const dated = (headers, rows) => [['Timestamp', ...headers], ...rows.map(([ago, ...v]) => [stamp(NOW - ago * DAY), ...v])];
+const flagsOf = (rows, opts = {}) => F.fieldFlags({ summary: F.summarise(rows, { now: NOW, ...opts }), ...opts.flags });
+const earlier = (v, n = 10) => Array.from({ length: n }, (_, k) => [20 + k, ...v]);
 
-test('the low mark: the bottom two points of 1–5, the bottom quarter (rounded up) of longer scales', () => {
+test('the low mark: the bottom quarter of the scale, rounded up', () => {
+  // 1–5: 1 and 2; 1–7: 1 and 2; 0–10: 0, 1 and 2; 1–10: 1, 2 and 3.
   assert.deepEqual([[1, 5], [1, 7], [0, 10], [1, 10]].map(([l, h]) => F.lowMark(l, h)), [2, 2, 2, 3]);
 });
 
-test('low scores since the last update are counted per question, by its low mark', () => {
-  const old = Array.from({ length: 10 }, () => [4, 9]);
-  const fresh = [[1, 3], [2, 4], [3, 2], [5, 10]];
-  const s = F.summarise(flagForm(['Ease (1-5)', 'Clarity (1-10)'], [...old, ...fresh]), { since: SINCE });
-  const flags = F.fieldFlags({ summary: s });
-  assert.deepEqual(flags.filter((f) => f.kind === 'low').map((f) => [f.no, f.count, f.mark]), [[1, 2, 2], [2, 2, 3]]);
-  // Both fell well below their earlier 4 and 9.
-  assert.deepEqual(flags.filter((f) => f.kind === 'falling').map((f) => f.no), [1, 2]);
+test('low scores in the last 7 days are counted per question, by its low mark', () => {
+  const rows = dated(['Ease (1-5)', 'Clarity (1-10)'], [...earlier([4, 9]), [3, 1, 3], [2, 2, 4], [1, 3, 2], [0.5, 5, 10]]);
+  const { why, list } = flagsOf(rows);
+  assert.equal(why, null);
+  assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => [f.no, f.count, f.mark, f.worse]), [[1, 2, 2, false], [2, 2, 3, false]]);
+  assert.deepEqual(list.filter((f) => f.kind === 'falling').map((f) => f.no), [1, 2]);
 });
 
-test('a falling average is flagged at exactly a tenth of the scale, and not with only two new answers', () => {
-  const old = [[4], [4], [4], [4], [4], [4], [4], [4], [4], [4]];
-  // New answers average 3.6: 0.4 below 4.0 on a 1–5 scale, exactly 10% of its range.
-  const s = F.summarise(flagForm(['Ease (1-5)'], [...old, [4], [4], [4], [3], [3]]), { since: SINCE });
-  const falling = F.fieldFlags({ summary: s }).filter((f) => f.kind === 'falling');
-  assert.deepEqual(falling.map((f) => [f.no, f.newN, Number(f.newMean.toFixed(2)), Number(f.oldMean.toFixed(2))]), [[1, 5, 3.6, 4]]);
-  // Just under the line: 3.8 is only 0.2 lower.
-  const mild = F.summarise(flagForm(['Ease (1-5)'], [...old, [4], [4], [4], [4], [3]]), { since: SINCE });
-  assert.deepEqual(F.fieldFlags({ summary: mild }).filter((f) => f.kind === 'falling'), []);
-  // Two new answers, far lower: too few to call a trend.
-  const two = F.summarise(flagForm(['Ease (1-5)'], [...old, [1], [1]]), { since: SINCE });
-  assert.deepEqual(F.fieldFlags({ summary: two }).filter((f) => f.kind === 'falling'), []);
+test('a low score from 5 days ago is still flagged after a later read brought one good answer', () => {
+  const first = dated(['Ease (1-5)'], [...earlier([4]), [5, 1]]);
+  const later = dated(['Ease (1-5)'], [...earlier([4]), [5, 1], [1, 5]]);
+  let cache = F.afterFetch(null, got(first), { now: NOW - 4 * DAY, started: NOW - 4 * DAY, link: LINK });
+  cache = F.afterFetch(cache, got(later), { now: NOW, started: NOW, link: LINK });
+  const { list } = F.fieldFlags({ summary: F.summariseCache(cache, [], { now: NOW }) });
+  assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => f.count), [1]);
 });
 
-test('new comments are counted; a guessed scale raises no score flags', () => {
-  const rows = flagForm(['How satisfied are you overall?', 'Anything else?'], [...Array.from({ length: 10 }, (_, k) => [6, `Earlier note number ${k} about the set-up`]), [1, 'The start-up was far too slow'], [1, 'The holder came loose twice'], [1, 'It crashed during the case']]);
-  const flags = F.fieldFlags({ summary: F.summarise(rows, { since: SINCE }) });
-  assert.deepEqual(flags.filter((f) => f.kind === 'comments').map((f) => f.count), [3]);
-  assert.deepEqual(flags.filter((f) => f.kind === 'low' || f.kind === 'falling'), []);
+test('a falling average is flagged at exactly a tenth of the scale, and not with only two answers in the window', () => {
+  // The window's answers average 3.6: 0.4 below 4.0 on 1–5, exactly 10% of its range.
+  const falling = flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 3], [2, 3]])).list.filter((f) => f.kind === 'falling');
+  assert.deepEqual(falling.map((f) => [f.no, f.recentN, Number(f.recentMean.toFixed(2)), Number(f.earlierMean.toFixed(2))]), [[1, 5, 3.6, 4]]);
+  // 3.8 is only 0.2 lower.
+  assert.deepEqual(flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [6, 4], [5, 4], [4, 4], [3, 4], [2, 3]])).list.filter((f) => f.kind === 'falling'), []);
+  // Two answers, far lower: too few to call a trend.
+  assert.deepEqual(flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [2, 1], [1, 1]])).list.filter((f) => f.kind === 'falling'), []);
 });
 
-test('setup problems are flags too, each with its fix', () => {
-  const s = F.summarise(form(['How satisfied are you overall?'], [[6], [7], [5]]));
-  const share = { kind: 'share', message: 'Share the sheet…' };
-  assert.deepEqual(F.fieldFlags({ summary: s, lastError: share }).map((f) => [f.kind, f.what, f.fix]), [['setup', 'choose', 'check'], ['setup', 'share', 'settings']]);
-  assert.deepEqual(F.fieldFlags({ summary: null, lastError: { kind: 'network', message: 'x' } }).map((f) => [f.what, f.fix]), [['failed', 'refresh']]);
-  assert.deepEqual(F.fieldFlags({ summary: null, keyError: 'The key file…' }).map((f) => [f.what, f.fix]), [['key', 'settings']]);
+test('comments in the window are counted; a guessed scale raises no score flags', () => {
+  const rows = dated(['How satisfied are you overall?', 'Anything else?'],
+    [...Array.from({ length: 10 }, (_, k) => [20 + k, 6, `Earlier note number ${k} about the set-up`]), [3, 1, 'The start-up was far too slow'], [2, 1, 'The holder came loose twice'], [1, 1, 'It crashed during the case']]);
+  const { list } = flagsOf(rows);
+  assert.deepEqual(list.filter((f) => f.kind === 'comments').map((f) => f.count), [3]);
+  assert.deepEqual(list.filter((f) => f.kind === 'low' || f.kind === 'falling'), []);
 });
 
-test('an empty or never-read cache, or a read with nothing new, raises no flags and does not throw', () => {
-  assert.deepEqual(F.fieldFlags(), []);
-  assert.deepEqual(F.fieldFlags({ summary: F.summariseCache(null, []) }), []);
-  assert.deepEqual(F.fieldFlags({ summary: F.summarise([]) }), []);
-  assert.deepEqual(F.fieldFlags({ summary: F.summarise([['Timestamp', 'Ease (1-5)']]) }), []);
-  // Every answer is from before the last read: nothing new, nothing to flag.
-  const rows = flagForm(['Ease (1-5)'], [[1], [1], [2], [1], [1]]);
-  const quiet = F.summarise(rows, { since: new Date(2026, 10, 30).toISOString() });
-  assert.deepEqual(F.fieldFlags({ summary: quiet }), []);
-  // The first read: no "since" at all.
-  assert.deepEqual(F.fieldFlags({ summary: F.summarise(rows) }), []);
+test('flags say why they could not compare, instead of nothing to flag', () => {
+  // Never read.
+  assert.deepEqual(F.fieldFlags(), { why: 'unread', earlier: false, list: [] });
+  assert.equal(F.fieldFlags({ summary: F.summariseCache(null, []) }).why, 'unread');
+  assert.equal(F.fieldFlags({ summary: F.summarise([]) }).why, 'unread');
+  // No timestamp column: nothing to tell recent from earlier.
+  const noDates = F.summarise([['Rate it (1-5)', 'Notes'], [4, 'a long answer here'], [1, 'another long answer']], { now: NOW });
+  assert.deepEqual(F.fieldFlags({ summary: noDates }).why, 'no-dates');
+  // Dates waiting for the next read (a timestamp column the cache had dropped).
+  assert.equal(F.fieldFlags({ summary: { ...F.summarise(dated(['Ease (1-5)'], [[1, 1]]), { now: NOW }), datesWaiting: true } }).why, 'waiting');
+  // Set-up problems still show with any of these.
+  const share = { kind: 'share', message: 'x' };
+  assert.deepEqual(F.fieldFlags({ summary: null, lastError: share }).list.map((f) => f.what), ['share']);
+  // Nothing before the window: averages are not compared, low scores still are.
+  const fresh = flagsOf(dated(['Ease (1-5)'], [[3, 1], [2, 1], [1, 1]]));
+  assert.deepEqual([fresh.why, fresh.earlier, fresh.list.map((f) => f.kind)], [null, false, ['low']]);
+  // Compared, and all is well: an empty list.
+  const calm = flagsOf(dated(['Ease (1-5)'], [...earlier([4]), [3, 4], [1, 5]]));
+  assert.deepEqual([calm.why, calm.earlier, calm.list], [null, true, []]);
+});
+
+test('answers with no readable date are a set-up flag, and stay out of the window', () => {
+  const rows = dated(['Ease (1-5)'], [...earlier([4]), [2, 4]]);
+  rows.push(['not a date', 1], ['soon', 1]);
+  const { why, list } = flagsOf(rows);
+  assert.equal(why, null);
+  assert.deepEqual(list.map((f) => [f.kind, f.what ?? null, f.count ?? null]), [['setup', 'undated', 2]]);
+});
+
+test('on a scale where higher is worse, high answers and a rising average are flagged', () => {
+  const head = ['How difficult was setup? (1-5)'];
+  const s = F.summarise(dated(head, [[1, 2]]), { now: NOW });
+  assert.deepEqual([s.columns[1].suggested.worse, s.columns[1].worse], [true, true]);
+  assert.equal(F.summarise(dated(['How easy was setup? (1-5)'], [[1, 2]]), { now: NOW }).columns[1].worse ?? false, false);
+  for (const h of ['Pain after the case (1-5)', '操作困難程度 (1-5)', 'Problems with the holder (1-5)', 'Effort needed (1-10)']) {
+    assert.equal(F.summarise(dated([h], [[1, 2]]), { now: NOW }).columns[1].suggested.worse, true, h);
+  }
+  const rows = dated(head, [...earlier([2]), [3, 5], [2, 4], [1, 4]]);
+  const { list } = flagsOf(rows);
+  assert.deepEqual(list.map((f) => [f.kind, f.count ?? null, f.mark ?? null, f.worse]), [['low', 3, 4, true], ['falling', null, null, true]]);
+  // Unticked by the user: a plain scale again, where those are good answers.
+  const plain = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5 }]);
+  assert.deepEqual(flagsOf(rows, { roles: plain }).list, []);
+  // Ticked and saved: kept through checkRoles, the cache and a change of roles.
+  const ticked = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: true }]);
+  assert.equal(ticked[1].worse, true);
+  const cache = F.afterFetch(null, got(rows), { now: NOW, started: NOW, link: LINK, roles: ticked });
+  assert.equal(F.summariseCache(cache, ticked, { now: NOW }).columns[1].worse, true);
+  assert.equal(F.summariseCache(F.reroleCache(cache, ticked), ticked, { now: NOW }).columns[1].worse, true);
+  assert.equal(F.summariseCache(JSON.parse(JSON.stringify(cache)), ticked, { now: NOW }).columns[1].worse, true);
+});
+
+test('names with a scale word in them stay hidden names; answers made only of scale words are choices', () => {
+  for (const [h, vals] of [['Who ran the session?', ['Ann Good', 'Ann Good', 'Ann Good', 'Ann Good', 'Ann Good', 'Bo Chan', 'Bo Chan', 'Bo Chan', 'Cy Wu', 'Cy Wu']],
+    ['Lead', ['Lee Fair', 'Lee Fair', 'Lee Fair', 'Bo Chan', 'Bo Chan', 'Cy Wu']], ['Doctor on duty', ['Dr Good', 'Dr Good', 'Dr Good', 'Dr Wu', 'Dr Wu', 'Dr Chan']]]) {
+    const s = F.summarise(form([h], vals.map((v) => [v])));
+    assert.deepEqual([roleOf(s, h), col(s, h).needsChoice], ['identifying', true], h);
+  }
+  for (const [h, vals] of [['Setup', ['Very Easy', 'Quite Good', 'Very Easy', 'Not Easy', 'Quite Good', 'Very Easy']], ['Agree?', ['Strongly Agree', 'Agree', 'Strongly Agree', 'Strongly Agree', 'Agree', 'Neutral']]]) {
+    assert.equal(roleOf(F.summarise(form([h], vals.map((v) => [v]))), h), 'choice', h);
+  }
 });
 
 test('Needs attention lines for field feedback carry the fix the board links to', () => {

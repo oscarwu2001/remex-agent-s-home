@@ -123,7 +123,7 @@
           <span class="group-summary" id="group-look-summary"></span></span></button></h3>
         <div class="group-body" id="group-look-body" hidden>
           <section class="settings-group" aria-labelledby="look-h">
-            <h4 id="look-h">Look</h4>
+            <h4 id="look-h" tabindex="-1">Look</h4>
             <fieldset class="colourways" id="colourways">
               <legend>Colourway</legend>
               <div class="options">
@@ -165,7 +165,7 @@
           </section>
 
           <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
-            <h4 id="layout-h">Hospital layout <span class="count" id="layout-count"></span></h4>
+            <h4 id="layout-h" tabindex="-1">Hospital layout <span class="count" id="layout-count"></span></h4>
             <div id="layout-body"></div>
           </section>
         </div>
@@ -177,14 +177,13 @@
           <span class="group-summary" id="group-privacy-summary"></span></span></button></h3>
         <div class="group-body" id="group-privacy-body" hidden>
           <section class="settings-group" aria-labelledby="screen-h">
-            <h4 id="screen-h">On screen</h4>
+            <h4 id="screen-h" tabindex="-1">On screen</h4>
             <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names, commands and survey answers</span></label>
             <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
-            <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
           </section>
 
           <section class="settings-group" aria-labelledby="warn-h">
-            <h4 id="warn-h">Usage warnings</h4>
+            <h4 id="warn-h" tabindex="-1">Usage warnings</h4>
             <p class="hint">A session whose context is nearly full is always flagged: save your work before Claude Code compacts it. Claude Code's own usage-limit messages are passed on too.</p>
             <label class="field" for="opt-budget">Also warn me after this many tokens in 5 hours (leave empty for no warning)
               <input id="opt-budget" type="number" min="0" step="100000" inputmode="numeric" placeholder="e.g. 5000000"></label>
@@ -209,14 +208,14 @@
           <span class="group-summary" id="group-connect-summary"></span></span></button></h3>
         <div class="group-body" id="group-connect-body" hidden>
           <section class="settings-group" aria-labelledby="field-settings-h">
-            <h4 id="field-settings-h">Field feedback (Google Sheet)</h4>
+            <h4 id="field-settings-h" tabindex="-1">Field feedback (Google Sheet)</h4>
             <p class="hint">Your field survey’s answers on the board: how many, the average scores and what is new. The app reads one Google Sheet that you have shared with your own Google Cloud service account, on Monday, Wednesday and Friday at 08:00, and when it starts after missing one. Only the sheet’s id and a signed sign-in request are sent, never anything from your sessions. The README says how to make the key.</p>
             <label class="switch"><input type="checkbox" id="opt-field"> <span>Show field feedback (goes online)</span></label>
             <div class="field-settings" id="field-settings"></div>
           </section>
 
           <section class="settings-group" aria-labelledby="fleet-h">
-            <h4 id="fleet-h">Other computers</h4>
+            <h4 id="fleet-h" tabindex="-1">Other computers</h4>
             <p class="hint">See what runs on your other computers under “Running now”. Pick a folder they all sync, such as OneDrive, Dropbox or a network drive, and do the same on each computer. Each one writes a small status file there: project names, statuses, helper types and to-do counts. Never file names, commands, prompts or to-do wording. The app itself never goes online for this; your folder's own sync does.</p>
             <p class="hint" id="fleet-status" aria-live="polite"></p>
             <div class="form-actions">
@@ -237,12 +236,12 @@
           <span class="group-summary" id="group-agents-summary"></span></span></button></h3>
         <div class="group-body" id="group-agents-body" hidden>
           <section class="settings-group" aria-labelledby="pack-settings-h">
-            <h4 id="pack-settings-h">Office team for Claude (optional)</h4>
+            <h4 id="pack-settings-h" tabindex="-1">Office team for Claude (optional)</h4>
             <div id="pack-settings"></div>
           </section>
 
           <section class="settings-group" aria-labelledby="report-h">
-            <h4 id="report-h">Performance report</h4>
+            <h4 id="report-h" tabindex="-1">Performance report</h4>
             <p class="hint">How each agent has been doing: runs, finished rate, re-runs, time, tokens and a score, by day and by week.</p>
             <label class="field" for="report-days">Period
               <select id="report-days">
@@ -265,8 +264,14 @@
           <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-app-name">App</span>
           <span class="group-summary" id="group-app-summary"></span></span></button></h3>
         <div class="group-body" id="group-app-body" hidden>
+          <section class="settings-group" aria-labelledby="demo-h">
+            <h4 id="demo-h" tabindex="-1">Demo</h4>
+            <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
+            <p class="hint">Made-up sessions, helpers and sample field feedback, to try the app out. Your own sessions show again when it is off.</p>
+          </section>
+
           <section class="settings-group" aria-labelledby="update-h">
-            <h4 id="update-h">Updates</h4>
+            <h4 id="update-h" tabindex="-1">Updates</h4>
             <p class="hint" id="update-version"></p>
             <div class="form-actions">
               <button type="button" class="button" id="update-run">Update and restart</button>
@@ -277,7 +282,7 @@
           </section>
 
           <section class="settings-group" aria-labelledby="log-h">
-            <h4 id="log-h">System log</h4>
+            <h4 id="log-h" tabindex="-1">System log</h4>
             <p class="hint">A record for checking the team works, and for debugging: which agents worked, when, how they finished and their tokens, every few minutes who is working, and any errors. It is kept in the app's own folder, with names and times only, never your prompts or files.</p>
             <p class="hint" id="log-reminders" aria-live="polite"></p>
             <div class="form-actions">

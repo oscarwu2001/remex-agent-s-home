@@ -157,29 +157,32 @@ test('dates waiting for the next read say so on the board and in the sheet', asy
 
 // ---- flags -------------------------------------------------------------------------------------
 
+const NOW = new Date(2026, 10, 16, 12).getTime();
+// Ten answers in October, three in the last 7 days.
 const flagRows = (() => {
   const head = ['Timestamp', 'How easy was the setup? (1-5)', 'What should we improve?'];
-  const old = Array.from({ length: 10 }, (_, k) => [`2026-11-${String(1 + k).padStart(2, '0')} 09:00`, 4, `Earlier note number ${k} about the set-up`]);
+  const old = Array.from({ length: 10 }, (_, k) => [`2026-10-${String(1 + k).padStart(2, '0')} 09:00`, 4, `Earlier note number ${k} about the set-up`]);
   const fresh = [[1, 'The start-up was far too slow'], [2, 'The holder came loose twice'], [3, 'It crashed during the case']]
     .map(([v, t], k) => [`2026-11-${12 + k} 09:00`, v, t]);
   return [head, ...old, ...fresh];
 })();
 const flagged = () => {
-  const s = F.summarise(flagRows, { since: new Date(2026, 10, 10, 12).toISOString() });
-  return { ...field(s), sinceFetchedAt: new Date(2026, 10, 16, 8).getTime(), flags: F.fieldFlags({ summary: s, lastError: { kind: 'share', message: 'x' } }) };
+  const s = F.summarise(flagRows, { now: NOW });
+  return { ...field(s), flags: F.fieldFlags({ summary: s, lastError: { kind: 'share', message: 'x' } }) };
 };
 
 test('with privacy on, no flag names a question by its wording', async () => {
   const { flagsHtml, flagText } = await view();
   const f = flagged();
-  assert.deepEqual(f.flags.map((x) => x.kind), ['low', 'falling', 'comments', 'setup']);
-  const words = f.flags.map((x) => flagText(x, { privacy: true, since: f.sinceFetchedAt }));
+  assert.deepEqual(f.flags.list.map((x) => x.kind), ['low', 'falling', 'comments', 'setup']);
+  const words = f.flags.list.map((x) => flagText(x, { privacy: true }));
   for (const w of words) assert.doesNotMatch(w, /How easy|setup\?|improve|slow|holder|crashed/i, w);
-  assert.match(words[0], /^2 low scores on Question 1 since /);
-  const html = flagsHtml(f, { privacy: true });
-  assert.doesNotMatch(html, /How easy was the setup/);
+  assert.equal(words[0], '2 low scores on Question 1 in the last 7 days (2 or less on 1–5)');
+  assert.equal(words[1], 'Question 1 average down to 2.0 of 5 in the last 7 days (was 4.0)');
+  assert.equal(words[2], '3 comments in the last 7 days');
+  assert.doesNotMatch(flagsHtml(f, { privacy: true }), /How easy was the setup/);
   // With privacy off, the question's own words.
-  assert.match(flagText(f.flags[0], { privacy: false, since: f.sinceFetchedAt }), /^2 low scores on “How easy was the setup\? \(1-5\)” since /);
+  assert.equal(flagText(f.flags.list[0], { privacy: false }), '2 low scores on “How easy was the setup? (1-5)” in the last 7 days (2 or less on 1–5)');
 });
 
 test('each kind of flag has its own glyph and words, and set-up flags link to their fix', async () => {
@@ -187,16 +190,65 @@ test('each kind of flag has its own glyph and words, and set-up flags link to th
   const html = flagsHtml(flagged(), { privacy: true });
   for (const kind of ['low', 'falling', 'comments', 'setup']) assert.match(html, new RegExp(`class="ico flag-glyph flag-${kind}"`), kind);
   assert.match(html, /<button type="button" class="link-btn" data-field="settings">Open Settings<\/button>/);
-  assert.match(html, /3 new comments since /);
 });
 
-test('no flags is one calm line; no flags computed is no list at all', async () => {
+test('where higher is worse, the flags say high scores and an average going up, with their own glyph', async () => {
+  const { flagsHtml, flagText } = await view();
+  const head = ['Timestamp', 'How difficult was setup? (1-5)'];
+  const rows = [head, ...Array.from({ length: 10 }, (_, k) => [`2026-10-${String(1 + k).padStart(2, '0')} 09:00`, 2]), ['2026-11-12 09:00', 5], ['2026-11-13 09:00', 4], ['2026-11-14 09:00', 4]];
+  const s = F.summarise(rows, { now: NOW });
+  const f = { ...field(s), flags: F.fieldFlags({ summary: s }) };
+  assert.deepEqual(f.flags.list.map((x) => flagText(x, { privacy: true })), [
+    '3 high scores on Question 1 in the last 7 days (4 or more on 1–5, higher is worse)',
+    'Question 1 average up to 4.3 of 5 in the last 7 days (was 2.0; higher is worse)',
+  ]);
+  assert.match(flagsHtml(f), /class="ico flag-glyph flag-rising"/);
+});
+
+test('nothing to flag only when the window was compared; otherwise the board says why', async () => {
   const { flagsHtml, fieldHtml, fieldSheetHtml } = await view();
-  const calm = { ...field(F.summarise(rows)), flags: [] };
+  const s = F.summarise(rows);
+  const calm = { ...field(s), flags: { why: null, earlier: true, list: [] } };
   assert.match(flagsHtml(calm), /Nothing to flag/);
   assert.match(fieldHtml(calm), /Nothing to flag/);
   assert.match(fieldSheetHtml(calm), /Nothing to flag/);
-  assert.equal(flagsHtml(field(F.summarise(rows))), '');
+  assert.equal(flagsHtml(field(s)), '');
+  const said = (why) => flagsHtml({ ...field(s), flags: { why, earlier: false, list: [] } });
+  assert.match(said('unread'), /Flags show after the first update/);
+  assert.match(said('waiting'), /Flags show after the next update/);
+  assert.match(said('no-dates'), /No dates to compare: choose the timestamp column/);
+  assert.match(said('no-dates'), /data-field="check">Check the columns</);
+  for (const why of ['unread', 'waiting', 'no-dates']) assert.doesNotMatch(said(why), /Nothing to flag/, why);
+  // A set-up problem still shows under any of them.
+  assert.match(flagsHtml({ ...field(s), flags: { why: 'unread', earlier: false, list: [{ kind: 'setup', what: 'share', fix: 'settings' }] } }), /not shared/);
+  // Nothing from before the window: averages wait, and the board says so.
+  assert.match(flagsHtml({ ...field(s), flags: { why: null, earlier: false, list: [] } }), /No answers from before the last 7 days/);
+});
+
+test('a set-up flag for unchosen columns replaces the note above the numbers, and says the numbers are guesses', async () => {
+  const { fieldHtml, fieldSheetHtml, flagText } = await view();
+  const s = F.summarise(rows);
+  assert.equal(s.needsChoice, 1);
+  const f = { ...field(s), flags: F.fieldFlags({ summary: s }) };
+  for (const html of [fieldHtml(f), fieldSheetHtml(f)]) assert.doesNotMatch(html, /Columns not checked yet/);
+  assert.equal(flagText(f.flags.list.find((x) => x.what === 'choose')), '1 column needs a choice; until then the numbers are the app’s guesses');
+  // Without flags worked out, the note stays.
+  assert.match(fieldHtml(field(s)), /Columns not checked yet/);
+});
+
+test('"Higher is worse" is a tick on score rows, suggested by the title, kept in the roles', async () => {
+  const { fieldColumnsHtml, rolesFrom, draftWith } = await view();
+  const s = F.summarise([['Timestamp', 'How difficult was setup? (1-5)', 'Ease (1-5)'], ['2026-11-10 09:00', 2, 4], ['2026-11-11 09:00', 3, 5]]);
+  const f = field(s);
+  const html = fieldColumnsHtml(f, { privacy: false });
+  assert.match(html, /<input type="checkbox" id="fc-worse-1" data-col="1" data-part="worse" aria-label="How difficult was setup\? \(1-5\): higher is worse" checked>/);
+  assert.match(html, /<input type="checkbox" id="fc-worse-2" data-col="2" data-part="worse" aria-label="Ease \(1-5\): higher is worse">/);
+  assert.deepEqual(rolesFrom(f, {}).roles.filter((r) => r.role === 'score').map((r) => [r.index, r.worse ?? false]), [[1, true], [2, false]]);
+  const unticked = draftWith({}, 1, 'worse', false);
+  assert.equal(rolesFrom(f, unticked).roles.find((r) => r.index === 1).worse, undefined);
+  assert.deepEqual(F.checkRoles(rolesFrom(f, {}).roles).find((r) => r.index === 1), { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true });
+  // With privacy on the step only reads, and says so.
+  assert.match(fieldColumnsHtml(f, { privacy: true }), /Score, 1–5, higher is worse/);
 });
 
 test('the read-only step links to the privacy switch that opens it', async () => {

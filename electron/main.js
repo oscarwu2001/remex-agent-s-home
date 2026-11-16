@@ -526,6 +526,7 @@ app.whenReady().then(() => {
   let fieldGeneration = 0; // bumped when the link or key changes, so a fetch for the old ones is dropped
   let fieldTimer;
   let fieldLogged = '';
+  let fieldSummarisedAt = 0; // the flags' 7-day window is as of then
   const writeJsonFile = (file, data) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
@@ -548,7 +549,7 @@ app.whenReady().then(() => {
     try {
       columns = fieldSurvey.checkRoles(saved.columns ?? []);
     } catch {
-      problem('The checked field feedback columns could not be read; check them again in Settings → Field feedback', fieldFile);
+      problem('The checked field feedback columns could not be read; check them again in Settings → Connections → Field feedback', fieldFile);
     }
     field = {
       enabled: saved.enabled === true,
@@ -587,7 +588,8 @@ app.whenReady().then(() => {
   }
   function summariseField() {
     try {
-      fieldSummary = fieldSurvey.summariseCache(fieldCache, field.columns);
+      fieldSummarisedAt = Date.now();
+      fieldSummary = fieldSurvey.summariseCache(fieldCache, field.columns, { now: fieldSummarisedAt });
       fieldSummaryError = null;
     } catch (err) {
       // Never stops the app: the section shows no numbers and says why.
@@ -604,7 +606,7 @@ app.whenReady().then(() => {
     }
   }
   function readFieldKey() {
-    if (!field.keyPath) throw new fieldSurvey.FieldSurveyError('setup', 'Choose the key file in Settings → Field feedback.');
+    if (!field.keyPath) throw new fieldSurvey.FieldSurveyError('setup', 'Choose the key file in Settings → Connections → Field feedback.');
     let text;
     try {
       text = fs.readFileSync(field.keyPath, 'utf8');
@@ -680,7 +682,11 @@ app.whenReady().then(() => {
     // setTimeout cannot wait more than ~24 days.
     if (plan.wakeAt != null) fieldTimer = setTimeout(fieldTick, Math.min(Math.max(plan.wakeAt - Date.now() + 1_000, 1_000), 2 ** 31 - 1));
   }
-  setInterval(fieldTick, FIELD_CHECK_MS);
+  setInterval(() => {
+    // The window moves with the clock between reads: summarise again hourly.
+    if (fieldCache && Date.now() - fieldSummarisedAt > 60 * 60_000) summariseField();
+    fieldTick();
+  }, FIELD_CHECK_MS);
   checkFieldKey();
   summariseField();
   fieldTick();
@@ -780,7 +786,8 @@ app.whenReady().then(() => {
       summary: field.enabled ? fieldSummary : null,
       summaryError: field.enabled ? fieldSummaryError : null,
       // What needs a look (src/core/fieldsurvey.js fieldFlags); the board words them.
-      flags: field.enabled ? fieldSurvey.fieldFlags({ summary: fieldSummary, lastError: fieldCache?.lastError ?? null, keyError: fieldKey.error }) : [],
+      // { why, earlier, list }: why is set when the window could not be compared.
+      flags: field.enabled ? fieldSurvey.fieldFlags({ summary: fieldSummary, lastError: fieldCache?.lastError ?? null, keyError: fieldKey.error }) : null,
     };
   }
   function fieldProblems() {

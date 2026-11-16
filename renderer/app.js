@@ -1181,7 +1181,7 @@ function renderSessions(s) {
         ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}
         ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
   }).join('');
-  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: <button type="button" class="link-btn inline" data-settings="fleet-h">Settings → Other computers</button>.</p>';
+  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: <button type="button" class="link-btn inline" data-settings="fleet-h">Settings → Connections → Other computers</button>.</p>';
   return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
 }
 
@@ -2356,7 +2356,7 @@ async function showUpdateInfo() {
     ? `Version ${info.version}, ${info.branch} at ${info.commit}. Pulls the newest code from GitHub, then restarts.`
     : `Version ${info.version}. ${info.reason}`;
   $('update-run').disabled = !info.available;
-  updateSummary = info.available ? `Version ${info.version} · update when you like` : `Version ${info.version} · updates off here`;
+  updateSummary = info.available ? `Version ${info.version} · updates from GitHub` : `Version ${info.version} · updates off here`;
   if (!$('settings').hidden) renderGroupSummaries();
 }
 
@@ -2445,7 +2445,7 @@ async function showLogStatus() {
   }
   const { summary: s, team } = res;
   if (team.reminders !== 'on') {
-    line.textContent = `Team reminders are off (${team.team} of the team in Claude). To turn them on, tick Team reminders under Office team in Settings.`;
+    line.textContent = `Team reminders are off (${team.team} of the team in Claude). To turn them on, tick Team reminders in Settings → Agents & reports → Office team.`;
   } else if (!s.runs) {
     line.textContent = `Team reminders are on but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
   } else {
@@ -2703,10 +2703,10 @@ for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-l
 // "Check the columns": each choice goes into the draft, and the row redraws
 // (a score shows its scale).
 $('field-settings').addEventListener('change', (e) => {
-  const el = e.target.closest('select[data-col]');
+  const el = e.target.closest('select[data-col], input[type="checkbox"][data-col]');
   if (!el) return;
   const col = Number(el.dataset.col);
-  fieldUi.draft = draftWith(fieldUi.draft, col, el.dataset.part, el.value);
+  fieldUi.draft = draftWith(fieldUi.draft, col, el.dataset.part, el.type === 'checkbox' ? el.checked : el.value);
   fieldUi.checkNote = '';
   renderFieldSettings();
 });
@@ -2879,6 +2879,8 @@ function showInSettings(id, block = 'start') {
   const group = $(id)?.closest('[data-group]')?.dataset.group;
   if (group) openGroup(group);
   $(id)?.scrollIntoView({ block });
+  // Keyboard users land where the link pointed (headings carry tabindex="-1").
+  $(id)?.focus({ preventScroll: true });
 }
 // Any button with data-settings="<id>" (outside the field section's own
 // actions) is a link into Settings.
@@ -2901,10 +2903,10 @@ function groupSummaries() {
           : f.fetchedAt ? `Field feedback on · updated ${fieldAge(f.fetchedAt)}` : 'Field feedback on · not updated yet';
   return {
     look: `${theme} · ${time}`,
-    privacy: `Privacy ${prefs.private ? 'on' : 'off'} · ${wait ? `tell me after ${wait} min waiting` : 'no waiting alerts'}`,
+    privacy: `Privacy ${prefs.private ? 'on' : 'off'} · ${wait ? `waiting alert after ${wait} min` : 'no waiting alerts'}`,
     connect: `${field} · ${snapshot?.fleet?.on ? 'sharing with other computers' : 'other computers off'}`,
     agents: `Report for the ${$('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? 'last 28 days'}`,
-    app: updateSummary,
+    app: `${updateSummary}${prefs.demo ? ' · demo patients on' : ''}`,
   };
 }
 function renderGroupSummaries() {

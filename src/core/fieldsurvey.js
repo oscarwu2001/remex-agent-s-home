@@ -200,9 +200,9 @@ function refusal(step, status, body, key) {
   if (status === 403 && RATE.test(said)) return BUSY();
   // The address itself is the detail: it shows only with privacy off.
   if (status === 403) {
-    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (copy it in Settings → Field feedback) as Viewer, then press Refresh now.', key.clientEmail);
+    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (copy it in Settings → Connections → Field feedback) as Viewer, then press Refresh now.', key.clientEmail);
   }
-  if (status === 404) return new FieldSurveyError('missing', 'No sheet was found at this link. Open it in your browser to check it, then paste it again in Settings → Field feedback.');
+  if (status === 404) return new FieldSurveyError('missing', 'No sheet was found at this link. Open it in your browser to check it, then paste it again in Settings → Connections → Field feedback.');
   if (status === 401) return new FieldSurveyError('token', 'Google did not accept the sign-in for the sheet (401); press Refresh now.');
   if (status === 400 && step === 'values') return new FieldSurveyError('tab', 'Google could not read the responses tab (400). Open the tab and copy its link again.');
   return new FieldSurveyError('google', `Google answered ${status}; press Refresh now, and check the link and the key if it happens again.`);
@@ -298,6 +298,10 @@ const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
+// A score whose title speaks of difficulty, effort, pain or problems: higher
+// is worse. Only a suggestion, shown ticked in Check the columns.
+const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?)\b|困難|困难|難|难|麻煩|麻烦/i;
+const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -429,7 +433,9 @@ function looksLikeName(v) {
   if (SCALE_HAN.test(s)) return false;
   if (/^\p{Script=Han}{2,3}$/u.test(s)) return SURNAMES.includes(s[0]);
   const words = s.split(/\s+/);
-  if (words.some((w) => SCALE_WORDS.has(w.toLowerCase().replace(/[^a-z]/g, '')))) return false;
+  // Every word a scale word ("Very Easy", "Not Easy"): an answer on a scale.
+  // "Ann Good" or "Dr Good" has a name in it, so it still counts.
+  if (words.every((w) => SCALE_WORDS.has(w.toLowerCase().replace(/[^a-z]/g, '')))) return false;
   return words.length >= 2 && words.length <= 3 && words.every((w) => NAME_WORD.test(w));
 }
 
@@ -486,8 +492,8 @@ function suggest(header, values, untitled) {
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
     if (COUNT_HEADER.test(header)) return { role: 'number', reason: 'count', confidence: HIGH };
     if (!stated && ints.includes(0)) return { role: 'number', reason: 'count', confidence: LOW };
-    if (stated) return { role: 'score', ...stated, scaleFrom: 'header', confidence: HIGH };
-    return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers', confidence: LOW };
+    if (stated) return { role: 'score', ...stated, scaleFrom: 'header', confidence: HIGH, ...worseOf(header) };
+    return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers', confidence: LOW, ...worseOf(header) };
   }
   const dayFirst = dayFirstColumn(values);
   if (share(values, (v) => Number.isFinite(dateOf(v, { dayFirst }))) >= 0.8) return { role: 'ignore', reason: 'dates', confidence: HIGH };
@@ -534,7 +540,7 @@ function checkRoles(list) {
       if (!((low === 0 || low === 1) && Number.isInteger(high) && high > low && high <= 10)) {
         throw new RangeError('A score’s scale starts at 0 or 1 and ends above it, at 10 at most.');
       }
-      Object.assign(out, { low, high });
+      Object.assign(out, { low, high }, r.worse === true ? { worse: true } : {});
     }
     return out;
   });
@@ -591,7 +597,7 @@ const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 // Roles whose answers, or numbers made of them, the board shows.
 const SHOWN = new Set(['comment', 'choice', 'score', 'number']);
 
-function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], hiddenAs = [] } = {}) {
+function summarise(rows, { since = null, now = null, comments: keep = 8, timeZone, roles = [], redacted = [], hiddenAs = [] } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
@@ -623,7 +629,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     if (!hidden.has(i)) return suggest(h, columns[i], untitled[i]);
     const w = was.get(i);
     if (!w) return { role: 'identifying', reason: 'hidden', confidence: HIGH };
-    return { role: w.role, confidence: w.confidence, ...(w.reason ? { reason: w.reason } : {}), ...(w.role === 'score' ? { low: w.low, high: w.high, scaleFrom: w.scaleFrom } : {}) };
+    return { role: w.role, confidence: w.confidence, ...(w.reason ? { reason: w.reason } : {}), ...(w.role === 'score' ? { low: w.low, high: w.high, scaleFrom: w.scaleFrom, ...(w.worse === true ? { worse: true } : {}) } : {}) };
   });
   const titles = new Map();
   for (const h of headers) titles.set(h, (titles.get(h) ?? 0) + 1);
@@ -657,23 +663,28 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     if (after != null && Number.isFinite(after)) out.newSince = known.filter((t) => t > after).length;
   }
 
-  // Answers after the last read that brought something new, and those
-  // before it: the flags compare the two. Only with a known cut and dates.
-  const cut = toMs(since);
-  const splitAt = cut != null && Number.isFinite(cut) && tsCol >= 0 && !out.datesWaiting ? cut : null;
-  const splitOf = (i, low, high) => {
-    if (splitAt == null) return null;
-    const fresh = [];
-    const earlier = [];
+  // The flags' window: the answers of the last WINDOW_DAYS days by their
+  // date, against those before. It needs a "now", a timestamp column and
+  // its dates; it keeps no state, so any number of reads gives the same.
+  const nowMs = toMs(now);
+  const windowFrom = nowMs != null && Number.isFinite(nowMs) && tsCol >= 0 && !out.datesWaiting ? nowMs - WINDOW_DAYS * MS_DAY : null;
+  out.window = windowFrom != null ? { from: isoOf(windowFrom), days: WINDOW_DAYS } : null;
+  const windowOf = (i, low, high, worse) => {
+    const recent = [];
+    const before = [];
     data.forEach((r, k) => {
       const n = intOf(r[i]);
       if (times[k] == null || !Number.isInteger(n) || n < low || n > high) return;
-      (times[k] > splitAt ? fresh : earlier).push(n);
+      (times[k] >= windowFrom ? recent : before).push(n);
     });
-    const mark = lowMark(low, high);
+    // The bad end of the scale: the bottom quarter, or the top one when
+    // higher is worse.
+    const reach = lowMark(low, high) - low;
+    const mark = worse ? high - reach : low + reach;
     return {
-      mark, newN: fresh.length, newLow: fresh.filter((n) => n <= mark).length, newMean: fresh.length ? mean(fresh) : null,
-      oldN: earlier.length, oldMean: earlier.length ? mean(earlier) : null,
+      mark, bad: recent.filter((n) => (worse ? n >= mark : n <= mark)).length,
+      recentN: recent.length, recentMean: recent.length ? mean(recent) : null,
+      earlierN: before.length, earlierMean: before.length ? mean(before) : null,
     };
   };
 
@@ -694,9 +705,9 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
       ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}), ...(titles.get(header) > 1 ? { repeated: true } : {}),
     };
     if (role === 'score') {
-      const scale = conf?.role === 'score' ? { low: conf.low, high: conf.high, scaleFrom: 'confirmed' }
-        : sug.role === 'score' ? { low: sug.low, high: sug.high, scaleFrom: sug.scaleFrom }
-          : { ...(statedScale(header) ?? guessedScale(columns[i].map(intOf).filter(onScale))), scaleFrom: statedScale(header) ? 'header' : 'answers' };
+      const scale = conf?.role === 'score' ? { low: conf.low, high: conf.high, scaleFrom: 'confirmed', worse: conf.worse === true }
+        : sug.role === 'score' ? { low: sug.low, high: sug.high, scaleFrom: sug.scaleFrom, worse: sug.worse === true }
+          : { ...(statedScale(header) ?? guessedScale(columns[i].map(intOf).filter(onScale))), scaleFrom: statedScale(header) ? 'header' : 'answers', worse: WORSE.test(header) };
       Object.assign(col, scale);
     }
     out.columns.push(col);
@@ -711,7 +722,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
-        ...(splitAt != null ? { split: splitOf(i, col.low, col.high) } : {}),
+        worse: col.worse === true, ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
       // headline average; a guessed scale could make 3 of 5 out of 3 of 10.
@@ -752,7 +763,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   // Newest first; with no date, later rows are newer (forms add at the end).
   allComments.sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || b.row - a.row || a.col - b.col);
   out.commentCount = allComments.length;
-  out.newComments = splitAt != null ? allComments.filter((c) => c.ms != null && c.ms > splitAt).length : null;
+  out.recentComments = windowFrom != null ? allComments.filter((c) => c.ms != null && c.ms >= windowFrom).length : null;
   out.comments = allComments.slice(0, keep).map((c) => ({ question: c.question, text: c.text, at: isoOf(c.ms) }));
   return out;
 }
@@ -847,8 +858,8 @@ function planFetch({ now, settings, cache, busy = false }) {
 const toRedact = (summary) => summary.columns
   .filter((c) => c.role === 'identifying' || c.doubt || (c.role === 'ignore' && (c.answers > 0 || c.hidden))).map((c) => c.index);
 const hiddenAsIn = (summary, hide) => hide.filter((i) => summary.columns[i]).map((i) => {
-  const { role, reason, confidence, low, high, scaleFrom } = summary.columns[i].suggested;
-  return { index: i, role, confidence, ...(reason ? { reason } : {}), ...(role === 'score' ? { low, high, scaleFrom } : {}) };
+  const { role, reason, confidence, low, high, scaleFrom, worse } = summary.columns[i].suggested;
+  return { index: i, role, confidence, ...(reason ? { reason } : {}), ...(role === 'score' ? { low, high, scaleFrom, ...(worse ? { worse: true } : {}) } : {}) };
 });
 
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
@@ -891,9 +902,9 @@ function reroleCache(cache, roles) {
   return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(s, hide) };
 }
 
-function summariseCache(cache, roles) {
+function summariseCache(cache, roles, { now = null } = {}) {
   if (!cache?.rows) return null;
-  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [] });
+  return summarise(cache.rows, { since: cache.since ?? null, now, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [] });
 }
 
 // The cache file as read -> { cache, problem }. A cache that is not this
@@ -915,6 +926,7 @@ function validCache(raw, link) {
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
     && (raw.hiddenAs == null || (Array.isArray(raw.hiddenAs) && raw.hiddenAs.every((h) => h && Number.isInteger(h.index) && h.index >= 0
       && ROLES.includes(h.role) && (h.confidence === HIGH || h.confidence === LOW) && str(h.reason)
+      && (h.worse == null || typeof h.worse === 'boolean')
       && (h.role !== 'score' || (Number.isInteger(h.low) && Number.isInteger(h.high) && typeof h.scaleFrom === 'string')))))
     && (e == null || (typeof e === 'object' && typeof e.kind === 'string' && typeof e.message === 'string' && num(e.at) && str(e.detail)))
     && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
@@ -978,37 +990,53 @@ function changeSettings(current, change, { summary = null } = {}) {
 
 // ---- flags ------------------------------------------------------------------------------------
 //
-// What needs a look since the last update, from the summary: low scores,
-// a falling average, new comments, and the set-up problems Needs attention
-// lists too. Each flag is data (counts, means, the question's index, number
-// and title); the board words it, and names the question only by its
-// number while privacy mode is on.
+// What needs a look in the last WINDOW_DAYS days, from the summary: low
+// scores, a falling average (a rising one where higher is worse), comments,
+// and the set-up problems Needs attention lists too. Each flag is data
+// (counts, means, the question's index, number and title); the board words
+// it, and names the question only by its number while privacy mode is on.
 
 // The highest answer that counts as low: the bottom quarter of the scale,
-// rounded up (the bottom two points of 1–5, 1–7 and 0–10; three of 1–10).
+// rounded up. That is 1–2 on 1–5 and 1–7, 0–2 on 0–10 and 1–3 on 1–10.
 function lowMark(low, high) {
   return low + Math.ceil((high - low + 1) / 4) - 1;
 }
 
-// A drop of at least a tenth of the scale, over at least three new answers.
+// A drop of at least a tenth of the scale, over at least three answers in
+// the window.
+const WINDOW_DAYS = 7;
 const FALL_SHARE = 0.1;
 const FALL_MIN_NEW = 3;
 
+// -> { why, earlier, list }. why: null when the window was compared, else
+// 'unread' (nothing read yet), 'no-dates' (no timestamp column) or
+// 'waiting' (its dates come with the next read); set-up flags show either
+// way. earlier: some score had answers before the window, so averages
+// could be compared.
 function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) {
   const out = [];
   const s = summary && !summary.empty ? summary : null;
-  // Guessed scales are left out, as they are of the average: a low mark on
-  // the wrong scale would flag the wrong answers.
-  for (const q of s?.questions ?? []) {
-    const t = q.split;
-    if (q.guessed || !t) continue;
-    const who = { index: q.index, no: q.no, question: q.question, low: q.low, high: q.high };
-    if (t.newLow > 0) out.push({ kind: 'low', ...who, count: t.newLow, mark: t.mark });
-    if (t.newN >= FALL_MIN_NEW && t.oldN > 0 && t.oldMean - t.newMean >= FALL_SHARE * (q.high - q.low) - 1e-9) {
-      out.push({ kind: 'falling', ...who, newN: t.newN, newMean: t.newMean, oldMean: t.oldMean });
+  const why = !s ? 'unread' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates' : !s.window ? 'unread' : null;
+  let earlier = false;
+  if (!why) {
+    // Guessed scales are left out, as they are of the average: a low mark
+    // on the wrong scale would flag the wrong answers.
+    for (const q of s.questions ?? []) {
+      const w = q.window;
+      if (q.guessed || !w) continue;
+      if (w.earlierN > 0) earlier = true;
+      const who = { index: q.index, no: q.no, question: q.question, low: q.low, high: q.high, worse: q.worse === true };
+      if (w.bad > 0) out.push({ kind: 'low', ...who, count: w.bad, mark: w.mark });
+      const change = q.worse ? w.recentMean - w.earlierMean : w.earlierMean - w.recentMean;
+      if (w.recentN >= FALL_MIN_NEW && w.earlierN > 0 && change >= FALL_SHARE * (q.high - q.low) - 1e-9) {
+        out.push({ kind: 'falling', ...who, recentN: w.recentN, recentMean: w.recentMean, earlierMean: w.earlierMean });
+      }
     }
+    if (s.recentComments > 0) out.push({ kind: 'comments', count: s.recentComments });
+    // Answers with no readable date cannot be placed in or out of the window.
+    const undated = s.unreadable?.timestamps ?? 0;
+    if (undated > 0) out.push({ kind: 'setup', what: 'undated', count: undated });
   }
-  if (s?.newComments > 0) out.push({ kind: 'comments', count: s.newComments });
   if (s?.needsChoice > 0) out.push({ kind: 'setup', what: 'choose', count: s.needsChoice, fix: 'check' });
   if (s?.doubtful?.length) out.push({ kind: 'setup', what: 'doubt', count: s.doubtful.length, fix: 'check' });
   if (lastError) {
@@ -1016,7 +1044,7 @@ function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) 
     out.push({ kind: 'setup', what: share ? 'share' : 'failed', fix: share || !TRANSIENT.has(lastError.kind) ? 'settings' : 'refresh' });
   }
   if (keyError && keyError !== lastError?.message) out.push({ kind: 'setup', what: 'key', fix: 'settings' });
-  return out;
+  return { why, earlier, list: out };
 }
 
 // The reply to a columns save: a checked column whose answers read as
@@ -1044,12 +1072,12 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     const unread = unreadableText(summary);
     if (unread) add(unread);
     const n = summary.newColumns?.length ?? 0;
-    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Field feedback → Check the columns)`, '', 'check');
+    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
     // Privacy mode keeps the step read-only, so this is the reminder.
     const unsure = summary.needsChoice ?? 0;
-    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`, '', 'check');
+    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)`, '', 'check');
     const doubt = summary.doubtful?.length ?? 0;
-    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`, '', 'check');
+    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);

@@ -44,8 +44,8 @@ const checkLink = (words) => `<button type="button" class="link-btn" id="field-c
 
 // What the section says before there is anything to count.
 function setupStep(f) {
-  if (!f.sheetUrl) return 'First paste the sheet’s link in Settings → Field feedback.';
-  if (!f.keyName) return 'Now choose the service account’s key file in Settings → Field feedback.';
+  if (!f.sheetUrl) return 'First paste the sheet’s link in Settings → Connections → Field feedback.';
+  if (!f.keyName) return 'Now choose the service account’s key file in Settings → Connections → Field feedback.';
   return '';
 }
 
@@ -54,6 +54,9 @@ function setupStep(f) {
 // A timestamp column chosen after the cache dropped its answers: its dates
 // come back at the next read.
 const waitNote = (s) => (s?.datesWaiting ? '<p class="field-note">Dates show after the next update. Refresh now to see them sooner.</p>' : '');
+
+// The note gives way to the flag that says the same (columns to choose).
+const noteUnlessFlagged = (f) => (f?.flags?.list?.some((x) => x.what === 'choose') ? '' : checkNote(f?.summary));
 
 function checkNote(s) {
   if (!s || s.checked || !s.columns?.length) return '';
@@ -99,7 +102,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   const open = s.responses
     ? `<div class="form-actions"><button type="button" class="link-btn" id="field-open" data-field="open" aria-haspopup="dialog">${privacy ? 'See the score for each question' : 'See each question and the comments'}</button></div>`
     : '';
-  return `<p class="field-line">${line}</p>${failed}${checkNote(s)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h')}${open}`;
+  return `<p class="field-line">${line}</p>${failed}${noteUnlessFlagged(f)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h')}${open}`;
 }
 
 // The detail sheet's body.
@@ -161,7 +164,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const doubt = s.doubtful?.length ?? 0;
   if (doubt) left.push(`${plural(doubt, 'column')} you checked now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
-  return `${head}${hint}${flagsBlock(f, privacy, 'field-h')}${checkNote(s)}${waitNote(s)}
+  return `${head}${hint}${flagsBlock(f, privacy, 'field-h')}${noteUnlessFlagged(f)}${waitNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
     ${numbers}
     <h3 class="field-h">Newest comments</h3>${comments}
@@ -182,7 +185,9 @@ export function stepRows(f, draft = {}) {
     const low = role === 'score' ? (d.low ?? (sure ? c.low : null)) : null;
     const high = role === 'score' ? (d.high ?? (sure ? c.high : null)) : null;
     const missing = !role || (role === 'score' && (low == null || high == null));
-    return { c, role, low, high, missing, touched: Object.keys(d).length > 0 };
+    // Higher is worse: the user's tick, else what the app suggests from the title.
+    const worse = role === 'score' && (d.worse ?? (c.role === 'score' ? c.worse === true : c.suggested?.worse === true));
+    return { c, role, low, high, worse, missing, touched: Object.keys(d).length > 0 };
   });
 }
 
@@ -191,7 +196,7 @@ export function stepRows(f, draft = {}) {
 export function draftWith(draft, col, part, value) {
   const row = { ...draft[col] };
   if (value === '' || value == null) delete row[part];
-  else row[part] = part === 'role' ? value : Number(value);
+  else row[part] = part === 'role' ? value : part === 'worse' ? value === true : Number(value);
   return { ...draft, [col]: row };
 }
 
@@ -232,11 +237,11 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
   const nameOf = (c) => (privacy ? (c.role === 'timestamp' ? 'Timestamp' : `Question ${qNo.get(c.index)}`) : c.header);
   const guess = (r) => (r.missing && r.c.needsChoice && r.c.suggested ? `<p class="muted">The app’s guess: ${esc(guessWords(r.c))}.</p>` : '');
   const left = missing ? `${plural(missing, 'column')} still ${missing === 1 ? 'needs' : 'need'} a choice.` : '';
-  const head = '<h5 id="field-check-h">Check the columns</h5>';
+  const head = '<h5 id="field-check-h" tabindex="-1">Check the columns</h5>';
 
   if (privacy) {
     const items = rows.map((r) => {
-      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}` : 'Not chosen';
+      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}${r.worse ? ', higher is worse' : ''}` : 'Not chosen';
       return `<li class="field-col">
         <p class="field-col-name"><span>${esc(nameOf(r.c))}</span>${rowTags(r)}</p>
         <p class="field-col-what">${esc(what)}</p>${guess(r)}</li>`;
@@ -256,7 +261,8 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
       + Object.entries(ROLE_WORDS).map(([v, w]) => `<option value="${v}"${v === r.role ? ' selected' : ''}>${w}</option>`).join('');
     const scale = r.role === 'score' ? `<span class="field-scale">
         <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low" aria-label="${esc(name)}: scale from">${scaleOpts([0, 1], r.low)}</select></label>
-        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts([2, 3, 4, 5, 6, 7, 8, 9, 10], r.high)}</select></label></span>` : '';
+        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts([2, 3, 4, 5, 6, 7, 8, 9, 10], r.high)}</select></label></span>
+        <label class="field-worse"><input type="checkbox" id="fc-worse-${c.index}" data-col="${c.index}" data-part="worse" aria-label="${esc(name)}: higher is worse"${r.worse ? ' checked' : ''}> Higher is worse</label>` : '';
     return `<li class="field-col${r.missing ? ' needs-choice' : ''}">
       <p class="field-col-name"><span>${esc(name)}</span>${rowTags(r)}</p>
       <div class="field-col-role"><label class="visually-hidden" for="fc-role-${c.index}">What ${esc(name)} is</label>
@@ -272,7 +278,7 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
   </section>`;
 }
 
-// Settings → Field feedback, below the switch. state: { editing, error, note, draft, checkNote, checkError }.
+// Settings → Connections → Field feedback, below the switch. state: { editing, error, note, draft, checkNote, checkError }.
 export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}, now = Date.now() } = {}) {
   if (f?.demo) {
     return `<p class="hint">The demo shows made-up sample feedback. Turn off “Demo patients” to set up your own sheet.</p>
@@ -313,22 +319,23 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
 // and how many still have none (the app refuses to save while any do).
 export function rolesFrom(f, draft = {}) {
   const rows = stepRows(f, draft);
-  const roles = rows.filter((r) => !r.missing).map(({ c, role, low, high }) => ({
-    header: c.header, index: c.index, role, ...(role === 'score' ? { low, high } : {}),
+  const roles = rows.filter((r) => !r.missing).map(({ c, role, low, high, worse }) => ({
+    header: c.header, index: c.index, role, ...(role === 'score' ? { low, high, ...(worse ? { worse: true } : {}) } : {}),
   }));
   return { roles, missing: rows.length - roles.length };
 }
 
 // ---- flags -------------------------------------------------------------------------------------
 //
-// What needs a look since the last update (src/core/fieldsurvey.js
-// fieldFlags works them out; here they are only worded). One glyph per
-// kind, so a flag never rests on colour alone; with privacy on a question
-// is only ever "Question N".
+// What needs a look in the last 7 days (src/core/fieldsurvey.js fieldFlags
+// works them out; here they are only worded). One glyph per kind, so a
+// flag never rests on colour alone; with privacy on a question is only
+// ever "Question N".
 
 const FLAG_GLYPHS = {
   low: '<path d="M12 4v10.5M7.5 10 12 14.5 16.5 10M6 19h12"/>', // down to the floor
   falling: '<path d="M4 7.5l5.5 5.5 3.5-3.5 6.5 6.5M20 11.5V16h-4.5"/>', // a line going down
+  rising: '<path d="M4 16.5l5.5-5.5 3.5 3.5 6.5-6.5M20 12.5V8h-4.5"/>', // a line going up (higher is worse)
   comments: '<path d="M5 5.5h14v10h-8.5L6 19v-3.5H5z"/>', // a speech bubble
   setup: '<path d="M12 4.5 20.5 19h-17zM12 10v4M12 16.5v.5"/>', // a warning sign
 };
@@ -336,37 +343,56 @@ const flagGlyph = (kind) => `<svg class="ico flag-glyph flag-${kind}" viewBox="0
 // What a flag or a Needs attention line links to (app.js fieldAction).
 export const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
 const SETUP_WORDS = {
-  choose: (n) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice`,
+  choose: (n) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice; until then the numbers are the app’s guesses`,
+  undated: (n) => `${plural(n, 'answer')} ${n === 1 ? 'has' : 'have'} no readable date and ${n === 1 ? 'isn’t' : 'aren’t'} in the flags`,
   doubt: (n) => `${plural(n, 'checked column')} now ${n === 1 ? 'looks' : 'look'} like emails or phone numbers`,
   share: () => 'The sheet is not shared with the key’s reader address',
   failed: () => 'The last update failed',
   key: () => 'The key file could not be read',
 };
 
-// One flag in words. since: when the last update that brought something
-// new came (the board's "New since").
-export function flagText(flag, { privacy = true, since = null } = {}) {
+// One flag in words. days: the window's length.
+export function flagText(flag, { privacy = true, days = 7 } = {}) {
   const name = privacy || !flag.question ? `Question ${flag.no ?? ''}`.trim() : `“${flag.question}”`;
-  const when = since ? `since ${boardDay(since)}` : 'since the last update';
-  if (flag.kind === 'low') return `${plural(flag.count, 'low score')} on ${name} ${when}`;
-  if (flag.kind === 'falling') return `Average falling on ${name}: ${mean1(flag.newMean)} over ${plural(flag.newN, 'new answer')}, ${mean1(flag.oldMean)} before (of ${flag.high})`;
-  if (flag.kind === 'comments') return `${plural(flag.count, 'new comment')} ${when}`;
+  const when = `in the last ${days} days`;
+  if (flag.kind === 'low') {
+    return flag.worse ? `${plural(flag.count, 'high score')} on ${name} ${when} (${flag.mark} or more on ${flag.low}–${flag.high}, higher is worse)`
+      : `${plural(flag.count, 'low score')} on ${name} ${when} (${flag.mark} or less on ${flag.low}–${flag.high})`;
+  }
+  if (flag.kind === 'falling') {
+    return `${name} average ${flag.worse ? 'up' : 'down'} to ${mean1(flag.recentMean)} of ${flag.high} ${when} (was ${mean1(flag.earlierMean)}${flag.worse ? '; higher is worse' : ''})`;
+  }
+  if (flag.kind === 'comments') return `${plural(flag.count, 'comment')} ${when}`;
   return (SETUP_WORDS[flag.what] ?? (() => 'Field feedback needs a look'))(flag.count ?? 0);
 }
 
-// The list, or one calm line; nothing at all when no flags were worked out
-// (an older snapshot).
+// Why the window could not be compared, in words.
+const WHY_WORDS = {
+  unread: () => 'Flags show after the first update',
+  waiting: () => 'Flags show after the next update',
+  'no-dates': () => `No dates to compare: choose the timestamp column <button type="button" class="link-btn" data-field="check">${FIXES.check}</button>`,
+};
+
+// f.flags: { why, earlier, list } from the main process. "Nothing to flag"
+// only when the window was compared; otherwise why it was not, with any
+// set-up flags below. Nothing at all when no flags were worked out (an
+// older snapshot).
 export function flagsHtml(f, { privacy = true } = {}) {
-  if (!Array.isArray(f?.flags)) return '';
-  if (!f.flags.length) return '<p class="field-calm">Nothing to flag</p>';
-  const items = f.flags.map((x) => {
-    const detail = x.kind === 'low' ? ` <span class="muted">(${x.mark} or less on ${x.low}–${x.high})</span>` : '';
-    const fix = x.fix && FIXES[x.fix] ? ` <button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
-    return `<li class="field-flag">${flagGlyph(x.kind)}<span class="field-flag-text">${esc(flagText(x, { privacy, since: f.sinceFetchedAt }))}${detail}</span>${fix}</li>`;
+  const info = f?.flags;
+  if (!info || !Array.isArray(info.list)) return '';
+  const days = f.summary?.window?.days ?? 7;
+  const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)()}</p>` : '';
+  const scored = (f.summary?.questions ?? []).some((q) => !q.guessed);
+  const noEarlier = !info.why && !info.earlier && scored ? `<p class="field-calm">No answers from before the last ${days} days, so averages are not compared yet.</p>` : '';
+  if (!info.list.length) return why || `<p class="field-calm">Nothing to flag</p>${noEarlier}`;
+  const items = info.list.map((x) => {
+    const fix = x.fix && FIXES[x.fix] ? `<button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
+    const glyph = x.kind === 'falling' && x.worse ? 'rising' : x.kind;
+    return `<li class="field-flag">${flagGlyph(glyph)}<span class="field-flag-text">${esc(flagText(x, { privacy, days }))}</span>${fix}</li>`;
   }).join('');
-  return `<ul class="field-flags">${items}</ul>`;
+  return `${why}<ul class="field-flags">${items}</ul>${noEarlier}`;
 }
-const flagsBlock = (f, privacy, cls) => (Array.isArray(f?.flags) ? `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy })}` : '');
+const flagsBlock = (f, privacy, cls) => (f?.flags && Array.isArray(f.flags.list) ? `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy })}` : '');
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';
 
