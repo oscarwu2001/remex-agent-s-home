@@ -272,7 +272,10 @@ separately; multiple choice, counted; a comment; identifying; or ignored.
 The app suggests a role from each column's title and answers, and **Check
 the columns** lets you confirm it. Only scores whose scale you confirmed, or
 that the question states (like "(1-5)"), count in the average; a guessed
-scale is marked "scale guessed", a guessed direction "direction guessed". Columns with names, email addresses, phone
+scale is marked "scale guessed", a guessed direction "direction guessed".
+Once you have saved the columns, a score column added to the form later
+stays out of the average too until you check it; the sheet marks it "not
+checked, not in the average". Columns with names, email addresses, phone
 numbers or patient and case numbers are hidden, and their answers are not
 kept on your computer. Answers that only look personal (shaped like names,
 or long numbers such as a phone number the sheet stored as a number) are
@@ -314,11 +317,16 @@ update):
   key. They are under **Needs attention** too, and each links to its fix.
 
 Low scores and averages are flagged only for score columns you have
-checked: until you press **Save the columns** once (and for a column added
-to the form later, until you check it), the section says "Score flags
-start once the columns are checked · Check the columns" and lists only
-comments and set-up problems, since the app's guess of a scale or of which
-end is better can be wrong.
+checked, since the app's guess of a scale or of which end is better can be
+wrong. Until you press **Save the columns** once, the note above the
+numbers says "Columns not checked yet: these numbers are the app's
+guesses, and score flags wait until they are checked · Check the columns",
+and Flags lists only comments and set-up problems. When a column also
+needs a choice, its flag says the same instead of the note. After a save, a
+column added to the form later gets one line, "A new column is not checked
+yet: it is not in the average or the score flags · Check the columns" (or,
+when it needs a choice, its flag says so). Either way the section has one
+**Check the columns** link.
 
 **Higher is worse.** On a question such as "How difficult was setup?
 (1-5)", a high answer is the bad one. In Check the columns each score
@@ -328,8 +336,9 @@ Higher is better only on a score the app is sure of. On a column you turn
 into a score yourself it starts on "Choose direction…" (a saved score keeps
 its saved direction), and so it does when the title speaks of difficulty,
 effort, pain, a symptom or problems (discomfort, fatigue, anxiety, nausea,
-swelling, bleeding, stress, errors; also 困難, 難, 麻煩, 痛, 疼, 不適, 焦慮,
-噁心, 腫, 出血, 錯誤): the app only guesses those, since "Pain relief
+swelling, bleeding, dizziness, itching, vomiting, stress, errors; also 困難,
+難, 麻煩, 痛, 疼, 不適, 焦慮, 噁心, 腫, 出血, 頭暈, 癢, 嘔吐, 錯誤): the app
+only guesses those, since "Pain relief
 achieved" is the other way round, so the column stays marked **Needs a
 choice** and "Direction guessed", even after you choose Score, until you
 set it. Until then the column is out of the flags and the
