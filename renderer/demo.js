@@ -220,6 +220,14 @@ function demoField(nowMs) {
     enabled: true, demo: true, sheetUrl: '', keyName: 'sample-key.json', clientEmail: 'sample-reader@sample-project.iam.gserviceaccount.com',
     busy: false, fetchedAt: nowMs - 2 * h, lastAttemptAt: nowMs - 2 * h, error: null, errorKind: null, errorAt: null,
     sinceFetchedAt: nowMs - 2 * day - 2 * h, tab: 'Sample responses', nextAt: nowMs + 2 * day - 2 * h,
+    // One flag of each kind, as fieldFlags (src/core/fieldsurvey.js) gives them:
+    // question 5's three newest answers are lower, two of them low.
+    flags: [
+      { kind: 'low', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, count: 2, mark: 2 },
+      { kind: 'falling', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, newN: 3, newMean: 2.3, oldMean: 4.2 },
+      { kind: 'comments', count: 2 },
+      { kind: 'setup', what: 'choose', count: 1, fix: 'check' },
+    ],
     summary: {
       responses: 24, blankRows: 0, timestampColumn: 'Timestamp', timeZone: 'local', timeZoneUnknown: null,
       newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,

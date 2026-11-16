@@ -962,3 +962,65 @@ test('a timestamp column whose answers the cache does not keep waits for the nex
   const t = F.summariseCache(next, roles);
   assert.deepEqual([t.datesWaiting ?? false, t.unreadable.timestamps, t.newest != null], [false, 0, true]);
 });
+
+// ---- flags ------------------------------------------------------------------------------------
+
+// Rows answered on 1–15 November at 09:00 local time, with the last read's newest answer on the 10th.
+const flagForm = (headers, values) => [['Timestamp', ...headers], ...values.map((v, i) => [`2026-11-${String(1 + i).padStart(2, '0')} 09:00`, ...v])];
+const SINCE = new Date(2026, 10, 10, 12, 0).toISOString();
+
+test('the low mark: the bottom two points of 1–5, the bottom quarter (rounded up) of longer scales', () => {
+  assert.deepEqual([[1, 5], [1, 7], [0, 10], [1, 10]].map(([l, h]) => F.lowMark(l, h)), [2, 2, 2, 3]);
+});
+
+test('low scores since the last update are counted per question, by its low mark', () => {
+  const old = Array.from({ length: 10 }, () => [4, 9]);
+  const fresh = [[1, 3], [2, 4], [3, 2], [5, 10]];
+  const s = F.summarise(flagForm(['Ease (1-5)', 'Clarity (1-10)'], [...old, ...fresh]), { since: SINCE });
+  const flags = F.fieldFlags({ summary: s });
+  assert.deepEqual(flags.filter((f) => f.kind === 'low').map((f) => [f.no, f.count, f.mark]), [[1, 2, 2], [2, 2, 3]]);
+  // Both fell well below their earlier 4 and 9.
+  assert.deepEqual(flags.filter((f) => f.kind === 'falling').map((f) => f.no), [1, 2]);
+});
+
+test('a falling average is flagged at exactly a tenth of the scale, and not with only two new answers', () => {
+  const old = [[4], [4], [4], [4], [4], [4], [4], [4], [4], [4]];
+  // New answers average 3.6: 0.4 below 4.0 on a 1–5 scale, exactly 10% of its range.
+  const s = F.summarise(flagForm(['Ease (1-5)'], [...old, [4], [4], [4], [3], [3]]), { since: SINCE });
+  const falling = F.fieldFlags({ summary: s }).filter((f) => f.kind === 'falling');
+  assert.deepEqual(falling.map((f) => [f.no, f.newN, Number(f.newMean.toFixed(2)), Number(f.oldMean.toFixed(2))]), [[1, 5, 3.6, 4]]);
+  // Just under the line: 3.8 is only 0.2 lower.
+  const mild = F.summarise(flagForm(['Ease (1-5)'], [...old, [4], [4], [4], [4], [3]]), { since: SINCE });
+  assert.deepEqual(F.fieldFlags({ summary: mild }).filter((f) => f.kind === 'falling'), []);
+  // Two new answers, far lower: too few to call a trend.
+  const two = F.summarise(flagForm(['Ease (1-5)'], [...old, [1], [1]]), { since: SINCE });
+  assert.deepEqual(F.fieldFlags({ summary: two }).filter((f) => f.kind === 'falling'), []);
+});
+
+test('new comments are counted; a guessed scale raises no score flags', () => {
+  const rows = flagForm(['How satisfied are you overall?', 'Anything else?'], [...Array.from({ length: 10 }, (_, k) => [6, `Earlier note number ${k} about the set-up`]), [1, 'The start-up was far too slow'], [1, 'The holder came loose twice'], [1, 'It crashed during the case']]);
+  const flags = F.fieldFlags({ summary: F.summarise(rows, { since: SINCE }) });
+  assert.deepEqual(flags.filter((f) => f.kind === 'comments').map((f) => f.count), [3]);
+  assert.deepEqual(flags.filter((f) => f.kind === 'low' || f.kind === 'falling'), []);
+});
+
+test('setup problems are flags too, each with its fix', () => {
+  const s = F.summarise(form(['How satisfied are you overall?'], [[6], [7], [5]]));
+  const share = { kind: 'share', message: 'Share the sheet…' };
+  assert.deepEqual(F.fieldFlags({ summary: s, lastError: share }).map((f) => [f.kind, f.what, f.fix]), [['setup', 'choose', 'check'], ['setup', 'share', 'settings']]);
+  assert.deepEqual(F.fieldFlags({ summary: null, lastError: { kind: 'network', message: 'x' } }).map((f) => [f.what, f.fix]), [['failed', 'refresh']]);
+  assert.deepEqual(F.fieldFlags({ summary: null, keyError: 'The key file…' }).map((f) => [f.what, f.fix]), [['key', 'settings']]);
+});
+
+test('an empty or never-read cache, or a read with nothing new, raises no flags and does not throw', () => {
+  assert.deepEqual(F.fieldFlags(), []);
+  assert.deepEqual(F.fieldFlags({ summary: F.summariseCache(null, []) }), []);
+  assert.deepEqual(F.fieldFlags({ summary: F.summarise([]) }), []);
+  assert.deepEqual(F.fieldFlags({ summary: F.summarise([['Timestamp', 'Ease (1-5)']]) }), []);
+  // Every answer is from before the last read: nothing new, nothing to flag.
+  const rows = flagForm(['Ease (1-5)'], [[1], [1], [2], [1], [1]]);
+  const quiet = F.summarise(rows, { since: new Date(2026, 10, 30).toISOString() });
+  assert.deepEqual(F.fieldFlags({ summary: quiet }), []);
+  // The first read: no "since" at all.
+  assert.deepEqual(F.fieldFlags({ summary: F.summarise(rows) }), []);
+});

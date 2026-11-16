@@ -657,6 +657,26 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     if (after != null && Number.isFinite(after)) out.newSince = known.filter((t) => t > after).length;
   }
 
+  // Answers after the last read that brought something new, and those
+  // before it: the flags compare the two. Only with a known cut and dates.
+  const cut = toMs(since);
+  const splitAt = cut != null && Number.isFinite(cut) && tsCol >= 0 && !out.datesWaiting ? cut : null;
+  const splitOf = (i, low, high) => {
+    if (splitAt == null) return null;
+    const fresh = [];
+    const earlier = [];
+    data.forEach((r, k) => {
+      const n = intOf(r[i]);
+      if (times[k] == null || !Number.isInteger(n) || n < low || n > high) return;
+      (times[k] > splitAt ? fresh : earlier).push(n);
+    });
+    const mark = lowMark(low, high);
+    return {
+      mark, newN: fresh.length, newLow: fresh.filter((n) => n <= mark).length, newMean: fresh.length ? mean(fresh) : null,
+      oldN: earlier.length, oldMean: earlier.length ? mean(earlier) : null,
+    };
+  };
+
   const allComments = [];
   const scored = [];
   headers.forEach((header, i) => {
@@ -691,6 +711,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
+        ...(splitAt != null ? { split: splitOf(i, col.low, col.high) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
       // headline average; a guessed scale could make 3 of 5 out of 3 of 10.
@@ -713,6 +734,13 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   });
   out.checked = headers.length > 0 && saved.every(Boolean);
   out.needsChoice = out.columns.filter((c) => c.needsChoice).length;
+  // "Question 3": a column's place among those that are not the timestamp,
+  // the name used while privacy mode hides the wording.
+  let no = 0;
+  const numbers = new Map();
+  for (const c of out.columns) if (c.role !== 'timestamp') numbers.set(c.index, (no += 1));
+  for (const c of out.columns) if (numbers.has(c.index)) c.no = numbers.get(c.index);
+  for (const q of [...out.questions, ...out.numbers]) q.no = numbers.get(q.index);
 
   // One scale for all: a plain average. Several: each answer put on 0–10.
   if (scored.length) {
@@ -724,6 +752,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   // Newest first; with no date, later rows are newer (forms add at the end).
   allComments.sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || b.row - a.row || a.col - b.col);
   out.commentCount = allComments.length;
+  out.newComments = splitAt != null ? allComments.filter((c) => c.ms != null && c.ms > splitAt).length : null;
   out.comments = allComments.slice(0, keep).map((c) => ({ question: c.question, text: c.text, at: isoOf(c.ms) }));
   return out;
 }
@@ -947,6 +976,49 @@ function changeSettings(current, change, { summary = null } = {}) {
   return { settings: next, sheetChanged, ...(note ? { note } : {}) };
 }
 
+// ---- flags ------------------------------------------------------------------------------------
+//
+// What needs a look since the last update, from the summary: low scores,
+// a falling average, new comments, and the set-up problems Needs attention
+// lists too. Each flag is data (counts, means, the question's index, number
+// and title); the board words it, and names the question only by its
+// number while privacy mode is on.
+
+// The highest answer that counts as low: the bottom quarter of the scale,
+// rounded up (the bottom two points of 1–5, 1–7 and 0–10; three of 1–10).
+function lowMark(low, high) {
+  return low + Math.ceil((high - low + 1) / 4) - 1;
+}
+
+// A drop of at least a tenth of the scale, over at least three new answers.
+const FALL_SHARE = 0.1;
+const FALL_MIN_NEW = 3;
+
+function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) {
+  const out = [];
+  const s = summary && !summary.empty ? summary : null;
+  // Guessed scales are left out, as they are of the average: a low mark on
+  // the wrong scale would flag the wrong answers.
+  for (const q of s?.questions ?? []) {
+    const t = q.split;
+    if (q.guessed || !t) continue;
+    const who = { index: q.index, no: q.no, question: q.question, low: q.low, high: q.high };
+    if (t.newLow > 0) out.push({ kind: 'low', ...who, count: t.newLow, mark: t.mark });
+    if (t.newN >= FALL_MIN_NEW && t.oldN > 0 && t.oldMean - t.newMean >= FALL_SHARE * (q.high - q.low) - 1e-9) {
+      out.push({ kind: 'falling', ...who, newN: t.newN, newMean: t.newMean, oldMean: t.oldMean });
+    }
+  }
+  if (s?.newComments > 0) out.push({ kind: 'comments', count: s.newComments });
+  if (s?.needsChoice > 0) out.push({ kind: 'setup', what: 'choose', count: s.needsChoice, fix: 'check' });
+  if (s?.doubtful?.length) out.push({ kind: 'setup', what: 'doubt', count: s.doubtful.length, fix: 'check' });
+  if (lastError) {
+    const share = lastError.kind === 'share';
+    out.push({ kind: 'setup', what: share ? 'share' : 'failed', fix: share || !TRANSIENT.has(lastError.kind) ? 'settings' : 'refresh' });
+  }
+  if (keyError && keyError !== lastError?.message) out.push({ kind: 'setup', what: 'key', fix: 'settings' });
+  return out;
+}
+
 // The reply to a columns save: a checked column whose answers read as
 // emails or phones stays hidden unless chosen Identifying or Ignore.
 function columnsReply(summary) {
@@ -986,6 +1058,6 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  summarise, unreadableText, checkRoles, checkSubmission, columnsReply, keyFileError, redactRows, nextRun, dateOf,
+  summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };

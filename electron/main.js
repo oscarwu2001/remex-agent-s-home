@@ -779,6 +779,8 @@ app.whenReady().then(() => {
       nextAt: nextFieldRead(),
       summary: field.enabled ? fieldSummary : null,
       summaryError: field.enabled ? fieldSummaryError : null,
+      // What needs a look (src/core/fieldsurvey.js fieldFlags); the board words them.
+      flags: field.enabled ? fieldSurvey.fieldFlags({ summary: fieldSummary, lastError: fieldCache?.lastError ?? null, keyError: fieldKey.error }) : [],
     };
   }
   function fieldProblems() {

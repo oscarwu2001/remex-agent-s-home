@@ -154,3 +154,47 @@ test('dates waiting for the next read say so on the board and in the sheet', asy
     assert.match(html, /Dates show after the next update\. Refresh now to see them sooner\./);
   }
 });
+
+// ---- flags -------------------------------------------------------------------------------------
+
+const flagRows = (() => {
+  const head = ['Timestamp', 'How easy was the setup? (1-5)', 'What should we improve?'];
+  const old = Array.from({ length: 10 }, (_, k) => [`2026-11-${String(1 + k).padStart(2, '0')} 09:00`, 4, `Earlier note number ${k} about the set-up`]);
+  const fresh = [[1, 'The start-up was far too slow'], [2, 'The holder came loose twice'], [3, 'It crashed during the case']]
+    .map(([v, t], k) => [`2026-11-${12 + k} 09:00`, v, t]);
+  return [head, ...old, ...fresh];
+})();
+const flagged = () => {
+  const s = F.summarise(flagRows, { since: new Date(2026, 10, 10, 12).toISOString() });
+  return { ...field(s), sinceFetchedAt: new Date(2026, 10, 16, 8).getTime(), flags: F.fieldFlags({ summary: s, lastError: { kind: 'share', message: 'x' } }) };
+};
+
+test('with privacy on, no flag names a question by its wording', async () => {
+  const { flagsHtml, flagText } = await view();
+  const f = flagged();
+  assert.deepEqual(f.flags.map((x) => x.kind), ['low', 'falling', 'comments', 'setup']);
+  const words = f.flags.map((x) => flagText(x, { privacy: true, since: f.sinceFetchedAt }));
+  for (const w of words) assert.doesNotMatch(w, /How easy|setup\?|improve|slow|holder|crashed/i, w);
+  assert.match(words[0], /^2 low scores on Question 1 since /);
+  const html = flagsHtml(f, { privacy: true });
+  assert.doesNotMatch(html, /How easy was the setup/);
+  // With privacy off, the question's own words.
+  assert.match(flagText(f.flags[0], { privacy: false, since: f.sinceFetchedAt }), /^2 low scores on “How easy was the setup\? \(1-5\)” since /);
+});
+
+test('each kind of flag has its own glyph and words, and set-up flags link to their fix', async () => {
+  const { flagsHtml } = await view();
+  const html = flagsHtml(flagged(), { privacy: true });
+  for (const kind of ['low', 'falling', 'comments', 'setup']) assert.match(html, new RegExp(`class="ico flag-glyph flag-${kind}"`), kind);
+  assert.match(html, /<button type="button" class="link-btn" data-field="settings">Open Settings<\/button>/);
+  assert.match(html, /3 new comments since /);
+});
+
+test('no flags is one calm line; no flags computed is no list at all', async () => {
+  const { flagsHtml, fieldHtml, fieldSheetHtml } = await view();
+  const calm = { ...field(F.summarise(rows)), flags: [] };
+  assert.match(flagsHtml(calm), /Nothing to flag/);
+  assert.match(fieldHtml(calm), /Nothing to flag/);
+  assert.match(fieldSheetHtml(calm), /Nothing to flag/);
+  assert.equal(flagsHtml(field(F.summarise(rows))), '');
+});

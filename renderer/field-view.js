@@ -99,7 +99,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   const open = s.responses
     ? `<div class="form-actions"><button type="button" class="link-btn" id="field-open" data-field="open" aria-haspopup="dialog">${privacy ? 'See the score for each question' : 'See each question and the comments'}</button></div>`
     : '';
-  return `<p class="field-line">${line}</p>${failed}${checkNote(s)}${waitNote(s)}${stats}${open}`;
+  return `<p class="field-line">${line}</p>${failed}${checkNote(s)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h')}${open}`;
 }
 
 // The detail sheet's body.
@@ -161,7 +161,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const doubt = s.doubtful?.length ?? 0;
   if (doubt) left.push(`${plural(doubt, 'column')} you checked now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
-  return `${head}${hint}${checkNote(s)}${waitNote(s)}
+  return `${head}${hint}${flagsBlock(f, privacy, 'field-h')}${checkNote(s)}${waitNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
     ${numbers}
     <h3 class="field-h">Newest comments</h3>${comments}
@@ -317,6 +317,54 @@ export function rolesFrom(f, draft = {}) {
   }));
   return { roles, missing: rows.length - roles.length };
 }
+
+// ---- flags -------------------------------------------------------------------------------------
+//
+// What needs a look since the last update (src/core/fieldsurvey.js
+// fieldFlags works them out; here they are only worded). One glyph per
+// kind, so a flag never rests on colour alone; with privacy on a question
+// is only ever "Question N".
+
+const FLAG_GLYPHS = {
+  low: '<path d="M12 4v10.5M7.5 10 12 14.5 16.5 10M6 19h12"/>', // down to the floor
+  falling: '<path d="M4 7.5l5.5 5.5 3.5-3.5 6.5 6.5M20 11.5V16h-4.5"/>', // a line going down
+  comments: '<path d="M5 5.5h14v10h-8.5L6 19v-3.5H5z"/>', // a speech bubble
+  setup: '<path d="M12 4.5 20.5 19h-17zM12 10v4M12 16.5v.5"/>', // a warning sign
+};
+const flagGlyph = (kind) => `<svg class="ico flag-glyph flag-${kind}" viewBox="0 0 24 24" aria-hidden="true">${FLAG_GLYPHS[kind] ?? FLAG_GLYPHS.setup}</svg>`;
+const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
+const SETUP_WORDS = {
+  choose: (n) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice`,
+  doubt: (n) => `${plural(n, 'checked column')} now ${n === 1 ? 'looks' : 'look'} like emails or phone numbers`,
+  share: () => 'The sheet is not shared with the key’s reader address',
+  failed: () => 'The last update failed',
+  key: () => 'The key file could not be read',
+};
+
+// One flag in words. since: when the last update that brought something
+// new came (the board's "New since").
+export function flagText(flag, { privacy = true, since = null } = {}) {
+  const name = privacy || !flag.question ? `Question ${flag.no ?? ''}`.trim() : `“${flag.question}”`;
+  const when = since ? `since ${boardDay(since)}` : 'since the last update';
+  if (flag.kind === 'low') return `${plural(flag.count, 'low score')} on ${name} ${when}`;
+  if (flag.kind === 'falling') return `Average falling on ${name}: ${mean1(flag.newMean)} over ${plural(flag.newN, 'new answer')}, ${mean1(flag.oldMean)} before (of ${flag.high})`;
+  if (flag.kind === 'comments') return `${plural(flag.count, 'new comment')} ${when}`;
+  return (SETUP_WORDS[flag.what] ?? (() => 'Field feedback needs a look'))(flag.count ?? 0);
+}
+
+// The list, or one calm line; nothing at all when no flags were worked out
+// (an older snapshot).
+export function flagsHtml(f, { privacy = true } = {}) {
+  if (!Array.isArray(f?.flags)) return '';
+  if (!f.flags.length) return '<p class="field-calm">Nothing to flag</p>';
+  const items = f.flags.map((x) => {
+    const detail = x.kind === 'low' ? ` <span class="muted">(${x.mark} or less on ${x.low}–${x.high})</span>` : '';
+    const fix = x.fix && FIXES[x.fix] ? ` <button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
+    return `<li class="field-flag">${flagGlyph(x.kind)}<span class="field-flag-text">${esc(flagText(x, { privacy, since: f.sinceFetchedAt }))}${detail}</span>${fix}</li>`;
+  }).join('');
+  return `<ul class="field-flags">${items}</ul>`;
+}
+const flagsBlock = (f, privacy, cls) => (Array.isArray(f?.flags) ? `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy })}` : '');
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';
 
