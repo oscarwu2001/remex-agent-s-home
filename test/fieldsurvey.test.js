@@ -702,6 +702,7 @@ test('names found by their shape need a header that speaks of a person, and are 
   const s = F.summarise(form(['Who filled this in?'], names));
   assert.deepEqual([roleOf(s, 'Who filled this in?'), col(s, 'Who filled this in?').suggested.confidence], ['identifying', 'low']);
   assert.equal(roleOf(F.summarise(form(['Notes'], names)), 'Notes'), 'comment');
+  assert.equal(roleOf(F.summarise(form(['Nombre'], names)), 'Nombre'), 'identifying');
   const zh = F.summarise(form(['填寫人'], [['王小明'], ['陳大文'], ['林美玲']]));
   assert.deepEqual([roleOf(zh, '填寫人'), col(zh, '填寫人').suggested.confidence], ['identifying', 'high']);
   // Clear labels and email-shaped answers are sure.

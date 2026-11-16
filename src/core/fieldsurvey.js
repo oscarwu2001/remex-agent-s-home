@@ -297,7 +297,7 @@ const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫�
 const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 // A header that speaks of a person: only then can name-shaped answers be
 // names. Without it, "Easy Setup" or "方便" are just short answers.
-const NAME_HINT = /\b(?:who|whom|names?|by|persons?|people|staff|respondents?|reporters?|surgeons?|doctors?|physicians?|nurses?|operators?|testers?|interviewers?|contact)\b|填寫|填写|填表|填答|姓名|名字|名前|氏名|醫師|医师|醫生|医生|護理|护理|人員|人员|操作者|受訪|受访/i;
+const NAME_HINT = /\b(?:who|whom|names?|nombres?|nom|by|persons?|people|staff|respondents?|reporters?|surgeons?|doctors?|physicians?|nurses?|operators?|testers?|interviewers?|contact)\b|填寫|填写|填表|填答|姓名|名字|名前|氏名|醫師|医师|醫生|医生|護理|护理|人員|人员|操作者|受訪|受访/i;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
