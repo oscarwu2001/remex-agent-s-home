@@ -2859,7 +2859,23 @@ function renderLine() {
   paint($('line-body'), lineHtml(shown, { privacy: prefs.private, ui: lineUi, projects: lineProjects() }));
   const sel = lineUi.adding && $(`line-project-${lineUi.adding}`);
   if (sel && lineUi.project && sel.value !== lineUi.project) sel.value = lineUi.project;
+  fitLineMore();
 }
+// isLong() guesses which messages the board cuts; once drawn, a Show all
+// whose message fits after all is hidden (and shown again if a narrower
+// window cuts it). A message not laid out (height 0) keeps the guess.
+function fitLineMore() {
+  for (const b of $('line-body').querySelectorAll('.line-more[aria-expanded="false"]')) {
+    const text = b.previousElementSibling;
+    if (!text?.classList.contains('line-text') || !text.clientHeight) continue;
+    b.hidden = text.scrollHeight <= text.clientHeight;
+  }
+}
+let lineFitFrame = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(lineFitFrame);
+  lineFitFrame = requestAnimationFrame(fitLineMore);
+});
 function renderLineSettings() {
   const l = snapshot.line;
   const online = Boolean(bridge.lineSet);

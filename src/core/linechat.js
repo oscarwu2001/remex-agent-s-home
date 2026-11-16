@@ -445,19 +445,22 @@ function mergeChats(exports) {
     const when = (e) => localMs(e.savedAt) ?? e.mtimeMs ?? 0;
     const newestFirst = [...list].sort((a, b) => when(b) - when(a));
     // Each message once, by its hash. Inside the time a newer export covers
-    // (its first to last message), an older export's message the newer one
-    // lacks is dropped only when the newer one shows that sender unsending
-    // a message that minute; any other is kept and counted (olderOnly), as
-    // the newer export may have been cut or saved from another device.
+    // (its first to last message), an older export's messages the newer one
+    // lacks, from one sender in one minute, are dropped only when the newer
+    // one shows that sender unsending at least as many messages that
+    // minute (which of several was unsent cannot be told); any others are
+    // kept and counted (olderOnly), as the newer export may have been cut
+    // or saved from another device.
     const spans = [];
     const byHash = new Map();
-    const unsent = new Map(); // at|actor -> unsent events not yet matched
+    const unsent = new Map(); // at|actor -> unsent events in newer exports
     const unsentKey = (at, who) => `${at}\u0000${who}`;
     let olderOnly = 0;
     for (const e of newestFirst) {
       let lo = Infinity;
       let hi = -Infinity;
       const own = [];
+      const lacking = new Map(); // at|sender -> this export's messages inside a newer span
       for (const m of e.messages ?? []) {
         const ms = m.ms ?? 0;
         if (ms < lo) lo = ms;
@@ -466,14 +469,17 @@ function mergeChats(exports) {
         if (byHash.has(m.hash)) continue;
         if (spans.some(([a, b]) => ms >= a && ms <= b)) {
           const k = unsentKey(m.at, m.sender);
-          const left = unsent.get(k) ?? 0;
-          if (m.sender && left > 0) {
-            unsent.set(k, left - 1);
-            continue;
-          }
-          olderOnly += 1;
+          if (!lacking.has(k)) lacking.set(k, []);
+          lacking.get(k).push(m);
+          continue;
         }
         byHash.set(m.hash, { ...m, chat });
+      }
+      for (const [k, list] of lacking) {
+        const events = unsent.get(k) ?? 0;
+        if (list[0].sender && list.length <= events) continue;
+        olderOnly += list.length;
+        for (const m of list) byHash.set(m.hash, { ...m, chat });
       }
       // This export's unsent events stand for the exports older than it.
       for (const k of own) unsent.set(k, (unsent.get(k) ?? 0) + 1);
@@ -496,14 +502,24 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 // A name in CJK script is found anywhere (no spaces between words); any
 // other name only as a whole word: not in "Meiling", "Mei-Ling",
-// "mei@example.com" or "x.mei.y". An @ just before it is a mention.
+// "Anna-Mei", "Mei2", "mei@example.com" or "x.mei.y". An @ just before it is
+// a mention.
+const LATIN = '\\p{Script=Latin}';
+const CJK_BEFORE = '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\u3000-\\u303f]';
 function mentions(text, name) {
   const t = text.normalize('NFKC');
   const n = name.normalize('NFKC');
   if (CJK.test(n)) return t.toLowerCase().includes(n.toLowerCase());
-  // Bounded only by Latin letters and digits: "請@Mei", "麻煩Mei看" and
-  // "ok@Mei" are mentions; "mei@…" (an address) and "bob@mei.com" are not.
-  return new RegExp(`(?<![\\p{Script=Latin}\\p{Nd}_.\\-])${escapeRe(n)}(?![\\p{Script=Latin}\\p{Nd}_@]|[.\\-][\\p{Script=Latin}\\p{Nd}])`, 'iu').test(t);
+  const e = escapeRe(n);
+  // Bounded only by Latin letters and digits: "請@Mei", "麻煩Mei看",
+  // "ok@Mei", "thanks.Mei" and "好的……Mei" (NFKC makes the ellipsis full
+  // stops) are mentions. Before it: a hyphen counts as part of the word only
+  // after a Latin letter or digit ("Anna-Mei"). After it: no Latin letter,
+  // @ (an address) or .x / -x ("bob@mei.com", "Mei-Ling"), and a digit only
+  // in CJK text, where a time may follow the name ("請Mei3點").
+  const before = `(?<![${LATIN}\\p{Nd}_])(?<![${LATIN}\\p{Nd}]-)`;
+  const after = `(?![${LATIN}_@]|[.\\-][${LATIN}\\p{Nd}])`;
+  return new RegExp(`${before}(?:(?<=${CJK_BEFORE})${e}|${e}(?!\\p{Nd}))${after}`, 'iu').test(t);
 }
 // The user's own words that take something on. The text is first made
 // plain (full-width to half-width, curly apostrophes straight), and the
@@ -970,49 +986,61 @@ function wslProbe(dir, { execFile = childProcess.execFile } = {}) {
 
 // Prompt files hold a chat's words: each is removed a day after it was
 // written (all of them when maxAgeMs is 0, as the feature is turned off).
-// A file dated in the future (a clock set back) is kept and counted.
-// Returns { removed, kept, failed: codes of files that could not go,
-// folderError: the code when the folder itself could not be listed }; no
-// folder yet is not an error.
-function prunePrompts(dir, { now = Date.now(), maxAgeMs = 24 * 3600_000, fsys = fs } = {}) {
+// A file dated in the future (a clock set back) is kept and counted apart
+// (future), as it would never come of age. retry: names of files to remove
+// at any age (a prompt a failed start could not remove). Returns { removed,
+// kept, future, failed: codes of other files that could not go, stuck:
+// [{ name, code }] of retried files still there, folderError: the code when
+// the folder itself could not be listed }; no folder yet is not an error.
+const FUTURE_SLACK_MS = 60_000;
+function prunePrompts(dir, { now = Date.now(), maxAgeMs = 24 * 3600_000, fsys = fs, retry = [] } = {}) {
   let names;
   try {
     names = fsys.readdirSync(dir);
   } catch (err) {
-    return { removed: 0, kept: 0, failed: [], folderError: err.code === 'ENOENT' ? null : err.code || 'error' };
+    return { removed: 0, kept: 0, future: 0, failed: [], stuck: [], folderError: err.code === 'ENOENT' ? null : err.code || 'error' };
   }
+  const again = new Set(retry);
   let removed = 0;
   let kept = 0;
+  let future = 0;
   const failed = [];
+  const stuck = [];
   for (const name of names) {
     const file = path.join(dir, name);
     try {
-      if (maxAgeMs > 0 && now - fsys.statSync(file).mtimeMs < maxAgeMs) {
-        kept += 1;
-        continue;
+      if (!again.has(name) && maxAgeMs > 0) {
+        const age = now - fsys.statSync(file).mtimeMs;
+        if (age < maxAgeMs) {
+          kept += 1;
+          if (age < -FUTURE_SLACK_MS) future += 1;
+          continue;
+        }
       }
       fsys.rmSync(file, { force: true });
       removed += 1;
     } catch (err) {
-      failed.push(err.code || 'error');
+      if (again.has(name)) stuck.push({ name, code: err.code || 'error' });
+      else failed.push(err.code || 'error');
     }
   }
-  return { removed, kept, failed, folderError: null };
+  return { removed, kept, future, failed, stuck, folderError: null };
 }
 
 // Marks (added, dismissed) saved under a message's hash by an earlier
-// version move to the item's key, unless one is already there. hits:
-// [{ key, hash }]. Returns { marks, changed }.
+// version move to the key of every item with that hash (one message can be
+// in two chats), unless one is already there. hits: [{ key, hash }].
+// Returns { marks, changed }.
 function migrateMarks(marks, hits) {
   const out = { ...marks };
-  let changed = false;
+  const moved = new Set();
   for (const h of hits) {
-    if (!h.hash || h.hash === h.key || !Object.hasOwn(out, h.hash)) continue;
-    if (!Object.hasOwn(out, h.key)) out[h.key] = out[h.hash];
-    delete out[h.hash];
-    changed = true;
+    if (!h.hash || h.hash === h.key || !Object.hasOwn(marks, h.hash)) continue;
+    if (!Object.hasOwn(out, h.key)) out[h.key] = marks[h.hash];
+    moved.add(h.hash);
   }
-  return { marks: out, changed };
+  for (const hash of moved) delete out[hash];
+  return { marks: out, changed: moved.size > 0 };
 }
 
 module.exports = {

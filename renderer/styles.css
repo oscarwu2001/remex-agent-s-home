@@ -867,6 +867,7 @@ body.no-select, body.no-select * { user-select: none; }
 .line-text.open { display: block; overflow: visible; }
 .line-more { display: inline-block; margin-top: 2px; }
 .link-btn.line-more { font-size: 12px; }
+.line-more[hidden] { display: none; } /* a message that fits after all (app.js fitLineMore) */
 /* Add and Send in the accent; Dismiss quieter, pushed away to the far end. */
 .line-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); margin: var(--s-1) 0 0 calc(-1 * var(--s-2)); }
 .line-act { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; color: var(--accent); }

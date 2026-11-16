@@ -236,7 +236,8 @@ function demoLine(nowMs) {
       { chat: 'Sample family', files: 1, read: false, problems: 0 },
     ],
     items: [
-      item('d0a1b2c3d4e5f601', 25 * min, 'Sample crew', 'Robin', '@Sam could you check why the nightly export failed? The log says the tracker lost the probe twice.', 'mention', 'Sam', 'check why the nightly export failed? The log says the tracker lost the probe twice.'),
+      // Guessed long (isLong) but not cut on a wide board, so its Show all is hidden once drawn.
+      item('d0a1b2c3d4e5f601', 25 * min, 'Sample crew', 'Robin', '@Sam could you check why the nightly export failed? The log says the tracker lost the probe twice, once just after the warm-up and once near the end, and the retry did not start on its own. No rush before lunch.', 'mention', 'Sam', 'check why the nightly export failed? The log says the tracker lost the probe twice.'),
       // Long enough to be cut at six lines, so its Show all can be seen.
       item('d0a1b2c3d4e5f602', 140 * min, '範例實驗室', '小華', '新的 calibration 報告在共用資料夾，週五前要回覆。請大家先看第二節的流程圖，再對照上週的會議紀錄，把需要修改的地方標出來；如果有不清楚的地方，直接在檔案裡留言就好。量測的部分我已經把原始數據整理成表格，放在同一個資料夾的子目錄裡，麻煩確認單位和小數點位數是否一致，有問題的話週四下午可以一起討論。', 'keyword', 'calibration', '新的 calibration 報告在共用資料夾，週五前要回覆'),
       item('d0a1b2c3d4e5f603', 26 * 60 * min, 'Sample crew', 'Sam', 'I’ll send the release note draft tomorrow morning', 'commitment', 'I’ll', 'I’ll send the release note draft tomorrow morning'),

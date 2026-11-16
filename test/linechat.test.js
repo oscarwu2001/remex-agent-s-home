@@ -694,9 +694,9 @@ test('prunePrompts removes prompt files older than a day and keeps the rest', ()
   fs.writeFileSync(path.join(dir, 'new.txt'), 'y');
   const day = 24 * 3600_000;
   fs.utimesSync(path.join(dir, 'old.txt'), new Date(Date.now() - 2 * day), new Date(Date.now() - 2 * day));
-  assert.deepEqual(L.prunePrompts(dir, { now: Date.now() }), { removed: 1, kept: 1, failed: [], folderError: null });
+  assert.deepEqual(L.prunePrompts(dir, { now: Date.now() }), { removed: 1, kept: 1, future: 0, failed: [], stuck: [], folderError: null });
   assert.deepEqual(fs.readdirSync(dir), ['new.txt']);
-  assert.deepEqual(L.prunePrompts(path.join(dir, 'none')), { removed: 0, kept: 0, failed: [], folderError: null });
+  assert.deepEqual(L.prunePrompts(path.join(dir, 'none')), { removed: 0, kept: 0, future: 0, failed: [], stuck: [], folderError: null });
 });
 
 test('prunePrompts keeps a future-dated file and counts it, and says apart when the folder cannot be read', () => {
@@ -704,11 +704,11 @@ test('prunePrompts keeps a future-dated file and counts it, and says apart when 
   fs.writeFileSync(path.join(dir, 'future.txt'), 'x');
   const later = new Date(Date.now() + 2 * 24 * 3600_000);
   fs.utimesSync(path.join(dir, 'future.txt'), later, later);
-  assert.deepEqual(L.prunePrompts(dir), { removed: 0, kept: 1, failed: [], folderError: null });
+  assert.deepEqual(L.prunePrompts(dir), { removed: 0, kept: 1, future: 1, failed: [], stuck: [], folderError: null });
   // Turned off: everything goes, a future-dated file too.
-  assert.deepEqual(L.prunePrompts(dir, { maxAgeMs: 0 }), { removed: 1, kept: 0, failed: [], folderError: null });
+  assert.deepEqual(L.prunePrompts(dir, { maxAgeMs: 0 }), { removed: 1, kept: 0, future: 0, failed: [], stuck: [], folderError: null });
   const fsys = { ...fs, readdirSync: () => { throw Object.assign(new Error('no'), { code: 'EACCES' }); } };
-  assert.deepEqual(L.prunePrompts(dir, { fsys }), { removed: 0, kept: 0, failed: [], folderError: 'EACCES' });
+  assert.deepEqual(L.prunePrompts(dir, { fsys }), { removed: 0, kept: 0, future: 0, failed: [], stuck: [], folderError: 'EACCES' });
 });
 
 // ---- round 3 -------------------------------------------------------------------------
@@ -833,4 +833,43 @@ test('a project list that cannot be read is refused with its code apart from the
   fs.writeFileSync(file, '{"version":1,"projects":[]}');
   const fsys = { ...fs, readFileSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } };
   assert.throws(() => L.addTodo(file, { project: 'p1', text: 'x' }, fsys), (err) => err.code === 'EBUSY' && err.stage === 'read' && !/EBUSY/.test(err.message));
+});
+
+// ---- round 4 -------------------------------------------------------------------------
+
+test('T1: a prompt a failed start left is removed at any age when retried, and stays named while it cannot go', () => {
+  const dir = tmpDir();
+  for (const n of ['left.txt', 'fresh.txt', 'locked.txt']) fs.writeFileSync(path.join(dir, n), 'x');
+  const fsys = { ...fs, rmSync: (p, o) => { if (p.endsWith('locked.txt')) throw Object.assign(new Error('busy'), { code: 'EBUSY' }); return fs.rmSync(p, o); } };
+  assert.deepEqual(L.prunePrompts(dir, { fsys, retry: ['left.txt', 'locked.txt', 'gone.txt'] }),
+    { removed: 1, kept: 1, future: 0, failed: [], stuck: [{ name: 'locked.txt', code: 'EBUSY' }], folderError: null });
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['fresh.txt', 'locked.txt']);
+});
+
+test('T2 (R4c): one unsent event and two older-only messages from that sender that minute: both are kept and counted', () => {
+  const parse = (file, ...lines) => ({ ...L.parseExport(exp('[LINE] Chat history with G', ...lines)), file, mtimeMs: 1 });
+  const older = parse('old.txt', 'Saved on: 11/16/2026, 10:40', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\t@Mei call me', '10:35\tKen\toops');
+  const newer = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend');
+  const [chat] = L.mergeChats([older, newer]);
+  assert.deepEqual(chat.messages.filter((m) => m.kind === 'text').map((m) => m.text), ['start', '@Mei call me', 'oops', 'end']);
+  assert.equal(chat.olderOnly, 2);
+  // Two unsent events for two messages: both go.
+  const newer2 = parse('new2.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend');
+  const [chat2] = L.mergeChats([older, newer2]);
+  assert.deepEqual(chat2.messages.filter((m) => m.kind === 'text').map((m) => m.text), ['start', 'end']);
+  assert.equal(chat2.olderOnly, 0);
+});
+
+test('T3: a bare name right after a full stop or an ellipsis, or before a time in CJK text, is found; Mei2, Meiling, Mei-Ling and addresses are not', () => {
+  const hits = (text) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
+  for (const text of ['好的……Mei你看一下', '收到…Mei', 'OK.Mei can you check', 'thanks.Mei', '請Mei3點前回覆']) assert.equal(hits(text), 1, text);
+  for (const text of ['mei@example.com', 'Mei-Ling', 'Meiling', 'Mei2', 'ask Mei2 about it', 'Anna-Mei is here', 'see x.mei.y']) assert.equal(hits(text), 0, text);
+});
+
+test('T4: a mark under a hash two chats share goes to every listed item with it', () => {
+  const hits = [{ key: 'k1', hash: 'h1' }, { key: 'k2', hash: 'h1' }, { key: 'k3', hash: 'h3' }];
+  assert.deepEqual(L.migrateMarks({ h1: { what: 'dismissed', at: 5 }, k3: { what: 'added', at: 6 } }, hits), {
+    marks: { k1: { what: 'dismissed', at: 5 }, k2: { what: 'dismissed', at: 5 }, k3: { what: 'added', at: 6 } },
+    changed: true,
+  });
 });

@@ -1221,22 +1221,43 @@ app.whenReady().then(() => {
   scanLine();
   // Prompt files hold a chat's words: each goes a day after it was written
   // (looked at as the app starts and every hour), all of them while the
-  // feature is off. One that stays is said under Needs attention, in one
-  // place that the next prune that works clears.
-  let linePruneProblem = null;
+  // feature is off. What stays is said under Needs attention: files that
+  // could not go and files dated in the future (they would never come of
+  // age), as of the last prune; and a prompt a failed start could not
+  // remove, retried at any age every hour and said until it is gone.
+  let linePruneProblems = [];
+  const lineLeftovers = new Map(); // prompt file name -> the code it could not be removed with
   const PRUNE_AGAIN = 'the app tries again within the hour';
   function pruneLinePrompts(maxAgeMs) {
-    const gone = lineChat.prunePrompts(linePromptDir, maxAgeMs == null ? {} : { maxAgeMs });
+    const gone = lineChat.prunePrompts(linePromptDir, { ...(maxAgeMs == null ? {} : { maxAgeMs }), retry: [...lineLeftovers.keys()] });
     const n = gone.failed.length;
+    const out = [];
     if (gone.folderError) {
-      linePruneProblem = { label: `LINE chats: the app's folder of saved prompts could not be opened to remove old ones; ${PRUNE_AGAIN}. If this stays, restart the app`, detail: `${linePromptDir} (${gone.folderError})` };
-    } else if (n) {
-      linePruneProblem = { label: `LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and ${PRUNE_AGAIN}`,
-        detail: `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})` };
+      // The leftovers cannot be looked at either: they stay said.
+      out.push({ label: `LINE chats: the app's folder of saved prompts could not be opened to remove old ones; ${PRUNE_AGAIN}. If this stays, restart the app`, detail: `${linePromptDir} (${gone.folderError})` });
     } else {
-      linePruneProblem = null;
+      lineLeftovers.clear();
+      for (const s of gone.stuck) lineLeftovers.set(s.name, s.code);
     }
+    if (n) {
+      out.push({ label: `LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and ${PRUNE_AGAIN}`,
+        detail: `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})` });
+    }
+    if (gone.future) {
+      const f = gone.future;
+      out.push({ label: `LINE chats: ${f === 1 ? '1 saved prompt is' : `${f} saved prompts are`} dated in the future, so the app does not remove ${f === 1 ? 'it' : 'them'} after a day; check the computer's date, or turn LINE chats off to remove every saved prompt`,
+        detail: linePromptDir });
+    }
+    linePruneProblems = out;
   }
+  const leftoverProblem = () => {
+    const n = lineLeftovers.size;
+    if (!n) return [];
+    return [{
+      label: `LINE chats: ${n === 1 ? 'a saved prompt' : `${n} saved prompts`} could not be removed after Claude did not start; close any app using the app's line-prompts folder, and the app tries again every hour`,
+      detail: [...lineLeftovers].map(([name, code]) => `${path.join(linePromptDir, name)} (${code})`).join(', '),
+    }];
+  };
   const pruneLineNow = () => pruneLinePrompts(line.enabled ? undefined : 0);
   pruneLineNow();
   setInterval(pruneLineNow, LINE_PRUNE_MS);
@@ -1371,7 +1392,7 @@ app.whenReady().then(() => {
         if (!err) return resolve({ ok: true, label: plan.label });
         // Nothing started: the prompt (a chat's words) does not stay behind.
         fs.rm(plan.write.file, { force: true }, (rmErr) => {
-          if (rmErr) linePruneProblem = { label: `LINE chats: a saved prompt could not be removed after Claude did not start; ${PRUNE_AGAIN}`, detail: `${plan.write.file} (${lineCode(rmErr)})` };
+          if (rmErr) lineLeftovers.set(path.basename(plan.write.file), lineCode(rmErr));
         });
         lineLog(`start failed (${req.target})`, err);
         const tmux = req.target === 'tmux';
@@ -1420,7 +1441,8 @@ app.whenReady().then(() => {
         olderOnly: lineChats.reduce((n, c) => n + (c.olderOnly ?? 0), 0),
       }),
       ...(lineScanError ? [{ label: lineScanError, detail: '' }] : []),
-      ...(linePruneProblem ? [linePruneProblem] : []),
+      ...linePruneProblems,
+      ...leftoverProblem(),
     ].map((p) => ({ ...p, count: 1 }));
     // Each new set of problems goes to the system log once (labels only).
     const text = out.map((p) => p.label).join(' | ');
