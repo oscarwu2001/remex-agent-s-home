@@ -188,22 +188,24 @@ test("Google's refusals become plain sentences with what to try", async () => {
     assert.fail('expected a refusal');
   };
   const share = await fail({ meta: [403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED' } }] });
-  assert.equal(share.message, `Share the sheet with ${ROBOT} as Viewer, then press Refresh now.`);
+  // The reader address is the detail, shown only with privacy off.
+  assert.equal(share.message, 'Share the sheet with the key’s reader address (shown in Settings) as Viewer, then press Refresh now.');
+  assert.equal(share.detail, ROBOT);
   assert.equal(share.kind, 'share');
   const api = await fail({ meta: [403, { error: { code: 403, message: 'Google Sheets API has not been used in project 0 before or it is disabled.', status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED' }] } }] });
   assert.match(api.message, /Turn on the Google Sheets API/);
-  assert.match((await fail({ meta: [404, { error: { code: 404, status: 'NOT_FOUND' } }] })).message, /The sheet link points to nothing — check it/);
+  assert.match((await fail({ meta: [404, { error: { code: 404, status: 'NOT_FOUND' } }] })).message, /^No sheet was found at this link\. Open it in your browser/);
   assert.match((await fail({}, { spreadsheetId: SHEET_ID, gid: 999 })).message, /tab in the link \(gid 999\)/);
   assert.match((await fail({ token: [400, { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' }] })).message, /Google refused the key/);
   assert.match((await fail({ token: new Error('net::ERR_INTERNET_DISCONNECTED') })).message, /No network/);
   // Electron's words when a request is redirected and redirects are refused.
   const moved = await fail({ meta: new Error("Attempted to redirect, but redirect policy was 'error'") });
-  assert.match(moved.message, /sent the request elsewhere/);
+  assert.match(moved.message, /^Google redirected the request, which the app does not follow/);
   assert.equal(moved.kind, 'blocked');
   const slow = new Error('The operation was aborted due to timeout');
   slow.name = 'TimeoutError';
   assert.match((await fail({ meta: slow })).message, /did not answer in time/);
-  assert.match((await fail({ values: [200, 'not json'] })).message, /not JSON/);
+  assert.match((await fail({ values: [200, 'not json'] })).message, /^Google’s answer could not be read\. Press Refresh now\./);
   assert.match((await fail({ values: [200, { values: 'x' }] })).message, /without rows/);
   assert.match((await fail({ token: [200, { token_type: 'Bearer' }] })).message, /without a token/);
   assert.match((await fail({ values: [503, {}] })).message, /\(503\).*tries again/);
@@ -227,11 +229,14 @@ test('an English form: responses, dates, scores, comments; names and emails neve
   assert.equal(s.oldest, iso(2026, 11, 10, 9, 15, 2));
   assert.equal(s.newSince, 3);
   assert.equal(s.timestampColumn, 'Timestamp');
-  assert.deepEqual(s.questions.map((q) => [q.question, q.n, q.mean, q.low, q.high, q.scaleFrom, q.unreadable]), [
-    ['How easy was the setup? (1-5)', 5, 18 / 5, 1, 5, 'header', 0],
-    ['How clear was the screen?', 4, 16 / 4, 1, 5, 'answers', 1],
+  assert.deepEqual(s.questions.map((q) => [q.question, q.n, q.mean, q.low, q.high, q.scaleFrom, q.guessed, q.unreadable]), [
+    ['How easy was the setup? (1-5)', 5, 18 / 5, 1, 5, 'header', false, 0],
+    ['How clear was the screen?', 4, 16 / 4, 1, 5, 'answers', true, 1],
   ]);
-  assert.deepEqual(s.overall, { mean: 34 / 9, high: 5, rescaled: false, n: 9 });
+  // Only the stated scale counts in the headline: 4, 5, 3, 4, 2.
+  assert.deepEqual(s.overall, { mean: 18 / 5, high: 5, rescaled: false, n: 5 });
+  assert.equal(s.scalesGuessed, 1);
+  assert.equal(s.checked, false);
   assert.deepEqual(s.comments.map((c) => [c.question, c.text, c.at]), [
     ['What should we improve?', 'Quieter fan', iso(2026, 11, 14, 16, 45, 10)],
     ['What should we improve?', 'Faster start-up', iso(2026, 11, 12, 11, 30)],
@@ -241,7 +246,7 @@ test('an English form: responses, dates, scores, comments; names and emails neve
   assert.deepEqual(s.identifying, ['Email Address', 'Your name']);
   assert.ok(!JSON.stringify(s).includes('@example.com'));
   assert.ok(!JSON.stringify(s).includes('Alex Tester'));
-  assert.deepEqual(s.unreadable, { scores: 1, timestamps: 0 });
+  assert.deepEqual(s.unreadable, { scores: 1, numbers: 0, timestamps: 0 });
 });
 
 test('a Traditional Chinese form, with 上午/下午 times', () => {
@@ -260,9 +265,8 @@ test('a Traditional Chinese form, with 上午/下午 times', () => {
     ['整體滿意度', 3, 4, 1, 5],
     ['導航準確度 (1-10)', 3, 8, 1, 10],
   ]);
-  // Two scales: the overall average is put on 0–10.
-  assert.equal(s.overall.rescaled, true);
-  assert.equal(s.overall.high, 10);
+  // The first scale is only a guess: the headline is the stated 1–10 one.
+  assert.deepEqual(s.overall, { mean: 8, high: 10, rescaled: false, n: 3 });
   assert.deepEqual(s.comments.map((c) => c.text), ['螢幕字太小', '希望開機更快']);
   assert.deepEqual(s.identifying, ['電子郵件地址', '姓名']);
   assert.ok(!JSON.stringify(s).includes('王小明'));
@@ -289,7 +293,7 @@ test('a word in a score column is counted as unreadable, not averaged and not dr
   const rows = [['Timestamp', 'Rating'], ['2026-11-10 09:00', '4'], ['2026-11-10 10:00', 'five'], ['2026-11-10 11:00', 5], ['2026-11-10 12:00', 3], ['2026-11-10 13:00', 4]];
   const s = F.summarise(rows);
   assert.deepEqual(s.questions.map((q) => [q.n, q.mean, q.unreadable]), [[4, 4, 1]]);
-  assert.deepEqual(s.unreadable, { scores: 1, timestamps: 0 });
+  assert.deepEqual(s.unreadable, { scores: 1, numbers: 0, timestamps: 0 });
   assert.equal(F.unreadableText(s), '1 answer could not be read: 1 score that is not a whole number on its scale');
   // An answer outside the scale the question names is unreadable too.
   const off = F.summarise([['Timestamp', 'Ease (1-5)'], ['2026-11-10 09:00', 4], ['2026-11-10 10:00', 9], ['2026-11-10 11:00', 5], ['2026-11-10 12:00', 5], ['2026-11-10 13:00', 3]]);
@@ -326,13 +330,14 @@ test('ragged rows: short rows are blanks, extra cells become a column of their o
   assert.deepEqual(s.questions.map((q) => [q.question, q.n, q.mean]), [['Rating', 2, 4.5]]);
   // One answer's comments keep the form's order.
   assert.deepEqual(s.comments.map((c) => [c.question, c.text]), [['Comments', 'Works well'], ['Column D', 'a note past the last question']]);
-  assert.deepEqual(s.columns.find((c) => c.header === 'Column D'), { header: 'Column D', kind: 'text', untitled: true });
+  const d = s.columns.find((c) => c.header === 'Column D');
+  assert.deepEqual([d.role, d.untitled, d.confirmed], ['comment', true, false]);
 });
 
 test('a timestamp that is not a date is counted', () => {
   const s = F.summarise([['Timestamp', 'Rating'], ['2026-11-10 09:00', 4], ['yesterday', 5], ['', 3]]);
   assert.equal(s.responses, 3);
-  assert.deepEqual(s.unreadable, { scores: 0, timestamps: 2 });
+  assert.deepEqual(s.unreadable, { scores: 0, numbers: 0, timestamps: 2 });
   assert.match(F.unreadableText(s), /2 answers could not be read: 2 rows without a readable date/);
 });
 
@@ -361,13 +366,16 @@ test('with no timestamp header, the first column of dates is the timestamp', () 
   assert.equal(s.newest, iso(2026, 11, 12, 9));
 });
 
-test('other columns: choices are tallied, extra dates and numbers are listed as not summarised', () => {
+test('other columns: choices are tallied, numbers averaged apart, extra dates not summarised', () => {
   const rows = [['Timestamp', 'Your role', 'Date of the case', 'Cases per week', 'Reach you at', 'Anything else?']];
   const roles = ['Surgeon', 'Nurse', 'Surgeon', 'Engineer', 'Surgeon', 'Nurse'];
   roles.forEach((r, i) => rows.push([`2026-11-${10 + i} 09:00`, r, `2026-10-${10 + i}`, 12 + i * 10, `p${i}@example.com`, i === 2 ? 'Fine' : '']));
   const s = F.summarise(rows);
   assert.deepEqual(s.choices, [{ question: 'Your role', n: 6, answers: [{ answer: 'Surgeon', count: 3 }, { answer: 'Nurse', count: 2 }, { answer: 'Engineer', count: 1 }] }]);
-  assert.deepEqual(s.skipped, [{ question: 'Date of the case', reason: 'dates' }, { question: 'Cases per week', reason: 'numbers' }]);
+  assert.deepEqual(s.skipped, [{ question: 'Date of the case', reason: 'dates' }]);
+  // 12, 22, 32, 42, 52, 62: a number, never in the headline.
+  assert.deepEqual(s.numbers.map((q) => [q.question, q.n, q.mean]), [['Cases per week', 6, 37]]);
+  assert.equal(s.overall, null);
   // Found by its answers, not its header.
   assert.deepEqual(s.identifying, ['Reach you at']);
   assert.deepEqual(s.comments.map((c) => c.text), ['Fine']);
@@ -394,6 +402,263 @@ test('a very long sheet is summarised, not a stack overflow', () => {
   assert.equal(s.responses, 300_000);
   assert.equal(s.newest, iso(2026, 11, 12, 9));
   assert.deepEqual(s.questions.map((q) => [q.n, q.mean, q.high]), [[300_000, 4.5, 5]]);
+});
+
+// ---- suggestions that need care ------------------------------------------------------------
+
+const roleOf = (s, header) => s.columns.find((c) => c.header === header)?.role;
+const form = (headers, values) => [['Timestamp', ...headers], ...values.map((v, i) => [`2026-11-${String(10 + i).padStart(2, '0')} 09:00`, ...v])];
+
+test('a word like "name" or "address" inside a question does not hide the column', () => {
+  const s = F.summarise(form(
+    ['Did the device address the problem?', 'Name one thing you liked', 'Do you use the mobile app?', 'Was contact support helpful?', 'Device name'],
+    [['Yes', 'The quick start', 'Yes', 'Yes', 'Remex'], ['No', 'Small holder', 'No', 'No', 'Remex']],
+  ));
+  assert.deepEqual(s.identifying, []);
+  // Short labels still are.
+  const t = F.summarise(form(['Name', 'Email address (optional)', '電話', 'Your name:'], [['Ann', 'a@example.com', '0912', 'Bo'], ['Cy', '', '', 'Di']]));
+  assert.deepEqual(t.identifying, ['Name', 'Email address (optional)', '電話', 'Your name:']);
+});
+
+test('patient and case identifiers are identifying, in English and Chinese', () => {
+  const rows = [['Timestamp', 'Patient ID', 'Case number', 'MRN', '病歷號碼', '個案編號', 'Medical record no.', 'Rating (1-5)']];
+  for (let i = 0; i < 6; i += 1) rows.push([46330 + i, `PT-00${i}9`, i + 1, `A${1234567 + i}`, `X${98765 + i}`, `K-${i}`, `MR${i}`, 3 + (i % 3)]);
+  const s = F.summarise(rows, { timeZone: 'UTC' });
+  // "Case number" holds 1…6, small whole numbers, and is still not a score.
+  assert.deepEqual(s.identifying, ['Patient ID', 'Case number', 'MRN', '病歷號碼', '個案編號', 'Medical record no.']);
+  assert.deepEqual(s.questions.map((q) => q.question), ['Rating (1-5)']);
+  assert.ok(!JSON.stringify(s.comments).includes('PT-'));
+  // A score about the patient is a score.
+  const p = F.summarise(form(['Patient satisfaction (1-5)', '患者疼痛程度'], [[4, 3], [5, 2], [3, 4]]));
+  assert.deepEqual(p.questions.map((q) => q.question), ['Patient satisfaction (1-5)', '患者疼痛程度']);
+});
+
+test('names under headers no list knows are found by their shape', () => {
+  const people = ['Ann Lee', 'Bo Chan', 'Cy Wu', 'Di Ho', 'Ed Ng', 'Fa Li'];
+  const s = F.summarise(form(['Who filled this in?', '名前', 'Respondent', 'Rating (1-5)'], people.map((n, i) => [n, ['王小明', '陳大文', '林美玲', '張家豪', '李志明', '黃淑芬'][i], n, 4])));
+  assert.deepEqual(s.identifying, ['Who filled this in?', '名前', 'Respondent']);
+  // Title Case answers that repeat are choices, not names; short comments are comments.
+  const c = F.summarise(form(['How was it?', 'Comments'], [['Very Easy', 'Works well'], ['Very Easy', '很好'], ['Quite Easy', 'Faster start-up'], ['Very Easy', '太慢了'], ['Quite Easy', 'Quieter fan']]));
+  assert.equal(roleOf(c, 'How was it?'), 'choice');
+  assert.equal(roleOf(c, 'Comments'), 'comment');
+});
+
+test('a count question is a number, never a score', () => {
+  const s = F.summarise(form(['How many times did you restart it?', 'Number of screws used', '重啟幾次', 'Rating'], [[0, 2, 1, 4], [2, 3, 0, 5], [1, 2, 0, 4], [3, 4, 2, 3], [0, 2, 1, 4]]));
+  assert.deepEqual(s.numbers.map((q) => [q.question, q.n, q.mean]), [
+    ['How many times did you restart it?', 5, 6 / 5], ['Number of screws used', 5, 13 / 5], ['重啟幾次', 5, 4 / 5],
+  ]);
+  assert.deepEqual(s.questions.map((q) => q.question), ['Rating']);
+  // A 0 with no scale in the question: counts, not a 0–5 score.
+  const z = F.summarise(form(['Problems seen'], [[0], [2], [1], [3]]));
+  assert.equal(roleOf(z, 'Problems seen'), 'number');
+  // A 0 with a stated scale is a score.
+  const nps = F.summarise(form(['How likely are you to recommend it? (0-10)'], [[0], [9], [10]]));
+  assert.deepEqual(nps.questions.map((q) => [q.low, q.high, q.scaleFrom]), [[0, 10, 'header']]);
+});
+
+test('mostly "No" with one longer answer is free text, not a choice', () => {
+  const s = F.summarise(form(['Anything else?'], [['No'], ['No'], ['No'], ['The holder slips when wet'], ['No'], ['No']]));
+  assert.equal(roleOf(s, 'Anything else?'), 'comment');
+  assert.equal(s.commentCount, 6);
+});
+
+test('the last scale in a question is its scale', () => {
+  const s = F.summarise(form(['How easy was it in the first 1-2 weeks? (1-5)'], [[4], [5], [3]]));
+  assert.deepEqual(s.questions.map((q) => [q.low, q.high, q.scaleFrom]), [[1, 5, 'header']]);
+});
+
+// ---- the user's own column roles --------------------------------------------------------------
+
+test('confirmed roles win over the suggestions, and a guessed scale stays out of the headline until confirmed', () => {
+  const rows = form(['Score A', 'Score B (1-5)', 'Notes'], [[4, 5, 'ok then'], [5, 4, 'fine'], [3, 4, 'slow']]);
+  const guess = F.summarise(rows);
+  assert.deepEqual(guess.questions.map((q) => [q.question, q.scaleFrom]), [['Score A', 'answers'], ['Score B (1-5)', 'header']]);
+  assert.deepEqual(guess.overall, { mean: 13 / 3, high: 5, rescaled: false, n: 3 });
+  assert.equal(guess.checked, false);
+  const roles = [
+    { header: 'Timestamp', index: 0, role: 'timestamp' },
+    { header: 'Score A', index: 1, role: 'score', low: 1, high: 10 },
+    { header: 'Score B (1-5)', index: 2, role: 'ignore' },
+    { header: 'Notes', index: 3, role: 'identifying' },
+  ];
+  const s = F.summarise(rows, { roles });
+  assert.equal(s.checked, true);
+  assert.deepEqual(s.questions.map((q) => [q.question, q.low, q.high, q.scaleFrom, q.guessed]), [['Score A', 1, 10, 'confirmed', false]]);
+  assert.deepEqual(s.overall, { mean: 4, high: 10, rescaled: false, n: 3 });
+  assert.deepEqual(s.skipped, [{ question: 'Score B (1-5)', reason: 'ignored' }]);
+  assert.deepEqual(s.identifying, ['Notes']);
+  assert.equal(s.commentCount, 0);
+  // Moved one place along by a new first question: the roles follow the headers.
+  const moved = form(['Added later', 'Score A', 'Score B (1-5)', 'Notes'], [['x', 4, 5, 'ok then']]);
+  const m = F.summarise(moved, { roles });
+  assert.equal(roleOf(m, 'Notes'), 'identifying');
+  assert.deepEqual(m.newColumns, ['Added later']);
+  assert.equal(m.checked, false);
+});
+
+test('a column that appears after the check is flagged under Needs attention', () => {
+  const roles = [{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Rating (1-5)', index: 1, role: 'score', low: 1, high: 5 }];
+  const s = F.summarise(form(['Rating (1-5)', 'New question'], [[4, 'yes']]), { roles });
+  assert.deepEqual(s.columns.map((c) => [c.header, c.confirmed, c.isNew]), [['Timestamp', true, false], ['Rating (1-5)', true, false], ['New question', false, true]]);
+  assert.deepEqual(F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label),
+    ['Field feedback: a new column in the sheet, not checked yet (Settings → Field feedback → Check the columns)']);
+  // Never checked: nothing is "new", the board says the columns are not checked yet.
+  assert.deepEqual(F.summarise(form(['Rating (1-5)'], [[4]])).newColumns, []);
+});
+
+test('roles from Settings are checked before they are saved', () => {
+  assert.deepEqual(F.checkRoles([{ header: 'Q', index: 1, role: 'score', low: '1', high: '5', extra: 'x' }]), [{ header: 'Q', index: 1, role: 'score', low: 1, high: 5 }]);
+  assert.throws(() => F.checkRoles([{ header: 'Q', index: 1, role: 'score', low: 2, high: 5 }]), /starts at 0 or 1/);
+  assert.throws(() => F.checkRoles([{ header: 'Q', index: 1, role: 'admin' }]), /could not be read/);
+  assert.throws(() => F.checkRoles('x'), /could not be read/);
+});
+
+// ---- what is kept, and when to read again ----------------------------------------------------
+
+const LINK = { spreadsheetId: SHEET_ID, gid: 777 };
+const SETTINGS = { enabled: true, sheetUrl: `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=777`, keyPath: 'key.json' };
+const got = (rows) => ({ rows, tab: { id: 777, title: 'Form Responses 1' }, timeZone: 'UTC' });
+const R1 = [['Timestamp', 'Email address', 'Rating (1-5)'], ['2026-11-10T09:00:00Z', 'a@example.com', 4], ['2026-11-11T09:00:00Z', 'b@example.com', 5]];
+const R2 = [...R1, ['2026-11-13T09:00:00Z', 'c@example.com', 3]];
+
+test('the cache never keeps an identifying answer, and still counts every response', () => {
+  const c = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
+  assert.ok(!JSON.stringify(c).includes('@example.com'));
+  assert.deepEqual(c.rows[0], R1[0]);
+  assert.deepEqual(c.redacted, [1]);
+  const s = F.summariseCache(c, []);
+  assert.equal(s.responses, 2);
+  assert.deepEqual(s.identifying, ['Email address']);
+  // Marked identifying later: dropped from the cache too.
+  const n = F.afterFetch(null, got([['Timestamp', 'Notes'], ['2026-11-10T09:00:00Z', 'call Ann']]), { now: 1, started: 1, link: LINK });
+  assert.ok(n.rows[1].includes('call Ann'));
+  const re = F.reroleCache(n, [{ header: 'Notes', index: 1, role: 'identifying' }]);
+  assert.ok(!JSON.stringify(re.rows).includes('Ann'));
+});
+
+test('first read, the same again, then new answers: "new since" moves only when something came in', () => {
+  const first = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
+  assert.deepEqual([first.since, first.sinceFetchedAt], [null, null]);
+  const same = F.afterFetch(first, got(R1), { now: 2000, started: 1900, link: LINK });
+  assert.deepEqual([same.since, same.sinceFetchedAt, same.fetchedAt], [null, null, 2000]);
+  const more = F.afterFetch(same, got(R2), { now: 3000, started: 2900, link: LINK });
+  assert.deepEqual([more.since, more.sinceFetchedAt], ['2026-11-11T09:00:00.000Z', 2000]);
+  assert.equal(F.summariseCache(more, []).newSince, 1);
+  const again = F.afterFetch(more, got(R2), { now: 4000, started: 3900, link: LINK });
+  assert.deepEqual([again.since, again.sinceFetchedAt], ['2026-11-11T09:00:00.000Z', 2000]);
+  // Another sheet: starts afresh.
+  const other = F.afterFetch(again, got(R2), { now: 5000, started: 4900, link: { spreadsheetId: 'B'.repeat(30), gid: 0 } });
+  assert.deepEqual([other.since, other.spreadsheetId], [null, 'B'.repeat(30)]);
+});
+
+test('a failed read keeps the last good rows, and the next good read clears the error', () => {
+  const good = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
+  const failed = F.afterFailure(good, new F.FieldSurveyError('share', 'Share the sheet…', ROBOT), { now: 2000, started: 1900, link: LINK });
+  assert.deepEqual(failed.rows, good.rows);
+  assert.equal(failed.fetchedAt, 1000);
+  assert.deepEqual(failed.lastError, { at: 2000, kind: 'share', message: 'Share the sheet…', detail: ROBOT });
+  const bug = F.afterFailure(null, new TypeError('x is undefined'), { now: 3000, started: 2900, link: LINK });
+  assert.deepEqual([bug.rows, bug.lastError.kind], [null, 'bug']);
+  assert.match(bug.lastError.message, /see the system log/);
+  const back = F.afterFetch(failed, got(R2), { now: 4000, started: 3900, link: LINK });
+  assert.equal(back.lastError, null);
+});
+
+test('when to read: due slots, a short wait after a passing failure, none after a refusal', () => {
+  const mon9 = local(2026, 11, 16, 9).getTime();
+  const plan = (cache, now = mon9, settings = SETTINGS) => F.planFetch({ now, settings, cache });
+  // Never read: now. Off or not set up: never.
+  assert.deepEqual(plan(null), { fetch: true, wakeAt: null });
+  assert.deepEqual(plan(null, mon9, { ...SETTINGS, enabled: false }), { fetch: false, wakeAt: null });
+  assert.deepEqual(plan(null, mon9, { ...SETTINGS, keyPath: '' }), { fetch: false, wakeAt: null });
+  // Read after this morning's slot: wait for Wednesday 08:00.
+  const fresh = { fetchedAt: local(2026, 11, 16, 8, 1).getTime() };
+  assert.deepEqual(plan(fresh), { fetch: false, wakeAt: local(2026, 11, 18, 8).getTime() });
+  // No network at 08:50: again 30 minutes after the try.
+  const offline = { fetchedAt: local(2026, 11, 13, 8).getTime(), lastAttemptAt: mon9 - 10 * 60_000, lastError: { kind: 'network', message: 'x' } };
+  assert.deepEqual(plan(offline), { fetch: false, wakeAt: mon9 + 20 * 60_000 });
+  assert.deepEqual(plan(offline, mon9 + 20 * 60_000), { fetch: true, wakeAt: null });
+  // Not shared (403): not again until Wednesday's slot, however long it waits.
+  const refused = { ...offline, lastError: { kind: 'share', message: 'x' } };
+  assert.deepEqual(plan(refused), { fetch: false, wakeAt: local(2026, 11, 18, 8).getTime() });
+  assert.equal(plan(refused, local(2026, 11, 17, 23).getTime()).fetch, false);
+  assert.equal(plan(refused, local(2026, 11, 18, 8).getTime()).fetch, true);
+  // A new key clears the try (the main process sets lastAttemptAt to null).
+  assert.equal(plan({ ...refused, lastAttemptAt: null }).fetch, true);
+});
+
+test('a saved cache is used only when it is whole and this sheet\'s', () => {
+  const good = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
+  assert.equal(F.validCache(JSON.parse(JSON.stringify(good)), LINK).cache.fetchedAt, 1000);
+  assert.deepEqual(F.validCache(null, LINK), { cache: null, problem: null });
+  assert.match(F.validCache(good, { spreadsheetId: 'B'.repeat(30), gid: 777 }).problem, /another sheet/);
+  assert.match(F.validCache(good, { spreadsheetId: SHEET_ID, gid: 0 }).problem, /another sheet/);
+  assert.match(F.validCache({ ...good, lastError: 'no network' }, LINK).problem, /could not be read/);
+  assert.match(F.validCache({ ...good, rows: 'x' }, LINK).problem, /could not be read/);
+  assert.match(F.validCache([], LINK).problem, /could not be read/);
+  // The first version kept names and emails: set aside, quietly, to be read again.
+  assert.deepEqual(F.validCache({ rows: [], fetchedAt: 1 }, LINK), { cache: null, problem: null });
+});
+
+test('Settings changes: an empty link keeps the saved one; a bad link or roles are refused', () => {
+  const now = { enabled: true, sheetUrl: SETTINGS.sheetUrl, keyPath: 'k.json', columns: [] };
+  assert.deepEqual(F.changeSettings(now, { sheetUrl: '   ' }), { settings: now, sheetChanged: false });
+  assert.match(F.changeSettings(now, { sheetUrl: 'https://example.com/x' }).error, /not a Google Sheet/);
+  const other = `https://docs.google.com/spreadsheets/d/${'B'.repeat(30)}/edit`;
+  assert.deepEqual(F.changeSettings(now, { sheetUrl: other }), { settings: { ...now, sheetUrl: other }, sheetChanged: true });
+  assert.deepEqual(F.changeSettings(now, { enabled: false }).settings.enabled, false);
+  assert.match(F.changeSettings(now, { columns: [{ header: 'Q', index: 0, role: 'nope' }] }).error, /could not be read/);
+});
+
+test('an unknown time zone and day-or-month dates are said under Needs attention', () => {
+  const s = F.summarise([['Timestamp', 'Rating'], ['03/04/2026 09:00', 4], ['05/06/2026 09:00', 5]], { timeZone: 'Mars/Olympus' });
+  assert.equal(s.ambiguousDates, 2);
+  assert.equal(s.timeZoneUnknown, 'Mars/Olympus');
+  const labels = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
+  assert.ok(labels.some((l) => /time zone \(Mars\/Olympus\) is not known/.test(l)), labels.join('\n'));
+  assert.ok(labels.some((l) => /2 typed dates could be day\/month or month\/day/.test(l)), labels.join('\n'));
+  // A day above 12 settles it.
+  assert.equal(F.summarise([['Timestamp', 'Rating'], ['03/04/2026 09:00', 4], ['25/06/2026 09:00', 5]]).ambiguousDates, 0);
+  assert.deepEqual(F.fieldProblems({ enabled: false, summary: s }), []);
+});
+
+test('the share refusal names the reader address only as a detail', () => {
+  const c = F.afterFailure(null, new F.FieldSurveyError('share', 'Share the sheet with the key’s reader address (shown in Settings) as Viewer, then press Refresh now.', ROBOT), { now: 1, started: 1, link: LINK });
+  const [p] = F.fieldProblems({ enabled: true, cache: c });
+  assert.ok(!p.label.includes(ROBOT));
+  assert.equal(p.detail, ROBOT);
+});
+
+test("Google's busy and down answers at sign-in, a quota 403 and a body that times out are passing troubles", async () => {
+  const key = F.readKey(keyJson());
+  const res = (status, body, textThrows) => ({
+    ok: status < 300, status,
+    text: async () => {
+      if (textThrows) {
+        const e = new Error('The operation was aborted due to timeout');
+        e.name = 'TimeoutError';
+        throw e;
+      }
+      return typeof body === 'string' ? body : JSON.stringify(body);
+    },
+  });
+  const run = async (plan) => {
+    let i = 0;
+    try {
+      await F.fetchRows({ link: LINK, key, fetch: async () => plan[i++] });
+    } catch (e) {
+      return e;
+    }
+    return assert.fail('expected a failure');
+  };
+  const tok = res(200, { access_token: 't' });
+  const meta = res(200, { sheets: [{ properties: { sheetId: 777, title: 'R' } }] });
+  assert.equal((await run([res(503, '<html>Service Unavailable</html>')])).kind, 'google');
+  assert.equal((await run([res(429, { error: 'rate_limit_exceeded' })])).kind, 'busy');
+  const slow = await run([tok, meta, res(200, null, true)]);
+  assert.deepEqual([slow.kind, /did not answer in time/.test(slow.message)], ['network', true]);
+  assert.equal((await run([tok, res(403, { error: { message: 'Quota exceeded for quota metric', status: 'PERMISSION_DENIED', details: [{ reason: 'RATE_LIMIT_EXCEEDED' }] } })])).kind, 'busy');
 });
 
 // ---- the schedule: Monday, Wednesday and Friday at 08:00 ---------------------------------

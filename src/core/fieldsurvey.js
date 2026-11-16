@@ -19,15 +19,22 @@ const HOSTS = new Set([TOKEN_HOST, SHEETS_HOST]);
 const TOKEN_URL = `https://${TOKEN_HOST}/token`;
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
-// Every failure the user should read carries `kind` (for the board) and a
-// message that says what happened and what to try.
+// Every failure the user should read carries `kind` (for the board and the
+// retry rule), a message that says what happened and what to try, and
+// sometimes a `detail` that shows only with privacy off (the reader address).
 class FieldSurveyError extends Error {
-  constructor(kind, message) {
+  constructor(kind, message, detail) {
     super(message);
     this.name = 'FieldSurveyError';
     this.kind = kind;
+    if (detail) this.detail = detail;
   }
 }
+
+// Failures that may pass by themselves, so the schedule tries again after
+// RETRY_MS. Every other refusal waits for the next slot, a new link or key,
+// or Refresh now: trying again sooner would only fail again.
+const TRANSIENT = new Set(['network', 'busy', 'google', 'answer']);
 
 // ---- the sheet link -------------------------------------------------------------
 
@@ -149,9 +156,9 @@ function checkUrl(url) {
 
 // The tab the link names, or the first tab when it names none.
 function pickTab(meta, gid) {
-  if (!meta || !Array.isArray(meta.sheets)) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs; try Refresh now.');
+  if (!meta || !Array.isArray(meta.sheets)) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs. Press Refresh now.');
   const tabs = meta.sheets.map((s) => s?.properties).filter((p) => p && typeof p.title === 'string' && Number.isInteger(p.sheetId));
-  if (!tabs.length) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs; try Refresh now.');
+  if (!tabs.length) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs. Press Refresh now.');
   if (gid == null) return tabs[0];
   const tab = tabs.find((p) => p.sheetId === gid);
   if (!tab) throw new FieldSurveyError('tab', `The tab in the link (gid ${gid}) is not in this sheet any more. Open the responses tab and copy its link again.`);
@@ -159,9 +166,14 @@ function pickTab(meta, gid) {
 }
 
 const API_OFF = /has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i;
+const RATE = /RATE_LIMIT|quota|rateLimitExceeded|userRateLimit/i;
+const BUSY = () => new FieldSurveyError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now later.');
+const DOWN = (status) => new FieldSurveyError('google', `Google's service had a problem (${status}); it tries again in half an hour.`);
 
 // Google's refusal -> a sentence with what to try.
 function refusal(step, status, body, key) {
+  if (status === 429) return BUSY();
+  if (status >= 500) return DOWN(status);
   if (step === 'token') {
     const code = typeof body?.error === 'string' ? body.error : '';
     if (code === 'invalid_grant') {
@@ -177,12 +189,14 @@ function refusal(step, status, body, key) {
   if (status === 403 && API_OFF.test(said)) {
     return new FieldSurveyError('api', 'Turn on the Google Sheets API for the key’s Cloud project (APIs & Services → Library → Google Sheets API → Enable), then press Refresh now.');
   }
-  if (status === 403) return new FieldSurveyError('share', `Share the sheet with ${key.clientEmail} as Viewer, then press Refresh now.`);
-  if (status === 404) return new FieldSurveyError('missing', 'The sheet link points to nothing — check it.');
+  if (status === 403 && RATE.test(said)) return BUSY();
+  // The address itself is the detail: it shows only with privacy off.
+  if (status === 403) {
+    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (shown in Settings) as Viewer, then press Refresh now.', key.clientEmail);
+  }
+  if (status === 404) return new FieldSurveyError('missing', 'No sheet was found at this link. Open it in your browser to check it, then paste it again in Settings → Field feedback.');
   if (status === 401) return new FieldSurveyError('token', 'Google did not accept the sign-in for the sheet (401); press Refresh now.');
   if (status === 400 && step === 'values') return new FieldSurveyError('tab', 'Google could not read the responses tab (400). Open the tab and copy its link again.');
-  if (status === 429) return new FieldSurveyError('busy', 'Google asked the app to slow down (429); it tries again later.');
-  if (status >= 500) return new FieldSurveyError('google', `Google's service had a problem (${status}); it tries again later.`);
   return new FieldSurveyError('google', `Google answered ${status}; press Refresh now, and check the link and the key if it happens again.`);
 }
 
@@ -192,7 +206,7 @@ function unreachable(err) {
   }
   // Requests never follow a redirect (it could lead off the allowed hosts).
   if (/redirect/i.test(String(err?.message))) {
-    return new FieldSurveyError('blocked', 'Google sent the request elsewhere, and the app only talks to Google’s sign-in and Sheets services; press Refresh now later.');
+    return new FieldSurveyError('blocked', 'Google redirected the request, which the app does not follow. Press Refresh now in a few minutes.');
   }
   const net = /net::(ERR_[A-Z_]+)/.exec(String(err?.message));
   if (net) return new FieldSurveyError('network', `No network: Google could not be reached (${net[1]}); check the internet connection or proxy.`);
@@ -212,49 +226,80 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
       if (err instanceof FieldSurveyError) throw err;
       throw unreachable(err);
     }
-    let body;
-    let text = '';
+    // The body arrives after the status: a timeout or a dropped connection
+    // here is the network's fault, not an answer that could not be read.
+    let raw;
     try {
-      text = await res.text();
-      body = text ? JSON.parse(text) : undefined;
+      raw = await res.text();
+    } catch (err) {
+      throw unreachable(err);
+    }
+    let body;
+    try {
+      body = raw ? JSON.parse(raw) : undefined;
     } catch {
       body = undefined; // a refusal without JSON is still explained by its status below
     }
     if (!res.ok) throw refusal(step, res.status, body, key);
-    if (!body || typeof body !== 'object') throw new FieldSurveyError('answer', 'Google answered with something that is not JSON; try Refresh now.');
+    if (!body || typeof body !== 'object') throw new FieldSurveyError('answer', 'Google’s answer could not be read. Press Refresh now.');
     return body;
   };
   const t = tokenRequest(key, now);
   const token = await ask('token', t.url, t.init);
-  if (typeof token.access_token !== 'string' || !token.access_token) throw new FieldSurveyError('token', 'Google signed in without a token; try Refresh now.');
+  if (typeof token.access_token !== 'string' || !token.access_token) throw new FieldSurveyError('answer', 'Google signed in without a token. Press Refresh now.');
   const init = { redirect: 'error', headers: { authorization: `Bearer ${token.access_token}`, accept: 'application/json' } };
   const meta = await ask('sheet', metadataUrl(link.spreadsheetId), init);
   const tab = pickTab(meta, link.gid);
   const vals = await ask('values', valuesUrl(link.spreadsheetId, tab.title), init);
   // Google leaves `values` out when the tab is empty.
-  if (vals.values !== undefined && !Array.isArray(vals.values)) throw new FieldSurveyError('answer', 'Google answered without rows; try Refresh now.');
+  if (vals.values !== undefined && !Array.isArray(vals.values)) throw new FieldSurveyError('answer', 'Google answered without rows. Press Refresh now.');
   const timeZone = typeof meta.properties?.timeZone === 'string' ? meta.properties.timeZone : undefined;
   return { rows: vals.values ?? [], tab: { id: tab.sheetId, title: tab.title }, timeZone };
 }
 
 // ---- summarising the table -------------------------------------------------------------
 //
-// We do not know the form's questions, so each column is classified by its
-// header and its answers: the timestamp; identifying columns (names, emails,
-// phones), which are counted and never shown; score questions (whole numbers
-// on a small scale); multiple choice (a few answers, repeated), which are
-// tallied; free text, which become comments; and the rest (other dates and
-// numbers, empty columns), listed as not summarised.
+// We do not know the form's questions, so each column gets a suggested role
+// from its header and its answers. The user confirms or changes the roles
+// once, in Settings ("Check the columns"); a confirmed role always wins, and
+// a column that appears later is flagged until it is checked too.
+//
+//   timestamp    when each answer came in
+//   score        a whole number on a scale low–high, averaged
+//   number       a count or another number (not a score), averaged apart
+//   choice       a few answers, repeated: tallied
+//   comment      free text, newest first
+//   identifying  names, emails, phones, patient or case numbers: counted,
+//                never shown, and not kept in the cache
+//   ignore       left out (other dates, empty columns, or the user's choice)
 
+const ROLES = ['timestamp', 'score', 'number', 'choice', 'comment', 'identifying', 'ignore'];
 const STRONG_TIME = /^(time ?stamp|submitted( at)?|submission time|時間戳記|时间戳记|提交時間|提交时间|填答時間)$/i;
 const WEAK_TIME = /^(date|time|date ?time|日期|時間|时间)$/i;
-const ID_HEADER = /\b(e-?mail|name|phone|mobile|telephone|tel|contact|address|username|employee id|id number)\b|電子郵件|電子信箱|电子邮件|郵件|邮件|信箱|姓名|名字|名稱|名称|電話|电话|手機|手机|聯絡|联络|聯繫|联系|地址|身分證|身份证|工號|員工編號/i;
+
+// Identifying by the header only when the header is a short label ("Name",
+// "Email address", "Patient ID", "電話"), never by a word inside a question
+// ("Did the device address the problem?", "Name one thing you liked").
+const PERSON = "(?:your|my|full|first|last|given|family|sur|respondent'?s?|user|contact|patient'?s?|surgeon'?s?|doctor'?s?|physician'?s?|nurse'?s?|staff|reporter'?s?|interviewer'?s?)";
+const ID_LABEL = new RegExp(`^(?:${PERSON} )?(?:name|e-?mail(?: address)?|phone(?: number| no)?|mobile(?: number| phone| no)?|cell ?phone|telephone(?: number)?|tel|contact(?: details| info| number)?|address|user ?name|line id|employee (?:id|number|no)|id number)$`, 'i');
+const PERSON_ROLE = /^(?:surgeon|doctor|physician|nurse|respondent|reporter|interviewer|filled in by|submitted by)$/i;
+const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|number|#)|medical records?)\b|\b(?:case|chart) ?#/i;
+const ID_CJK = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機|手机|聯絡|联络|聯繫|联系|地址|身分證|身份证|工號|工号|員工編號|员工编号|填寫人|填写人|填表人|醫師|医师|醫生|医生|護理師|护理师|病歷|病历|病人|病患|患者|個案|个案|病例/;
+// A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
+// identify even when they are small whole numbers.
+const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
+const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
+const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[\d\s().-]{8,}$/;
-const SCALE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/i;
+const NAME_WORD = /^(?:\p{Lu}[\p{Ll}'’-]+|\p{Lu}\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Prof\.?)$/u;
+// Common family names, for telling a two-to-four character Chinese name
+// from a short comment ("王小明" from "很好").
+const SURNAMES = '陳陈林黃黄張张李王吳吴劉刘蔡楊杨許许鄭郑謝谢郭洪曾邱廖賴赖周徐蘇苏葉叶莊庄呂吕江何蕭萧羅罗高潘簡简朱鍾钟彭游詹胡施沈余趙赵盧卢梁顏颜柯孫孙魏翁戴范宋方鄧邓杜傅侯曹溫温薛丁馬马蔣蒋唐卓藍蓝馮冯姚石董紀纪歐欧程連连古汪湯汤姜田康鄒邹白涂尤巫韓韩龔龚嚴严袁黎金阮陸陆倪夏童邵';
 const SERIAL_MIN = 25_569; // 1970-01-01 in spreadsheet days
 const SERIAL_MAX = 73_051; // 2100-01-01
 const MS_DAY = 86_400_000;
+const HIDDEN = '[hidden]'; // stands in, in the cache, for an identifying answer
 const isEmpty = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 const text = (v) => (typeof v === 'string' ? v.trim() : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '');
 const columnName = (i) => {
@@ -329,17 +374,18 @@ const intOf = (v) => {
 };
 const numberOf = (v) => (typeof v === 'number' ? v : typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
 const share = (values, ok) => (values.length ? values.filter(ok).length / values.length : 0);
+const onScale = (n) => Number.isInteger(n) && n >= 0 && n <= 10;
 
-// The scale a score question names in its header ("(1-5)", "1~10"), or the
-// one its answers fit: 0 or 1 up to 5, 7 or 10.
-function scaleOf(header, ints) {
-  const m = SCALE.exec(header);
-  if (m) {
-    const [low, high] = [Number(m[1]), Number(m[2])];
-    if ((low === 0 || low === 1) && high > low && high <= 10) return { low, high, scaleFrom: 'header' };
-  }
-  const max = ints.reduce((a, b) => Math.max(a, b), 0);
-  return { low: ints.includes(0) ? 0 : 1, high: [5, 7, 10].find((h) => h >= max) ?? 10, scaleFrom: 'answers' };
+// The header without notes in brackets or punctuation: "Email (optional)"
+// -> "Email".
+const headerLabel = (header) => header.replace(/[(（【[][^)）】\]]*[)）】\]]/g, ' ').replace(/[?？:：*.,，、!！。]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function idByHeader(header) {
+  const label = headerLabel(header);
+  if (!label) return false;
+  if (ID_LABEL.test(label) || PERSON_ROLE.test(label)) return true;
+  if (CASE_ID.test(label) && label.split(' ').length <= 4) return true;
+  return ID_CJK.test(label) && label.length <= 10;
 }
 
 // An email address, or a phone number (eight digits or more, not a date).
@@ -349,38 +395,133 @@ function looksPersonal(v) {
   return typeof v === 'string' && PHONE.test(s) && (s.match(/\d/g) ?? []).length >= 8 && !Number.isFinite(dateOf(s));
 }
 
-function classify(header, values, untitled) {
-  if (!values.length) return { kind: 'skipped', reason: 'no answers' };
-  if (!untitled && ID_HEADER.test(header)) return { kind: 'identifying' };
-  if (share(values, looksPersonal) >= 0.5) return { kind: 'identifying' };
-  // A score: 80% whole numbers on a small scale; or, on a small form where
-  // one "n/a" weighs a lot, at least half, the rest short placeholders.
-  // Either way the other cells are counted as unreadable.
-  const ints = values.map(intOf);
-  const onScale = (n) => Number.isInteger(n) && n >= 0 && n <= 10;
-  const scored = share(ints, onScale);
-  if (scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => onScale(ints[k]) || text(v).length <= 20))) {
-    return { kind: 'score', ...scaleOf(header, ints.filter((n) => Number.isInteger(n) && n >= 0 && n <= 10)) };
-  }
-  const dayFirst = dayFirstColumn(values);
-  if (share(values, (v) => Number.isFinite(dateOf(v, { dayFirst }))) >= 0.8) return { kind: 'skipped', reason: 'dates' };
-  if (share(values, (v) => Number.isFinite(numberOf(v))) >= 0.8) return { kind: 'skipped', reason: 'numbers' };
-  const answers = values.map(text);
-  const distinct = new Set(answers);
-  if (answers.length >= 5 && distinct.size <= 6 && distinct.size <= answers.length / 2 && answers.every((a) => a.length <= 60)) return { kind: 'choice' };
-  return { kind: 'text' };
+// "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape.
+function looksLikeName(v) {
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  if (/^\p{Script=Han}{2,4}$/u.test(s)) return SURNAMES.includes(s[0]);
+  const words = s.split(/\s+/);
+  return words.length >= 2 && words.length <= 3 && words.every((w) => NAME_WORD.test(w));
 }
 
-function findTimestamp(headers, columns, timeZone) {
+// The scale a header states ("(1-5)", "1~10"); with several ranges in it
+// ("in the first 1-2 weeks? (1-5)") the last one that can be a scale.
+function statedScale(header) {
+  let found = null;
+  for (const m of header.matchAll(RANGE)) {
+    const low = Number(m[1]);
+    const high = Number(m[2]);
+    if ((low === 0 || low === 1) && high > low && high <= 10) found = { low, high };
+  }
+  return found;
+}
+
+// The scale the answers fit: 1 up to 5, 7 or 10. Only ever a guess, and
+// shown as one.
+function guessedScale(ints) {
+  const max = ints.reduce((a, b) => Math.max(a, b), 0);
+  return { low: ints.includes(0) ? 0 : 1, high: [5, 7, 10].find((h) => h >= max) ?? 10 };
+}
+
+// The suggested role of one column, from its header and its answers.
+function suggest(header, values, untitled) {
+  if (!values.length) return { role: 'ignore', reason: 'no answers' };
+  const ints = values.map(intOf);
+  // A score: 80% whole numbers on a small scale; or, on a small form where
+  // one "n/a" weighs a lot, at least half, the rest short placeholders.
+  const scored = share(ints, onScale);
+  const scoreLike = scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => onScale(ints[k]) || text(v).length <= 20));
+  const byHeader = !untitled && idByHeader(header);
+  // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
+  if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header' };
+  if (share(values, looksPersonal) >= 0.5) return { role: 'identifying', reason: 'answers' };
+  const answers = values.map(text);
+  const counts = new Map();
+  for (const a of answers) counts.set(a, (counts.get(a) ?? 0) + 1);
+  // Names are mostly different from one answer to the next; choices repeat.
+  if (share(values, looksLikeName) >= 0.7 && (values.length < 4 || counts.size >= values.length / 2)) return { role: 'identifying', reason: 'answers' };
+  if (scoreLike) {
+    const stated = statedScale(header);
+    // "How many times…" with 0, 2, 1, 3: counts, not a scale.
+    if (COUNT_HEADER.test(header) || (!stated && ints.includes(0))) return { role: 'number', reason: 'count' };
+    if (stated) return { role: 'score', ...stated, scaleFrom: 'header' };
+    return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers' };
+  }
+  const dayFirst = dayFirstColumn(values);
+  if (share(values, (v) => Number.isFinite(dateOf(v, { dayFirst }))) >= 0.8) return { role: 'ignore', reason: 'dates' };
+  if (share(values, (v) => Number.isFinite(numberOf(v))) >= 0.8) return { role: 'number' };
+  // A few answers, repeated, are a choice; but one answer of more than a few
+  // words, given once, makes it free text ("No", "No", "The holder slips").
+  const wordy = answers.some((a) => counts.get(a) === 1 && (a.split(/\s+/).length > 3 || a.length > 20));
+  if (answers.length >= 5 && counts.size <= 6 && counts.size <= answers.length / 2 && answers.every((a) => a.length <= 60) && !wordy) return { role: 'choice' };
+  return { role: 'comment' };
+}
+
+// The confirmed role of each column: by its header at the same place first,
+// then by its header anywhere (the nearest place), so a column the form
+// moved keeps its role and a new one has none.
+function matchRoles(headers, roles) {
+  const list = Array.isArray(roles) ? roles : [];
+  const used = new Set();
+  const pick = headers.map(() => null);
+  headers.forEach((h, i) => {
+    const k = list.findIndex((r, j) => !used.has(j) && r.header === h && r.index === i);
+    if (k >= 0) {
+      used.add(k);
+      pick[i] = list[k];
+    }
+  });
+  headers.forEach((h, i) => {
+    if (pick[i]) return;
+    let best = -1;
+    list.forEach((r, j) => {
+      if (!used.has(j) && r.header === h && (best < 0 || Math.abs(r.index - i) < Math.abs(list[best].index - i))) best = j;
+    });
+    if (best >= 0) {
+      used.add(best);
+      pick[i] = list[best];
+    }
+  });
+  return pick;
+}
+
+// Roles from Settings, checked before they are saved.
+function checkRoles(list) {
+  const bad = () => new TypeError('The column roles could not be read; open Check the columns again.');
+  if (!Array.isArray(list) || list.length > 1000) throw bad();
+  return list.map((r) => {
+    if (!r || typeof r.header !== 'string' || r.header.length > 5000 || !Number.isInteger(r.index) || r.index < 0 || !ROLES.includes(r.role)) throw bad();
+    const out = { header: r.header, index: r.index, role: r.role };
+    if (r.role === 'score') {
+      const low = Number(r.low);
+      const high = Number(r.high);
+      if (!((low === 0 || low === 1) && Number.isInteger(high) && high > low && high <= 10)) {
+        throw new RangeError('A score’s scale starts at 0 or 1 and ends above it, at 10 at most.');
+      }
+      Object.assign(out, { low, high });
+    }
+    return out;
+  });
+}
+
+function findTimestamp(headers, columns, timeZone, candidate) {
   const parses = (i) => {
     const dayFirst = dayFirstColumn(columns[i]);
     return columns[i].length > 0 && share(columns[i], (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }))) >= 0.8;
   };
-  let i = headers.findIndex((h) => STRONG_TIME.test(h));
+  let i = headers.findIndex((h, k) => candidate(k) && STRONG_TIME.test(h));
   if (i >= 0) return i;
-  i = headers.findIndex((h, k) => WEAK_TIME.test(h) && parses(k));
+  i = headers.findIndex((h, k) => candidate(k) && WEAK_TIME.test(h) && parses(k));
   if (i >= 0) return i;
-  return headers.findIndex((h, k) => !ID_HEADER.test(h) && parses(k));
+  return headers.findIndex((h, k) => candidate(k) && !idByHeader(h) && parses(k));
+}
+
+// Typed dates such as 03/04/2026 that could be either way round: the column
+// shows no day above 12 in either place, so month first was assumed.
+function ambiguousDates(values) {
+  const parts = values.map((v) => (typeof v === 'string' ? DATE_RE.exec(v.trim()) : null)).filter((m) => m && m[3].length === 4);
+  if (parts.some((m) => Number(m[1]) > 12 || Number(m[2]) > 12)) return 0;
+  return parts.filter((m) => m[1] !== m[2]).length;
 }
 
 function usableZone(timeZone) {
@@ -389,22 +530,27 @@ function usableZone(timeZone) {
     new Intl.DateTimeFormat('en-US', { timeZone }).format(0);
     return timeZone;
   } catch {
-    return undefined; // an unknown zone: the computer's own is used, and the summary says 'local'
+    return undefined; // an unknown zone: the computer's own is used, and the summary names it (timeZoneUnknown)
   }
 }
 
 const toMs = (v) => (v == null ? null : v instanceof Date ? v.getTime() : typeof v === 'number' ? v : Date.parse(v));
 const isoOf = (ms) => (ms == null || !Number.isFinite(ms) ? null : new Date(ms).toISOString());
+const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 
 // rows: the tab, row 0 the headers. since: count answers after this time.
-// comments: how many of the newest to keep. timeZone: the sheet's.
-function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
+// comments: how many of the newest to keep. timeZone: the sheet's. roles:
+// the user's confirmed column roles. redacted: columns whose answers the
+// cache does not keep (identifying when they were read).
+function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [] } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
+    timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
-    questions: [], overall: null, comments: [], commentCount: 0, choices: [],
-    identifying: [], skipped: [], columns: [], unreadable: { scores: 0, timestamps: 0 },
+    checked: false, newColumns: [], columns: [],
+    questions: [], numbers: [], overall: null, scalesGuessed: 0, comments: [], commentCount: 0, choices: [],
+    identifying: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
   if (!Array.isArray(rows) || !rows.length) return { ...out, empty: true };
   const head = Array.isArray(rows[0]) ? rows[0] : [];
@@ -419,10 +565,17 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
     else data.push(cells);
   }
   out.responses = data.length;
-  const columns = headers.map((_, i) => data.map((r) => r[i]).filter((v) => !isEmpty(v)));
+  const hidden = new Set(redacted);
+  // A hidden column's answers are not here to look at.
+  const columns = headers.map((_, i) => (hidden.has(i) ? [] : data.map((r) => r[i]).filter((v) => !isEmpty(v))));
+  const saved = matchRoles(headers, roles);
+  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden' } : suggest(h, columns[i], untitled[i])));
 
-  // When each answer came in.
-  const tsCol = findTimestamp(headers, columns, zone);
+  // When each answer came in: the column the user named, or the one found.
+  let tsCol = saved.findIndex((r) => r?.role === 'timestamp');
+  const found = findTimestamp(headers, columns, zone, (k) => !hidden.has(k) && (!saved[k] || saved[k].role === 'timestamp') && suggested[k].reason !== 'header');
+  if (found >= 0) suggested[found] = { role: 'timestamp' };
+  if (tsCol < 0 && found >= 0 && !saved[found]) tsCol = found;
   const times = data.map(() => null);
   if (tsCol >= 0) {
     out.timestampColumn = headers[tsCol];
@@ -432,6 +585,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
       if (Number.isFinite(ms)) times[k] = ms;
       else out.unreadable.timestamps += 1;
     });
+    if (!dayFirst) out.ambiguousDates = ambiguousDates(columns[tsCol]);
     const known = times.filter((t) => t != null);
     if (known.length) {
       out.newest = isoOf(known.reduce((a, b) => Math.max(a, b)));
@@ -442,42 +596,60 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
   }
 
   const allComments = [];
-  const overall = [];
+  const scored = [];
   headers.forEach((header, i) => {
-    if (i === tsCol) {
-      out.columns.push({ header, kind: 'timestamp', ...(untitled[i] ? { untitled: true } : {}) });
-      return;
+    const sug = suggested[i];
+    const conf = saved[i];
+    let role = conf ? conf.role : sug.role;
+    if (role === 'timestamp' && i !== tsCol) role = 'ignore'; // one timestamp only
+    const col = {
+      index: i, header, role, confirmed: Boolean(conf), isNew: roles.length > 0 && !conf, suggested: sug, answers: columns[i].length,
+      ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}),
+    };
+    if (role === 'score') {
+      const scale = conf?.role === 'score' ? { low: conf.low, high: conf.high, scaleFrom: 'confirmed' }
+        : sug.role === 'score' ? { low: sug.low, high: sug.high, scaleFrom: sug.scaleFrom }
+          : { ...(statedScale(header) ?? guessedScale(columns[i].map(intOf).filter(onScale))), scaleFrom: statedScale(header) ? 'header' : 'answers' };
+      Object.assign(col, scale);
     }
-    const c = classify(header, columns[i], untitled[i]);
-    out.columns.push({ header, kind: c.kind, ...(c.reason ? { reason: c.reason } : {}), ...(untitled[i] ? { untitled: true } : {}) });
-    if (c.kind === 'identifying') out.identifying.push(header);
-    else if (c.kind === 'skipped') out.skipped.push({ question: header, reason: c.reason });
-    else if (c.kind === 'score') {
-      const ok = columns[i].map(intOf).filter((n) => Number.isInteger(n) && n >= c.low && n <= c.high);
+    out.columns.push(col);
+    if (col.isNew) out.newColumns.push(header);
+    if (role === 'identifying') out.identifying.push(header);
+    else if (role === 'ignore') out.skipped.push({ question: header, reason: conf ? 'ignored' : (sug.reason ?? 'ignored') });
+    else if (role === 'score') {
+      const ok = columns[i].map(intOf).filter((n) => Number.isInteger(n) && n >= col.low && n <= col.high);
       const unreadable = columns[i].length - ok.length;
       out.unreadable.scores += unreadable;
       out.questions.push({
-        question: header, n: ok.length, mean: ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null,
-        low: c.low, high: c.high, scaleFrom: c.scaleFrom, unreadable,
+        question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
+        low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
       });
-      for (const v of ok) overall.push({ v, low: c.low, high: c.high });
-    } else if (c.kind === 'choice') {
+      // Only scales the user confirmed or the question states count in the
+      // headline average; a guessed scale could make 3 of 5 out of 3 of 10.
+      if (col.scaleFrom === 'answers') out.scalesGuessed += 1;
+      else for (const v of ok) scored.push({ v, low: col.low, high: col.high });
+    } else if (role === 'number') {
+      const ok = columns[i].map(numberOf).filter(Number.isFinite);
+      out.unreadable.numbers += columns[i].length - ok.length;
+      out.numbers.push({ question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null, unreadable: columns[i].length - ok.length });
+    } else if (role === 'choice') {
       const counts = new Map();
       for (const a of columns[i].map(text)) counts.set(a, (counts.get(a) ?? 0) + 1);
       const answers = [...counts].map(([answer, count]) => ({ answer, count })).sort((a, b) => b.count - a.count);
       out.choices.push({ question: header, n: columns[i].length, answers });
-    } else {
+    } else if (role === 'comment') {
       data.forEach((r, k) => {
-        if (!isEmpty(r[i])) allComments.push({ question: header, text: text(r[i]).slice(0, 1000), ms: times[k], row: k, col: i });
+        if (!hidden.has(i) && !isEmpty(r[i])) allComments.push({ question: header, text: text(r[i]).slice(0, 1000), ms: times[k], row: k, col: i });
       });
     }
   });
+  out.checked = headers.length > 0 && saved.every(Boolean);
 
   // One scale for all: a plain average. Several: each answer put on 0–10.
-  if (overall.length) {
-    const same = overall.every((o) => o.low === overall[0].low && o.high === overall[0].high);
-    const vals = same ? overall.map((o) => o.v) : overall.map((o) => ((o.v - o.low) / (o.high - o.low)) * 10);
-    out.overall = { mean: vals.reduce((a, b) => a + b, 0) / vals.length, high: same ? overall[0].high : 10, rescaled: !same, n: vals.length };
+  if (scored.length) {
+    const same = scored.every((o) => o.low === scored[0].low && o.high === scored[0].high);
+    const vals = same ? scored.map((o) => o.v) : scored.map((o) => ((o.v - o.low) / (o.high - o.low)) * 10);
+    out.overall = { mean: mean(vals), high: same ? scored[0].high : 10, rescaled: !same, n: vals.length };
   }
 
   // Newest first; with no date, later rows are newer (forms add at the end).
@@ -490,13 +662,23 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
 // The unreadable answers in one sentence, or null. No headers or answers in
 // it, so it is safe under "Needs attention" with privacy on.
 function unreadableText(summary) {
-  const { scores = 0, timestamps = 0 } = summary?.unreadable ?? {};
-  const total = scores + timestamps;
+  const { scores = 0, numbers = 0, timestamps = 0 } = summary?.unreadable ?? {};
+  const total = scores + numbers + timestamps;
   if (!total) return null;
   const parts = [];
   if (scores) parts.push(`${scores} ${scores === 1 ? 'score that is' : 'scores that are'} not a whole number on its scale`);
+  if (numbers) parts.push(`${numbers} ${numbers === 1 ? 'answer that is' : 'answers that are'} not a number`);
   if (timestamps) parts.push(`${timestamps} ${timestamps === 1 ? 'row' : 'rows'} without a readable date`);
   return `${total} ${total === 1 ? 'answer' : 'answers'} could not be read: ${parts.join(', ')}`;
+}
+
+// The rows with the answers of identifying columns replaced: the cache keeps
+// that there was an answer (so a response is still counted), never what it
+// was. The header row stays.
+function redactRows(rows, indices) {
+  const hide = new Set(indices);
+  if (!hide.size) return rows;
+  return rows.map((r, k) => (k === 0 || !Array.isArray(r) ? r : r.map((v, i) => (hide.has(i) && !isEmpty(v) ? HIDDEN : v))));
 }
 
 // ---- the schedule ------------------------------------------------------------------------
@@ -525,8 +707,161 @@ function nextRun(now, lastOk) {
   return { due: ok == null || !Number.isFinite(ok) || ok < lastSlot.getTime(), lastSlot, next };
 }
 
+// ---- what to fetch, and what to keep ---------------------------------------------------
+//
+// The main process keeps only the timers, the files, net.fetch and the IPC;
+// the decisions are here, where they are tested.
+
+const RETRY_MS = 30 * 60_000;
+const CACHE_VERSION = 2;
+
+const sameSheet = (cache, link) => Boolean(cache && link && cache.spreadsheetId === link.spreadsheetId && (cache.gid ?? null) === (link.gid ?? null));
+
+// settings: { enabled, sheetUrl, keyPath }. -> { fetch, wakeAt }: fetch now,
+// or look again at wakeAt (null: nothing to wait for).
+function planFetch({ now, settings, cache, busy = false }) {
+  if (!settings?.enabled || !settings.sheetUrl || !settings.keyPath || busy) return { fetch: false, wakeAt: null };
+  const { due, next, lastSlot } = nextRun(now, cache?.fetchedAt ?? null);
+  const nextMs = next.getTime();
+  if (!due) return { fetch: false, wakeAt: nextMs };
+  const err = cache?.lastError;
+  const tried = cache?.lastAttemptAt;
+  if (!err || tried == null) return { fetch: true, wakeAt: null };
+  if (TRANSIENT.has(err.kind)) {
+    const retryAt = tried + RETRY_MS;
+    return toMs(now) >= retryAt ? { fetch: true, wakeAt: null } : { fetch: false, wakeAt: Math.min(retryAt, nextMs) };
+  }
+  // A refusal waiting will not fix (not shared, no such sheet, a bad key):
+  // once per slot, or sooner when the user changes the link or the key, or
+  // presses Refresh now.
+  return tried < lastSlot.getTime() ? { fetch: true, wakeAt: null } : { fetch: false, wakeAt: nextMs };
+}
+
+// A good read -> the cache to keep. Identifying columns' answers are not
+// kept. "New since" counts answers after the newest one of the last read
+// that brought something new, so pressing Refresh twice does not reset it.
+function afterFetch(prev, got, { now, started, link, roles = [] }) {
+  const first = summarise(got.rows, { timeZone: got.timeZone, roles });
+  const hide = first.columns.filter((c) => c.role === 'identifying').map((c) => c.index);
+  const same = sameSheet(prev, link) && Array.isArray(prev.rows);
+  const before = same ? prev.newest ?? null : null;
+  const changed = same && first.newest !== before;
+  return {
+    version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null,
+    tab: got.tab ?? null, timeZone: got.timeZone ?? null,
+    rows: redactRows(got.rows, hide), redacted: hide,
+    fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
+    since: changed ? before : same ? prev.since ?? null : null,
+    sinceFetchedAt: changed ? prev.fetchedAt : same ? prev.sinceFetchedAt ?? null : null,
+  };
+}
+
+// A failed read -> the cache to keep: the last good rows stay (they are
+// still this sheet's), with the error beside them.
+function afterFailure(prev, err, { now, started, link }) {
+  const known = err instanceof FieldSurveyError;
+  const lastError = {
+    at: now, kind: known ? err.kind : 'bug',
+    message: known ? err.message : 'Something went wrong while reading the sheet; see the system log.',
+    ...(known && err.detail ? { detail: err.detail } : {}),
+  };
+  const base = sameSheet(prev, link) ? prev
+    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], fetchedAt: null };
+  return { ...base, lastAttemptAt: started, lastError };
+}
+
+// After the user changes the roles: a column now identifying loses its
+// answers from the cache too.
+function reroleCache(cache, roles) {
+  if (!cache?.rows) return cache;
+  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [] });
+  const hide = [...new Set([...(cache.redacted ?? []), ...s.columns.filter((c) => c.role === 'identifying').map((c) => c.index)])].sort((a, b) => a - b);
+  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide };
+}
+
+function summariseCache(cache, roles) {
+  if (!cache?.rows) return null;
+  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [] });
+}
+
+// The cache file as read -> { cache, problem }. A cache that is not this
+// sheet's, or not in the shape written, is set aside (the caller deletes it)
+// and the sheet read again; an older format is set aside without a word,
+// since the next read rebuilds it the same.
+function validCache(raw, link) {
+  if (raw == null) return { cache: null, problem: null };
+  const bad = { cache: null, problem: 'The saved field feedback could not be read; the sheet is read again.' };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return bad;
+  if (raw.version !== CACHE_VERSION) return { cache: null, problem: null };
+  const num = (v) => v == null || Number.isFinite(v);
+  const str = (v) => v == null || typeof v === 'string';
+  const e = raw.lastError;
+  const ok = (raw.rows === null || (Array.isArray(raw.rows) && raw.rows.every(Array.isArray)))
+    && num(raw.fetchedAt) && num(raw.lastAttemptAt) && num(raw.sinceFetchedAt)
+    && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId)
+    && (raw.gid == null || Number.isInteger(raw.gid))
+    && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
+    && (e == null || (typeof e === 'object' && typeof e.kind === 'string' && typeof e.message === 'string' && num(e.at) && str(e.detail)))
+    && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
+    && !(raw.rows && raw.fetchedAt == null);
+  if (!ok) return bad;
+  if (!sameSheet(raw, link)) return { cache: null, problem: 'The saved field feedback was for another sheet; it was set aside and this sheet is read again.' };
+  return { cache: raw, problem: null };
+}
+
+// A change from Settings -> { settings, sheetChanged } or { error }. An
+// empty link keeps the saved one: Save with the field left blank (as it is
+// when privacy mode hides the saved link) must not wipe the link and the
+// answers read.
+function changeSettings(current, change) {
+  const next = { enabled: current?.enabled === true, sheetUrl: current?.sheetUrl ?? '', keyPath: current?.keyPath ?? '', columns: current?.columns ?? [] };
+  if (change && 'enabled' in change) next.enabled = change.enabled === true;
+  if (change && 'sheetUrl' in change) {
+    const url = String(change.sheetUrl ?? '').trim();
+    if (url) {
+      try {
+        parseSheetLink(url);
+      } catch (err) {
+        return { error: err.message };
+      }
+      next.sheetUrl = url;
+    }
+  }
+  if (change && 'columns' in change) {
+    try {
+      next.columns = checkRoles(change.columns);
+    } catch (err) {
+      return { error: err.message };
+    }
+  }
+  return { settings: next, sheetChanged: next.sheetUrl !== (current?.sheetUrl ?? '') };
+}
+
+// Everything that needs the user's attention, as { label, detail }: the
+// label is safe on a shared screen, the detail shows only with privacy off.
+function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
+  if (!enabled) return [];
+  const out = [];
+  const add = (label, detail = '') => out.push({ label: `Field feedback: ${label}`, detail });
+  const err = cache?.lastError;
+  if (err) add(err.message, err.detail ?? '');
+  if (keyError && keyError !== err?.message) add(keyError);
+  if (summaryError) add(summaryError);
+  if (summary) {
+    const unread = unreadableText(summary);
+    if (unread) add(unread);
+    const n = summary.newColumns?.length ?? 0;
+    if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Field feedback → Check the columns)`);
+    if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
+    const a = summary.ambiguousDates ?? 0;
+    if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);
+  }
+  return out;
+}
+
 module.exports = {
-  HOSTS, TOKEN_URL, SCOPE, FieldSurveyError,
+  HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  summarise, unreadableText, nextRun, dateOf,
+  summarise, unreadableText, checkRoles, redactRows, nextRun, dateOf,
+  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };
