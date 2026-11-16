@@ -314,18 +314,24 @@ update):
   key. They are under **Needs attention** too, and each links to its fix.
 
 **Higher is worse.** On a question such as "How difficult was setup?
-(1-5)", a high answer is the bad one. Check the columns has a **Higher is
-worse** tick on each score column. When the title speaks of difficulty,
-effort, pain, discomfort, fatigue or problems (also 困難, 難, 麻煩, 痛, 疼,
-不適), the app only guesses it, since "Pain relief achieved" is the other
-way round: the column is marked **Needs a choice** and "Direction guessed",
-and stays out of the flags and the average until you choose. Choose Score
-and the guess shows as the tick, already ticked; untick it if it is wrong.
-For a ticked column the flags count the top quarter of the scale ("3 high
-scores … (4 or more on 1–5, higher is worse)") and flag an average going
-up, and the headline average counts its answers turned round (5 on 1–5
-counts as 1); the sheet says "higher is worse, counted inverted in the
-average".
+(1-5)", a high answer is the bad one. In Check the columns each score
+column has its direction beside the scale: **Higher is better** or
+**Higher is worse**, saved with the column either way. It starts on
+Higher is better, except when the title speaks of difficulty, effort,
+pain, discomfort, fatigue or problems (also 困難, 難, 麻煩, 痛, 疼, 不適):
+the app only guesses those, since "Pain relief achieved" is the other way
+round, so the direction starts on "Choose…" and the column stays marked
+**Needs a choice** and "Direction guessed", even after you choose Score,
+until you set it. Until then the column is out of the flags and the
+average, and Save waits. A score checked before the direction was asked
+is asked again the same way when its title has those words. For a column
+set to Higher is worse the flags count the top quarter of the scale ("3
+high scores … (4 or more on 1–5, higher is worse)") and flag an average
+going up, and the headline average counts its answers turned round (5 on
+1–5 counts as 1). In the sheet it is tagged **Higher is worse**, its bar
+fills from the right, and it says what it counts as ("higher is worse:
+counts as 1.6 in the average"). With privacy on, Check the columns shows
+the direction in words ("Score, 1–5, higher is better").
 
 "Nothing to flag" shows only when the 7 days were compared. Otherwise the
 section says why: "The sheet has no answers yet", "No answers in the last
@@ -335,8 +341,10 @@ at all. While a timestamp column chosen after its dates were dropped waits
 for them, one line says "Dates show after the next update" with a
 **Refresh now** link, and Flags lists set-up problems only. While the
 section shows a failed update, Flags does not list it again (failed, or
-not shared). Scores on a guessed scale or direction raise no flags, as they
-are not in the average either. With privacy on, a flag names a question only
+not shared), and "Nothing to flag" says how old the answers are ("Nothing
+to flag in the answers read 3 days ago"). A tab with no rows at all says
+"The sheet has no answers yet". Scores on a guessed scale or direction
+raise no flags, as they are not in the average either. With privacy on, a flag names a question only
 as "Question N".
 
 When something goes wrong, the section and **Needs attention** say what to
