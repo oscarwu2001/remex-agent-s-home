@@ -873,3 +873,70 @@ test('T4: a mark under a hash two chats share goes to every listed item with it'
     changed: true,
   });
 });
+
+// ---- round 5 -------------------------------------------------------------------------
+
+test('F1: one unsend seen in two newer exports is one event, so a cut message and an unsent one from that minute are both kept and counted', () => {
+  const parse = (file, ...lines) => ({ ...L.parseExport(exp('[LINE] Chat history with G', ...lines)), file, mtimeMs: 1 });
+  const older = parse('old.txt', 'Saved on: 11/16/2026, 10:40', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\t@Mei call me', '10:35\tKen\toops');
+  const mid = parse('mid.txt', 'Saved on: 11/16/2026, 11:30', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend');
+  const newest = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend', '11:30\tAna\tlater');
+  const [chat] = L.mergeChats([older, mid, newest]);
+  assert.deepEqual(chat.messages.filter((m) => m.kind === 'text').map((m) => m.text), ['start', '@Mei call me', 'oops', 'end', 'later']);
+  assert.equal(chat.olderOnly, 2);
+});
+
+test('F1: a message an older export holds twice (pasted in twice) counts once', () => {
+  const parse = (file, ...lines) => ({ ...L.parseExport(exp('[LINE] Chat history with G', ...lines)), file, mtimeMs: 1 });
+  const twice = ['2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\t@Mei call me'];
+  const older = parse('old.txt', 'Saved on: 11/16/2026, 10:40', ...twice, '[LINE] Chat history with G', ...twice);
+  const unsent = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend');
+  const [dropped] = L.mergeChats([older, unsent]);
+  assert.ok(!dropped.messages.some((m) => m.text === '@Mei call me'));
+  assert.equal(dropped.olderOnly, 0);
+  const cut = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '11:00\tAna\tend');
+  const [kept] = L.mergeChats([older, cut]);
+  assert.equal(kept.messages.filter((m) => m.text === '@Mei call me').length, 1);
+  assert.equal(kept.olderOnly, 1);
+});
+
+test('F2: after a Latin letter or digit and a full stop, a name counts only as the user typed it', () => {
+  const hits = (text, names = ['Mei']) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names, keywords: [], since: 0 }).length;
+  for (const text of ['OK.Mei can you check', 'thanks.Mei']) assert.equal(hits(text), 1, text);
+  for (const text of ['see notes.mei', 'https://example.com/x.mei', 'import foo.mei']) assert.equal(hits(text), 0, text);
+  assert.equal(hits('Mr.Mark said hi', ['mark']), 0);
+  // Elsewhere case still does not matter.
+  assert.equal(hits('ok mei, can you check'), 1);
+});
+
+test('F3: digits may follow a name when a CJK character follows them, whatever comes before the name', () => {
+  const hits = (text) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
+  for (const text of ['請@Mei3點前回覆', '好，Mei3點前回覆', 'Mei3點前回覆', '請 Mei3點前回覆']) assert.equal(hits(text), 1, text);
+  for (const text of ['Mei2 is here', 'Mei2']) assert.equal(hits(text), 0, text);
+});
+
+test('F4: a prompt whose write fails is removed, and named as a leftover when it cannot be', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'p', '1-abcdef.txt');
+  const partial = { ...fs, writeFileSync: (p) => { fs.writeFileSync(p, 'part'); throw Object.assign(new Error('full'), { code: 'ENOSPC' }); } };
+  assert.deepEqual(L.writePrompt(file, 'words', partial), { ok: false, code: 'ENOSPC', leftover: null });
+  assert.equal(fs.existsSync(file), false);
+  const stuck = { ...partial, rmSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } };
+  assert.deepEqual(L.writePrompt(file, 'words', stuck), { ok: false, code: 'ENOSPC', leftover: 'EBUSY' });
+  assert.deepEqual(L.writePrompt(file, 'words'), { ok: true });
+  assert.equal(fs.readFileSync(file, 'utf8'), 'words');
+});
+
+test('F4: leftover prompt names are saved and read back, keeping only plain file names', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'line-leftovers.json');
+  assert.deepEqual(L.readLeftovers(file), { leftovers: new Map(), error: null });
+  fs.writeFileSync(file, JSON.stringify(L.leftoverJson(new Map([['1-abcdef.txt', 'EBUSY']]))));
+  assert.deepEqual(L.readLeftovers(file), { leftovers: new Map([['1-abcdef.txt', 'EBUSY']]), error: null });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, files: { '../x.txt': 'EBUSY', 'a\\b.txt': 'EPERM', '2-abcdef.txt': 'EPERM' } }));
+  assert.deepEqual(L.readLeftovers(file).leftovers, new Map([['2-abcdef.txt', 'EPERM']]));
+  fs.writeFileSync(file, '{ broken');
+  assert.equal(L.readLeftovers(file).error, 'invalid');
+  const fsys = { ...fs, readFileSync: () => { throw Object.assign(new Error('x'), { code: 'EACCES' }); } };
+  assert.equal(L.readLeftovers(file, fsys).error, 'EACCES');
+});

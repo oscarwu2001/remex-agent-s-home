@@ -1223,10 +1223,31 @@ app.whenReady().then(() => {
   // (looked at as the app starts and every hour), all of them while the
   // feature is off. What stays is said under Needs attention: files that
   // could not go and files dated in the future (they would never come of
-  // age), as of the last prune; and a prompt a failed start could not
-  // remove, retried at any age every hour and said until it is gone.
+  // age), as of the last prune; and a prompt a failed start (or a failed
+  // write) could not remove, retried at any age every hour and said until
+  // it is gone. Those leftovers' names are kept in line-leftovers.json in
+  // the app's data folder, so a restart still retries and lists them.
   let linePruneProblems = [];
-  const lineLeftovers = new Map(); // prompt file name -> the code it could not be removed with
+  const lineLeftoverFile = path.join(app.getPath('userData'), 'line-leftovers.json');
+  const loadedLeftovers = lineChat.readLeftovers(lineLeftoverFile);
+  const lineLeftovers = loadedLeftovers.leftovers; // prompt file name -> the code it could not be removed with
+  if (loadedLeftovers.error) {
+    lineLog('leftover prompt list not read', { code: loadedLeftovers.error });
+    problem('LINE chats: the list of saved prompts a failed start left could not be read; the app still removes every saved prompt a day after it was written', lineLeftoverFile, 'line');
+  }
+  let leftoversSaved = JSON.stringify(lineChat.leftoverJson(lineLeftovers));
+  function saveLeftovers() {
+    const data = lineChat.leftoverJson(lineLeftovers);
+    if (JSON.stringify(data) === leftoversSaved) return;
+    try {
+      writeJsonFile(lineLeftoverFile, data);
+      leftoversSaved = JSON.stringify(data);
+    } catch (err) {
+      // This run still lists and retries them; the save is tried again at
+      // the next change or prune.
+      lineLog('leftover prompt list not saved', err);
+    }
+  }
   const PRUNE_AGAIN = 'the app tries again within the hour';
   function pruneLinePrompts(maxAgeMs) {
     const gone = lineChat.prunePrompts(linePromptDir, { ...(maxAgeMs == null ? {} : { maxAgeMs }), retry: [...lineLeftovers.keys()] });
@@ -1239,6 +1260,7 @@ app.whenReady().then(() => {
       lineLeftovers.clear();
       for (const s of gone.stuck) lineLeftovers.set(s.name, s.code);
     }
+    saveLeftovers();
     if (n) {
       out.push({ label: `LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and ${PRUNE_AGAIN}`,
         detail: `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})` });
@@ -1378,11 +1400,15 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
     pruneLinePrompts();
-    try {
-      fs.mkdirSync(linePromptDir, { recursive: true });
-      fs.writeFileSync(plan.write.file, plan.write.text, { mode: 0o600 });
-    } catch (err) {
-      lineLog('prompt not saved', err);
+    // A write that fails partway leaves no chat words behind: the partial
+    // file is removed, or, when it cannot be, retried and listed.
+    const wrote = lineChat.writePrompt(plan.write.file, plan.write.text);
+    if (!wrote.ok) {
+      lineLog('prompt not saved', { code: wrote.code });
+      if (wrote.leftover) {
+        lineLeftovers.set(path.basename(plan.write.file), wrote.leftover);
+        saveLeftovers();
+      }
       return { ok: false, error: 'The prompt could not be saved in the app’s data folder. Try again; if it keeps failing, the system log has the reason.' };
     }
     return new Promise((resolve) => {
@@ -1392,7 +1418,9 @@ app.whenReady().then(() => {
         if (!err) return resolve({ ok: true, label: plan.label });
         // Nothing started: the prompt (a chat's words) does not stay behind.
         fs.rm(plan.write.file, { force: true }, (rmErr) => {
-          if (rmErr) lineLeftovers.set(path.basename(plan.write.file), lineCode(rmErr));
+          if (!rmErr) return;
+          lineLeftovers.set(path.basename(plan.write.file), lineCode(rmErr));
+          saveLeftovers();
         });
         lineLog(`start failed (${req.target})`, err);
         const tmux = req.target === 'tmux';

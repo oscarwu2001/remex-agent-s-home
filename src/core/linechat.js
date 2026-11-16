@@ -453,36 +453,40 @@ function mergeChats(exports) {
     // or saved from another device.
     const spans = [];
     const byHash = new Map();
-    const unsent = new Map(); // at|actor -> unsent events in newer exports
+    // at|actor -> unsent events: the most any one newer export shows (the
+    // same unsend saved in two exports is one event, not two).
+    const unsent = new Map();
     const unsentKey = (at, who) => `${at}\u0000${who}`;
     let olderOnly = 0;
     for (const e of newestFirst) {
       let lo = Infinity;
       let hi = -Infinity;
-      const own = [];
-      const lacking = new Map(); // at|sender -> this export's messages inside a newer span
+      const own = new Map(); // at|actor -> this export's unsent events, by hash
+      const lacking = new Map(); // at|sender -> this export's messages inside a newer span, by hash
+      const add = (map, k, m) => {
+        if (!map.has(k)) map.set(k, new Map());
+        map.get(k).set(m.hash, m); // a message pasted in twice is held once
+      };
       for (const m of e.messages ?? []) {
         const ms = m.ms ?? 0;
         if (ms < lo) lo = ms;
         if (ms > hi) hi = ms;
-        if (m.kind === 'unsent') own.push(unsentKey(m.at, m.actor ?? m.sender));
+        if (m.kind === 'unsent') add(own, unsentKey(m.at, m.actor ?? m.sender), m);
         if (byHash.has(m.hash)) continue;
         if (spans.some(([a, b]) => ms >= a && ms <= b)) {
-          const k = unsentKey(m.at, m.sender);
-          if (!lacking.has(k)) lacking.set(k, []);
-          lacking.get(k).push(m);
+          add(lacking, unsentKey(m.at, m.sender), m);
           continue;
         }
         byHash.set(m.hash, { ...m, chat });
       }
-      for (const [k, list] of lacking) {
-        const events = unsent.get(k) ?? 0;
-        if (list[0].sender && list.length <= events) continue;
+      for (const [k, held] of lacking) {
+        const list = [...held.values()];
+        if (list[0].sender && list.length <= (unsent.get(k) ?? 0)) continue;
         olderOnly += list.length;
         for (const m of list) byHash.set(m.hash, { ...m, chat });
       }
       // This export's unsent events stand for the exports older than it.
-      for (const k of own) unsent.set(k, (unsent.get(k) ?? 0) + 1);
+      for (const [k, events] of own) unsent.set(k, Math.max(unsent.get(k) ?? 0, events.size));
       if (lo <= hi) spans.push([lo, hi]);
     }
     const messages = [...byHash.values()].sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0));
@@ -502,24 +506,29 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 // A name in CJK script is found anywhere (no spaces between words); any
 // other name only as a whole word: not in "Meiling", "Mei-Ling",
-// "Anna-Mei", "Mei2", "mei@example.com" or "x.mei.y". An @ just before it is
-// a mention.
+// "Anna-Mei", "Mei2", "mei@example.com", "x.mei.y" or "notes.mei". An @
+// just before it is a mention.
 const LATIN = '\\p{Script=Latin}';
-const CJK_BEFORE = '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\u3000-\\u303f]';
+const CJK_CHAR = '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]';
 function mentions(text, name) {
   const t = text.normalize('NFKC');
   const n = name.normalize('NFKC');
   if (CJK.test(n)) return t.toLowerCase().includes(n.toLowerCase());
   const e = escapeRe(n);
   // Bounded only by Latin letters and digits: "請@Mei", "麻煩Mei看",
-  // "ok@Mei", "thanks.Mei" and "好的……Mei" (NFKC makes the ellipsis full
-  // stops) are mentions. Before it: a hyphen counts as part of the word only
-  // after a Latin letter or digit ("Anna-Mei"). After it: no Latin letter,
-  // @ (an address) or .x / -x ("bob@mei.com", "Mei-Ling"), and a digit only
-  // in CJK text, where a time may follow the name ("請Mei3點").
+  // "ok@Mei" and "好的……Mei" (NFKC makes the ellipsis full stops) are
+  // mentions. Before it: a hyphen counts as part of the word only after a
+  // Latin letter or digit ("Anna-Mei"). After it: no Latin letter, @ (an
+  // address) or .x / -x ("bob@mei.com", "Mei-Ling"), and digits only when a
+  // CJK character follows them, a time ("Mei3點前").
   const before = `(?<![${LATIN}\\p{Nd}_])(?<![${LATIN}\\p{Nd}]-)`;
-  const after = `(?![${LATIN}_@]|[.\\-][${LATIN}\\p{Nd}])`;
-  return new RegExp(`${before}(?:(?<=${CJK_BEFORE})${e}|${e}(?!\\p{Nd}))${after}`, 'iu').test(t);
+  const word = `${e}(?:(?!\\p{Nd})|(?=\\p{Nd}+${CJK_CHAR}))(?![${LATIN}_@]|[.\\-][${LATIN}\\p{Nd}])`;
+  // Right after a Latin letter or digit and a full stop it may be part of
+  // an identifier ("notes.mei", "x.mei"): there it counts only in the
+  // capitals the user typed it with ("thanks.Mei", "OK.Mei").
+  const dotted = `(?<=[${LATIN}\\p{Nd}]\\.)`;
+  return new RegExp(`${before}(?<![${LATIN}\\p{Nd}]\\.)${word}`, 'iu').test(t)
+    || new RegExp(`${dotted}${word}`, 'u').test(t);
 }
 // The user's own words that take something on. The text is first made
 // plain (full-width to half-width, curly apostrophes straight), and the
@@ -1027,6 +1036,50 @@ function prunePrompts(dir, { now = Date.now(), maxAgeMs = 24 * 3600_000, fsys = 
   return { removed, kept, future, failed, stuck, folderError: null };
 }
 
+// A prompt file, readable only by the user where the system allows. When
+// the write fails the partial file is removed; one that cannot be is a
+// leftover for prunePrompts' retry. Returns { ok: true } or { ok: false,
+// code, leftover: the removal's code, or null when nothing is left }.
+function writePrompt(file, text, fsys = fs) {
+  try {
+    fsys.mkdirSync(path.dirname(file), { recursive: true });
+    fsys.writeFileSync(file, text, { mode: 0o600 });
+    return { ok: true };
+  } catch (err) {
+    let leftover = null;
+    try {
+      fsys.rmSync(file, { force: true });
+    } catch (rmErr) {
+      leftover = rmErr.code || 'error';
+    }
+    return { ok: false, code: err.code || 'error', leftover };
+  }
+}
+
+// Prompts a failed start left, kept in the app data folder so a restart
+// still retries and lists them: { version: 1, files: { name: code } }.
+// Only plain file names are kept (prunePrompts only ever removes names it
+// lists in its own folder). Returns { leftovers: Map, error: null | the
+// read's code | 'invalid' }; no file yet is none left.
+const LEFTOVER_NAME = /^[\w-][\w.-]*\.txt$/;
+function leftoverJson(leftovers) {
+  return { version: 1, files: Object.fromEntries(leftovers) };
+}
+function readLeftovers(file, fsys = fs) {
+  let raw;
+  try {
+    raw = JSON.parse(fsys.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return { leftovers: new Map(), error: null };
+    return { leftovers: new Map(), error: err instanceof SyntaxError ? 'invalid' : err.code || 'error' };
+  }
+  const files = raw && typeof raw.files === 'object' && raw.files ? raw.files : null;
+  if (!files) return { leftovers: new Map(), error: 'invalid' };
+  const leftovers = new Map();
+  for (const [name, code] of Object.entries(files)) if (LEFTOVER_NAME.test(name)) leftovers.set(name, String(code));
+  return { leftovers, error: null };
+}
+
 // Marks (added, dismissed) saved under a message's hash by an earlier
 // version move to the key of every item with that hash (one message can be
 // in two chats), unless one is already there. hits: [{ key, hash }].
@@ -1048,4 +1101,5 @@ module.exports = {
   decodeExport, parseExport, readHeader, mergeChats, relatedToYou, draftTodo,
   scanFolder, lineProblems, changeSettings, addTodo, localMs,
   promptDraft, wslTarget, toWslPath, launchPlan, windowName, parseSessions, tmuxSessions, wslProbe, prunePrompts, migrateMarks,
+  writePrompt, readLeftovers, leftoverJson,
 };
