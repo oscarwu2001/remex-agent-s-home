@@ -777,6 +777,14 @@ test('a column checked as comments whose answers turn into emails is kept off th
   assert.deepEqual([s.commentCount, s.comments.length, s.doubtful], [0, 0, ['Anything else?']]);
   const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
   assert.ok(lines.some((l) => /checked as comments or choices now look like emails or phone numbers/.test(l)), lines.join('\n'));
+  // The emails are not kept either, and the cache still knows why the column is held back.
+  const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
+  assert.deepEqual([c.redacted, c.doubted], [[1], [1]]);
+  assert.ok(!JSON.stringify(c.rows).includes('@example.org'));
+  const again = F.summariseCache(c, roles);
+  assert.deepEqual([col(again, 'Anything else?').doubt, again.doubtful], [true, ['Anything else?']]);
+  assert.deepEqual(F.reroleCache(c, roles).doubted, [1]);
+  assert.match(F.validCache({ ...c, doubted: [-1] }, LINK).problem, /could not be read/);
   // Before the emails came, nothing to say.
   const before = F.summarise(form(['Anything else?'], [['Bigger font'], ['Quieter fan']]), { roles });
   assert.deepEqual([col(before, 'Anything else?').doubt ?? false, before.commentCount], [false, 2]);

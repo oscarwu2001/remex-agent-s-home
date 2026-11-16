@@ -155,7 +155,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const unread = (s.unreadable?.scores ?? 0) + (s.unreadable?.numbers ?? 0) + (s.unreadable?.timestamps ?? 0);
   if (unread) left.push(`${plural(unread, 'answer')} could not be read and ${unread === 1 ? 'is' : 'are'} left out (see Needs attention).`);
   const doubt = s.doubtful?.length ?? 0;
-  if (doubt) left.push(`${plural(doubt, 'column')} checked as comments or choices now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; kept off the board until the columns are checked again.`);
+  if (doubt) left.push(`${plural(doubt, 'column')} checked as comments or choices now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
   return `${head}${hint}${checkNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}

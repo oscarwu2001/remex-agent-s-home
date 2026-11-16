@@ -577,8 +577,9 @@ const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 // comments: how many of the newest to keep. timeZone: the sheet's. roles:
 // the user's confirmed column roles. redacted: columns whose answers the
 // cache does not keep (identifying when they were read); guessed: those of
-// them that were only a guess, so the user is still asked.
-function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], guessed = [] } = {}) {
+// them that were only a guess, so the user is still asked; doubted: those
+// checked as comments or choices whose answers read as emails or phones.
+function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], guessed = [], doubted = [] } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
@@ -603,10 +604,15 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   out.responses = data.length;
   const hidden = new Set(redacted);
   const unsure = new Set(guessed);
+  const doubts = new Set(doubted);
   // A hidden column's answers are not here to look at.
   const columns = headers.map((_, i) => (hidden.has(i) ? [] : data.map((r) => r[i]).filter((v) => !isEmpty(v))));
   const saved = matchRoles(headers, roles);
-  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden', confidence: unsure.has(i) ? LOW : HIGH } : suggest(h, columns[i], untitled[i])));
+  const suggested = headers.map((h, i) => {
+    if (!hidden.has(i)) return suggest(h, columns[i], untitled[i]);
+    if (doubts.has(i)) return { role: 'identifying', reason: 'answers', confidence: HIGH };
+    return { role: 'identifying', reason: 'hidden', confidence: unsure.has(i) ? LOW : HIGH };
+  });
   const titles = new Map();
   for (const h of headers) titles.set(h, (titles.get(h) ?? 0) + 1);
 
@@ -788,10 +794,13 @@ function planFetch({ now, settings, cache, busy = false }) {
 // kept. "New since" counts answers after the newest one of the last read
 // that brought something new, so pressing Refresh twice does not reset it.
 // The columns whose answers the cache drops: every identifying one, sure,
-// confirmed or only guessed; and of those, the guesses the user has not
-// chosen for yet, which the cache names so the row still asks.
-const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying').map((c) => c.index);
+// confirmed or only guessed, and one checked as comments whose answers now
+// read as emails or phones. The cache names the guesses the user has not
+// chosen for yet, so the row still asks, and the doubted ones, so they
+// stay flagged.
+const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying' || c.doubt).map((c) => c.index);
 const guessesIn = (summary, hide) => hide.filter((i) => summary.columns[i] && !summary.columns[i].confirmed && summary.columns[i].suggested.confidence === LOW);
+const doubtsIn = (summary, hide) => hide.filter((i) => summary.columns[i]?.doubt);
 
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const first = summarise(got.rows, { timeZone: got.timeZone, roles });
@@ -802,7 +811,7 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
   return {
     version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null,
     tab: got.tab ?? null, timeZone: got.timeZone ?? null,
-    rows: redactRows(got.rows, hide), redacted: hide, guessed: guessesIn(first, hide),
+    rows: redactRows(got.rows, hide), redacted: hide, guessed: guessesIn(first, hide), doubted: doubtsIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
     since: changed ? before : same ? prev.since ?? null : null,
     sinceFetchedAt: changed ? prev.fetchedAt : same ? prev.sinceFetchedAt ?? null : null,
@@ -819,7 +828,7 @@ function afterFailure(prev, err, { now, started, link }) {
     ...(known && err.detail ? { detail: err.detail } : {}),
   };
   const base = sameSheet(prev, link) ? prev
-    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], guessed: [], fetchedAt: null };
+    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], guessed: [], doubted: [], fetchedAt: null };
   return { ...base, lastAttemptAt: started, lastError };
 }
 
@@ -828,14 +837,14 @@ function afterFailure(prev, err, { now, started, link }) {
 // until the next read brings them back.
 function reroleCache(cache, roles) {
   if (!cache?.rows) return cache;
-  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [] });
+  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [], doubted: cache.doubted ?? [] });
   const hide = [...new Set([...(cache.redacted ?? []), ...toRedact(s)])].sort((a, b) => a - b);
-  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, guessed: guessesIn(s, hide) };
+  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, guessed: guessesIn(s, hide), doubted: doubtsIn(s, hide) };
 }
 
 function summariseCache(cache, roles) {
   if (!cache?.rows) return null;
-  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [] });
+  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [], doubted: cache.doubted ?? [] });
 }
 
 // The cache file as read -> { cache, problem }. A cache that is not this
@@ -855,7 +864,7 @@ function validCache(raw, link) {
     && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId)
     && (raw.gid == null || Number.isInteger(raw.gid))
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
-    && (raw.guessed == null || (Array.isArray(raw.guessed) && raw.guessed.every((i) => Number.isInteger(i) && i >= 0)))
+    && [raw.guessed, raw.doubted].every((list) => list == null || (Array.isArray(list) && list.every((i) => Number.isInteger(i) && i >= 0)))
     && (e == null || (typeof e === 'object' && typeof e.kind === 'string' && typeof e.message === 'string' && num(e.at) && str(e.detail)))
     && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
     && !(raw.rows && raw.fetchedAt == null);
@@ -935,7 +944,7 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     const unsure = summary.needsChoice ?? 0;
     if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`);
     const doubt = summary.doubtful?.length ?? 0;
-    if (doubt) add(`${doubt === 1 ? '1 column' : `${doubt} columns`} checked as comments or choices now look like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} kept off the board until checked again (Settings → Field feedback → Check the columns)`);
+    if (doubt) add(`${doubt === 1 ? '1 column' : `${doubt} columns`} checked as comments or choices now look like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`);
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);
