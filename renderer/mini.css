@@ -5,6 +5,8 @@
    hospital. It is always light, for reading at a glance beside other apps. */
 
 * { box-sizing: border-box; }
+/* Emphasis is never heavier than a label. */
+strong, b { font-weight: 500; }
 html, body { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font);
@@ -67,18 +69,17 @@ body { min-height: 100vh; overflow-x: hidden; }
 .mini-list { padding: var(--s-2) var(--s-3) var(--s-4); }
 .computer { padding: var(--s-2) 0; }
 .computer + .computer { border-top: 1px solid var(--line); margin-top: var(--s-2); }
-.computer h2 { margin: var(--s-1) var(--s-1) var(--s-2); font: 500 12px var(--font); color: var(--ink-muted); letter-spacing: 0; }
+.computer h2 { margin: var(--s-1) var(--s-1) var(--s-2); font: 400 12px var(--font); color: var(--ink-muted); letter-spacing: 0; }
 .computer h2 .state { font-weight: 400; }
 .computer.offline .sess { border-style: dashed; box-shadow: none; background: var(--panel); }
 .projects, .sessions { list-style: none; margin: 0; padding: 0; }
 .proj + .proj { margin-top: var(--s-3); }
-.proj-head { display: flex; justify-content: space-between; gap: var(--s-2); padding: 0 var(--s-1) var(--s-1); font: 500 14px var(--font); letter-spacing: var(--track-tight); }
+.proj-head { display: flex; justify-content: space-between; gap: var(--s-2); padding: 0 var(--s-1) var(--s-1); font: 400 14px var(--font); letter-spacing: var(--track-tight); }
 
 .sess {
   display: grid; grid-template-columns: 26px 1fr; gap: var(--s-2); align-items: start;
   padding: var(--s-3); margin-bottom: 6px;
   background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
-  box-shadow: var(--shadow-soft);
 
 }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
@@ -87,7 +88,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 .sess-top { display: flex; align-items: center; gap: var(--s-2); }
 .tag { flex: none; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-sunk); font-size: 11px; color: var(--ink-muted); }
 .since { margin-left: auto; flex: none; color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.sess-what { min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
+.sess-what { min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
 .sess.running .sess-what { color: var(--ink); }
 
 /* ---- to-dos -------------------------------------------------------------- */

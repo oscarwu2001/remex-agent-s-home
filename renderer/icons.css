@@ -25,18 +25,18 @@
 
 /* Hints and errors look the same in both windows. */
 .hint { font-size: 13px; color: var(--ink-muted); margin: 0 0 var(--s-2); }
-.form-error { margin: 4px 0 0; font-size: 12.5px; font-weight: 500; color: var(--warn); }
+.form-error { margin: 4px 0 0; font-size: 12.5px; font-weight: 400; color: var(--warn); }
 .pcard > .form-error { margin-top: var(--s-1); }
 
 /* ---- project cards, both windows ------------------------------------------ */
 
 .pcards { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.pcard { padding: var(--s-2) var(--s-3); background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-soft); }
-.pcard.unconfirmed { border-style: dashed; box-shadow: none; background: var(--panel); }
+.pcard { padding: var(--s-2) var(--s-3); background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.pcard.unconfirmed { border-style: dashed; background: var(--panel); }
 .pcard-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
 .pname {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; padding: 0; border: 0; background: none;
-  color: var(--ink); font: 500 14px var(--font); letter-spacing: var(--track-tight); cursor: pointer; text-align: left;
+  color: var(--ink); font: 400 14px var(--font); letter-spacing: var(--track-tight); cursor: pointer; text-align: left;
 }
 .pname span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pname .ico { color: var(--ink-muted); transition: transform 0.4s var(--spring); }
@@ -71,7 +71,7 @@
 .ptodos { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
 .ptodos li { display: grid; grid-template-columns: 24px 1fr auto auto auto; align-items: center; gap: 4px; min-height: 30px; font-size: 13px; }
 .ptodos li.completed .ptext { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--line); }
-.tick { width: 24px; height: 24px; display: grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer; border-radius: 6px; }
+.tick { width: 24px; height: 24px; display: grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer; border-radius: 999px; }
 .tick:hover .pip { border-color: var(--accent); transform: scale(1.15); }
 .by { display: inline-flex; color: var(--ink-muted); }
 .by .ico { width: 14px; height: 14px; }
@@ -99,7 +99,7 @@
 
 /* Hover labels (renderer/tip.js). */
 .tip {
-  position: fixed; z-index: 50; max-width: 240px; padding: 5px 9px; border-radius: 8px;
+  position: fixed; z-index: 50; max-width: 240px; padding: 5px 9px; border-radius: var(--r-sm);
   background: var(--ink); color: var(--panel); font: 400 12px/1.3 var(--font);
   box-shadow: var(--shadow-float); pointer-events: none; opacity: 0; transform: translateY(2px);
   transition: opacity 0.12s var(--ease-out), transform 0.2s var(--spring);
@@ -130,7 +130,7 @@
 .jobs { list-style: none; margin: 4px 0 var(--s-2); padding: 0; display: grid; gap: 6px; }
 .job {
   display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start;
-  padding: 10px 12px; background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-soft);
+  padding: 10px 12px; background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
 }
 .job-mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-sunk); color: var(--ink-muted); }
 .job-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -139,10 +139,10 @@
 .job.stalled .job-mark { border-radius: 4px; }
 .job-body { min-width: 0; }
 .job-top { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 13.5px; }
-.job-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-name { font-weight: 400; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-proj { color: var(--ink-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .job-pct { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; color: var(--ink-muted); font-size: 12px; }
-.job.running .job-pct { color: var(--accent); font-weight: 500; }
+.job.running .job-pct { color: var(--accent); }
 .job-bar { height: 5px; margin: 6px 0 4px; border-radius: 999px; background: var(--panel-sunk); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
 .job-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.8s var(--spring); }
 .job:not(.running) .job-bar span { background: var(--ink-muted); }
@@ -159,7 +159,7 @@
 /* ---- waiting for you, both windows ---------------------------------------- */
 
 .waiting { margin: 0 0 var(--s-3); padding: 8px 10px 6px; border-radius: var(--r-lg); background: var(--accent-soft); }
-.waiting-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12.5px; font-weight: 500; color: var(--accent); }
+.waiting-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12.5px; font-weight: 400; color: var(--accent); }
 .waiting-n { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 11px; }
 .waiting-list { list-style: none; margin: 0; padding: 0; }
 .wait { display: flex; align-items: center; gap: 2px; }
@@ -170,7 +170,7 @@
 }
 .wait-open:hover { background: var(--panel-raised); }
 .wait-open .glyph { width: 22px; height: 22px; }
-.wait-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-name { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wait-what { color: var(--ink-muted); font-size: 12px; white-space: nowrap; }
 .wait.blocked .wait-what { color: var(--warn); }
 .wait-for { color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -178,18 +178,18 @@
 .clash p { display: flex; gap: 8px; align-items: flex-start; margin: 0; }
 .clash p + p { margin-top: 6px; }
 .clash .ico { color: var(--warn); margin-top: 1px; }
-.clash strong { font-weight: 500; color: var(--warn); }
+.clash strong { font-weight: 400; color: var(--warn); }
 
 /* ---- worktrees in a project ------------------------------------------------ */
 .wt { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
 .wt-load { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0; }
 .wt-load .ico { width: 14px; height: 14px; }
 .wt-sum { margin: 2px 0 4px; font-size: 12px; color: var(--ink-muted); }
-.wt-sum strong { color: var(--accent); font-weight: 500; }
+.wt-sum strong { color: var(--accent); font-weight: 400; }
 .wt-list { list-style: none; margin: 0; padding: 0; }
 .wt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 4px 0; font-size: 12.5px; border-top: 1px solid var(--line); }
 .wt-row:first-child { border-top: 0; }
-.wt-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-name { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wt-branch { color: var(--ink-muted); font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 .wt-bits { grid-column: 1 / -1; color: var(--ink-muted); font-size: 11.5px; }
 .wt-safe { grid-column: 1 / -1; justify-self: start; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
