@@ -256,23 +256,34 @@ which you share the sheet with, so the sheet stays private:
 6. In Agent's Home, open **Settings → Field feedback (Google Sheet)**, turn on
    **Show field feedback**, paste the sheet's link from the browser's address
    bar and press **Save**, then press **Choose key file…** and pick the
-   `.json` file. Settings then shows the service account's email, so you can
-   check the sheet is shared with it.
+   `.json` file. **Copy reader address** puts the service account's email on
+   the clipboard for step 5 (with privacy off, Settings shows it too).
+7. After the first update, open **Check the columns** (the board links to
+   it): the app suggests what each column is, and you confirm or change each
+   one once. Until then the board says its numbers are the app's guesses.
 
-The app works out the form's columns by itself: the timestamp; score
-questions (whole numbers on a small scale such as 1–5 or 1–10; a scale
-written in the question, like "(1-5)", is used when there is one);
-multiple-choice questions, which are counted; and free text, which become the
-comments. Columns with names, email addresses or phone numbers are never
-shown. Answers it cannot read, such as a word in a score question, are
-counted under **Needs attention**, never dropped quietly. With **Hide file
-names and commands** on, the section shows only counts, scores and dates;
-question wording, comments and chosen answers show when it is off.
+Each column is one of: when answered; a score (whole numbers on a scale such
+as 1–5 or 1–10); a number that is not a score ("How many times…"), averaged
+separately; multiple choice, counted; a comment; identifying; or ignored.
+The app suggests a role from each column's title and answers, and **Check
+the columns** lets you confirm it. Only scores whose scale you confirmed, or
+that the question states (like "(1-5)"), count in the average; a guessed
+scale is marked "scale guessed". Columns with names, email addresses, phone
+numbers or patient and case numbers are hidden, and their answers are not
+kept on your computer. A column added to the form later is flagged under
+**Needs attention** until you check it. Answers the app cannot read, such as
+a word in a score question, are counted under **Needs attention**, never
+dropped quietly. With **Hide file names, commands and survey answers** on,
+the section shows only counts, scores and dates; question wording, comments
+and chosen answers show when it is off.
 
 When something goes wrong, the section and **Needs attention** say what to
-try, for example "Share the sheet with … as Viewer" or "The sheet link points
-to nothing — check it". After a failed read the app tries again 30 minutes
-later, and the last answers it read stay on the board.
+try, for example "Share the sheet with the key's reader address as Viewer"
+or "No sheet was found at this link". After a passing trouble (no network,
+Google busy) the app tries again half an hour later; after a refusal (not
+shared, no such sheet, a bad key) it waits for the next update time, a new
+link or key, or **Refresh now**. The last answers it read stay on the board,
+marked with how old they are.
 
 ## The Report button
 
@@ -421,12 +432,14 @@ but never writes there. There are three exceptions, and each happens only when y
   30 minutes. It sends only the place you chose, never anything from your
   sessions.
 - **Field feedback**, switched on in Settings, reads one Google Sheet that you
-  shared with your own service account, on Monday, Wednesday and Friday at
-  08:00 and when you press **Refresh now**. It sends Google only a sign-in
-  request signed with your key, the sheet's id and its tab name, never
-  anything from your sessions. The answers it read are kept in the app's data
-  folder (`field-survey-cache.json`) so the board shows them after a restart.
-- **Update and restart** pulls the newest code with git. **Hide file names and commands** is on by default. With
+  shared with your own service account: when you set it up, on Monday,
+  Wednesday and Friday at 08:00, half an hour after a passing failure, and
+  when you press **Refresh now**. It sends Google only a sign-in request
+  signed with your key, the sheet's id and its tab name, never anything from
+  your sessions. The answers it read are kept in the app's data folder
+  (`field-survey-cache.json`) without the identifying columns, so the board
+  shows them after a restart; turning the feature off deletes them.
+- **Update and restart** pulls the newest code with git. **Hide file names, commands and survey answers** is on by default. With
 it on, the board shows "Reading a file" but not the file's name, and it hides
 task descriptions and folder paths too. Error messages never quote the
 contents of a transcript line. Turn privacy off when you're not sharing your
