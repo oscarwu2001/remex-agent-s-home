@@ -277,9 +277,11 @@ numbers or patient and case numbers are hidden, and their answers are not
 kept on your computer. Answers that only look personal (shaped like names,
 or long numbers such as a phone number the sheet stored as a number) are
 treated the same until you choose: the column needs a choice, and if it is
-not identifying, its answers come back at the next update. A column you
-checked as comments whose answers turn into emails or phone numbers is kept
-off the board, its answers are not stored, and it is flagged. A column added to the form later, and columns
+not identifying, its answers come back at the next update. Ignored columns
+keep no answers either. A column you checked (comment, choice, score or
+number) whose answers turn into emails or phone numbers is kept off the
+board, its answers are not stored, and it is flagged until you choose
+Identifying or Ignore for it. A column added to the form later, and columns
 waiting for a choice, are flagged under **Needs attention** until you check
 them. Turning field feedback off deletes the answers kept and your checked
 columns; turned on again, the columns are checked afresh. Answers the app cannot read, such as
