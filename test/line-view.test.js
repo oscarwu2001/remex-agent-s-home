@@ -112,7 +112,8 @@ test('with privacy off Settings lists each chat with an off-by-default tick, and
   assert.equal(ticks.length, 3);
   assert.equal(ticks.filter((t) => t.includes('checked')).length, 2);
   assert.ok(!ticks.find((t) => t.includes('Family Group')).includes('checked'));
-  assert.match(html, /<label class="check" for="line-read-1"><input[^>]*> Read “Lab Chat”<\/label>/);
+  // The chat's name is the tick's label, with its counts under it.
+  assert.match(html, /<label class="check" for="line-read-1"><input[^>]*> <span class="line-chat-name">Lab Chat<\/span><\/label>\s*<span class="line-chat-what">1 export · 9 messages<\/span>/);
   assert.match(html, /id="line-names"[^>]*value="Mei"/);
   assert.match(html, /<button type="submit" class="button" id="line-words-save">Save<\/button>/);
   assert.match(html, /id="line-keywords"[^>]*value="calibration"/);
@@ -247,4 +248,33 @@ test('when the ticked chats could not be read the board sends the user to Needs 
   const { lineHtml } = await view();
   assert.match(lineHtml(line({ items: [], readCount: 0, tickedFailed: 2 }), { privacy: true, now: NOW }), /The ticked chats could not be read\. See Needs attention\./);
   assert.match(lineHtml(line({ items: [], scanFailed: true }), { privacy: true, now: NOW }), /The chats could not be read just now\. See Needs attention\./);
+});
+
+// ---- round 3 -------------------------------------------------------------------------
+
+test('sendStatus keeps a failed start a failure, for the error colour and an assertive status line', async () => {
+  const { sendStatus } = await view();
+  assert.deepEqual(sendStatus({ status: { ok: false, text: 'Not started. Choose a folder first.' } }), { text: 'Not started. Choose a folder first.', ok: false });
+});
+
+test('Show all is offered when the message is cut at six lines: CJK counts wide, and line breaks count', async () => {
+  const { isLong, lineHtml } = await view();
+  assert.equal(isLong('請'.repeat(200)), true);
+  assert.equal(isLong('請'.repeat(60)), false);
+  assert.equal(isLong('word '.repeat(20)), false);
+  assert.equal(isLong(['a', 'b', 'c', 'd', 'e', 'f', 'g'].join('\n')), true);
+  assert.equal(isLong(['a', 'b', 'c', 'd', 'e', 'f'].join('\n')), false);
+  const html = lineHtml(line({ items: [item({ text: '麻煩大家確認一下報告的內容，'.repeat(15) })] }), { privacy: false, now: NOW });
+  assert.match(html, /aria-expanded="false"[^>]*>Show all</);
+});
+
+test('after Add or Dismiss focus goes to the next item still listed, else the one before, else nowhere', async () => {
+  const { nextFocus } = await view();
+  const keys = ['a', 'b', 'c', 'd'];
+  assert.equal(nextFocus(keys, new Set(['b']), 'b'), 'c');
+  assert.equal(nextFocus(keys, new Set(['b', 'c']), 'b'), 'd');
+  assert.equal(nextFocus(keys, new Set(['d']), 'd'), 'c');
+  assert.equal(nextFocus(keys, new Set(['c', 'd']), 'd'), 'b');
+  assert.equal(nextFocus(['a'], new Set(['a']), 'a'), null);
+  assert.equal(nextFocus(keys, new Set(), 'x'), null);
 });

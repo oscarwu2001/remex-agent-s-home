@@ -865,13 +865,17 @@ body.no-select, body.no-select * { user-select: none; }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden;
 }
 .line-text.open { display: block; overflow: visible; }
-.line-more { display: inline-block; margin-top: 2px; font-size: 12px; }
+.line-more { display: inline-block; margin-top: 2px; }
+.link-btn.line-more { font-size: 12px; }
 /* Add and Send in the accent; Dismiss quieter, pushed away to the far end. */
 .line-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); margin: var(--s-1) 0 0 calc(-1 * var(--s-2)); }
 .line-act { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; color: var(--accent); }
-.line-act.line-dismiss { margin-left: auto; color: var(--ink-muted); font-weight: 400; }
+.line-act.line-dismiss { margin-left: auto; font-weight: 400; }
+/* After .link-btn.small, which would make every action muted. */
+.link-btn.line-act { color: var(--accent); }
+.link-btn.line-act.line-dismiss { color: var(--ink-muted); }
 .line-status { margin: 0; min-height: 1.4em; font-size: 13px; color: var(--ink-muted); }
-.line-status:empty { display: none; }
+.line-status:empty { min-height: 0; }
 .line-add { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel-raised); }
 .line-add .field input, .line-add .field select { width: 100%; min-width: 0; }
 .line-add .line-source { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
@@ -884,7 +888,7 @@ body.no-select, body.no-select * { user-select: none; }
 .line-chat-row { display: grid; gap: 0; padding: var(--s-1) 0; border-top: 1px solid var(--line); }
 .line-chat-row:first-child { border-top: 0; }
 .line-chat-name { font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
-.line-chat-what { font-size: 12px; color: var(--ink-muted); }
+.line-chat-what { margin-left: calc(18px + var(--s-2)); font-size: 12px; color: var(--ink-muted); }
 .line-words { display: grid; gap: var(--s-2); }
 .line-words .field input { width: 100%; min-width: 0; }
 /* The Send to agent sheet. */
@@ -911,6 +915,6 @@ body.no-select, body.no-select * { user-select: none; }
 /* The folder's error sits right under its list, before Browse. */
 .line-folder-row .field-error { flex-basis: 100%; margin: calc(-1 * var(--s-1)) 0 0; }
 .line-send-status { margin: var(--s-3) 0 0; font-size: 13px; color: var(--ink-muted); }
-.line-send-status:empty { display: none; }
+.line-send-status:empty { min-height: 0; }
 .line-send-status.is-error { color: var(--warn); font-weight: 500; }
 .line-where { display: inline-flex; align-items: center; gap: var(--s-2); margin: 0; font-size: 14px; color: var(--ink); }

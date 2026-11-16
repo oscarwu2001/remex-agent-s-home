@@ -772,12 +772,13 @@ function changeSettings(current, change = {}, { now = Date.now() } = {}) {
 // A to-do on a project of the shared list, through projects.js: read afresh,
 // changed, written whole (temp file + rename), fields it does not know kept.
 // A list it cannot read or parse is left alone and the reason thrown; a
-// read failure's error code goes on the error (err.code), not in its words.
+// read failure's error code goes on the error (err.code, with stage 'read'),
+// not in its words.
 function addTodo(file, { project, text }, fsys = fs) {
   const loaded = projectList.loadProjects(file, fsys);
   if (!loaded.raw) {
     const unread = /could not be read \(([^)]+)\)/.exec(loaded.problems[0] ?? '');
-    if (unread) throw Object.assign(new Error('The project list could not be read.'), { code: unread[1] });
+    if (unread) throw Object.assign(new Error('The project list could not be read.'), { code: unread[1], stage: 'read' });
     throw new Error(`The project list cannot be changed: ${loaded.problems[0]}`);
   }
   const next = projectList.applyChange(loaded.raw, { op: 'add-todo', project, text });

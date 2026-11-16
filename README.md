@@ -380,7 +380,8 @@ The **LINE** section (under Field feedback, off by default) lists what in
 your LINE group chats is for you: messages that mention one of your LINE
 names (with or without an @), messages with one of your keywords, and your
 own messages where you took something on ("我來", "我處理", "我會處理",
-"我負責", "I'll", "I will"; not "我來不及" or "我來了"). Each item shows its
+"我負責", in either script, "I'll", "I will"; not "我來不及", nor "我來了"
+unless it is "我來了解"). Each item shows its
 reason as a glyph and words. It can be added to a project as a to-do (you
 edit the wording first), sent to an agent, or dismissed (**Undo** is offered
 right after). Items from the last 14 days are listed; added and dismissed
@@ -400,9 +401,11 @@ reads them there:
 2. In the LINE desktop app, open the chat → **≡** (the menu at the top
    right) → **Save chat**, and save the `.txt` file into that folder. Do the
    same for each chat you want; save a chat again to bring it up to date
-   (the app merges the copies and shows each message once).
-3. Back in Settings, tick **Read “<chat>”** for each chat to read. A chat
-   that is not ticked is read only as far as its name.
+   (the app merges the copies and shows each message once; a message an
+   older copy holds and the newest lacks stays listed, and is counted under
+   **Needs attention**, unless the newest shows it unsent).
+3. Back in Settings, tick each chat to read (the tick is labelled with the
+   chat's name). A chat that is not ticked is read only as far as its name.
 4. Type **Your names in LINE** (as the others see them, comma-separated, up
    to 10) and any **Keywords** (up to 30), then **Save**.
 

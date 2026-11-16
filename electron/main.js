@@ -1189,8 +1189,20 @@ app.whenReady().then(() => {
       lineFiles = new Map(lineScan.files.map((f) => [f.file, f]));
       lineChats = lineChat.mergeChats(lineScan.files.filter((f) => f.read && f.messages));
       const since = Date.now() - lineChat.WINDOW_DAYS * 86_400_000;
-      lineItems = lineChats
-        .flatMap((c) => lineChat.relatedToYou(c.messages, { names: line.names, keywords: line.keywords, since }))
+      const hits = lineChats.flatMap((c) => lineChat.relatedToYou(c.messages, { names: line.names, keywords: line.keywords, since }));
+      // Marks an earlier version saved under the message's hash move to the
+      // item's key, so an added or dismissed item stays gone.
+      const moved = lineChat.migrateMarks(line.marks, hits);
+      if (moved.changed) {
+        line = { ...line, marks: moved.marks };
+        try {
+          writeJsonFile(lineFile, line);
+        } catch (err) {
+          // Kept for this run; the move is tried again at the next start.
+          lineLog('marks not moved to item keys', err);
+        }
+      }
+      lineItems = hits
         .filter((h) => !line.marks[h.key])
         .sort((a, b) => b.ms - a.ms)
         .map((h) => ({ ...h, draft: lineChat.draftTodo(h), prompt: lineChat.promptDraft(h) }));
@@ -1208,18 +1220,26 @@ app.whenReady().then(() => {
   setInterval(scanLine, LINE_SCAN_MS);
   scanLine();
   // Prompt files hold a chat's words: each goes a day after it was written
-  // (looked at as the app starts and every hour), all of them as the
-  // feature is turned off. One that stays is said under Needs attention.
+  // (looked at as the app starts and every hour), all of them while the
+  // feature is off. One that stays is said under Needs attention, in one
+  // place that the next prune that works clears.
+  let linePruneProblem = null;
+  const PRUNE_AGAIN = 'the app tries again within the hour';
   function pruneLinePrompts(maxAgeMs) {
     const gone = lineChat.prunePrompts(linePromptDir, maxAgeMs == null ? {} : { maxAgeMs });
     const n = gone.failed.length;
-    if (n) {
-      problem(`LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and the app tries again within the hour`,
-        `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})`);
+    if (gone.folderError) {
+      linePruneProblem = { label: `LINE chats: the app's folder of saved prompts could not be opened to remove old ones; ${PRUNE_AGAIN}. If this stays, restart the app`, detail: `${linePromptDir} (${gone.folderError})` };
+    } else if (n) {
+      linePruneProblem = { label: `LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and ${PRUNE_AGAIN}`,
+        detail: `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})` };
+    } else {
+      linePruneProblem = null;
     }
   }
-  pruneLinePrompts();
-  setInterval(() => pruneLinePrompts(), LINE_PRUNE_MS);
+  const pruneLineNow = () => pruneLinePrompts(line.enabled ? undefined : 0);
+  pruneLineNow();
+  setInterval(pruneLineNow, LINE_PRUNE_MS);
   function saveLine(next) {
     writeJsonFile(lineFile, next);
     const turnedOff = line.enabled && !next.enabled;
@@ -1267,11 +1287,12 @@ app.whenReady().then(() => {
       lineChat.addTodo(projectsPath, { project, text });
     } catch (err) {
       if (!err.code) return { ok: false, error: err.message }; // projects.js's own words, which say what to do
-      lineLog('project list not saved', err);
+      const verb = err.stage === 'read' ? 'read' : 'saved';
+      lineLog(`project list not ${verb}`, err);
       return {
         ok: false,
         error: ['EBUSY', 'EPERM', 'EACCES'].includes(err.code) ? 'The project list is in use. Close other apps using it and try again.'
-          : 'The project list could not be saved. Try again; if it keeps failing, the system log has the reason.',
+          : `The project list could not be ${verb}. Try again; if it keeps failing, the system log has the reason.`,
       };
     }
     readProjects(true);
@@ -1286,7 +1307,9 @@ app.whenReady().then(() => {
   // Where Send to agent can start Claude: the user's tmux sessions in WSL
   // (asked only when WSL is already running), else a Windows Terminal tab.
   ipcMain.handle('home:line-targets', async () => {
-    lineTmux = await lineChat.tmuxSessions();
+    const { sessions, why, code } = await lineChat.tmuxSessions();
+    if (code) lineLog('tmux sessions not asked', { code });
+    lineTmux = { sessions, why };
     return lineTmux;
   });
   ipcMain.handle('home:line-browse', async () => {
@@ -1348,7 +1371,7 @@ app.whenReady().then(() => {
         if (!err) return resolve({ ok: true, label: plan.label });
         // Nothing started: the prompt (a chat's words) does not stay behind.
         fs.rm(plan.write.file, { force: true }, (rmErr) => {
-          if (rmErr) problem('LINE chats: a saved prompt could not be removed after Claude did not start; the app tries again within the hour', `${plan.write.file} (${lineCode(rmErr)})`);
+          if (rmErr) linePruneProblem = { label: `LINE chats: a saved prompt could not be removed after Claude did not start; ${PRUNE_AGAIN}`, detail: `${plan.write.file} (${lineCode(rmErr)})` };
         });
         lineLog(`start failed (${req.target})`, err);
         const tmux = req.target === 'tmux';
@@ -1392,8 +1415,12 @@ app.whenReady().then(() => {
   }
   function lineProblemsNow() {
     const out = [
-      ...lineChat.lineProblems({ enabled: line.enabled, folder: line.folder, scan: lineScan, read: line.read }),
+      ...lineChat.lineProblems({
+        enabled: line.enabled, folder: line.folder, scan: lineScan, read: line.read,
+        olderOnly: lineChats.reduce((n, c) => n + (c.olderOnly ?? 0), 0),
+      }),
       ...(lineScanError ? [{ label: lineScanError, detail: '' }] : []),
+      ...(linePruneProblem ? [linePruneProblem] : []),
     ].map((p) => ({ ...p, count: 1 }));
     // Each new set of problems goes to the system log once (labels only).
     const text = out.map((p) => p.label).join(' | ');

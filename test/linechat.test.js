@@ -832,5 +832,5 @@ test('a project list that cannot be read is refused with its code apart from the
   const file = path.join(tmpDir(), 'projects.json');
   fs.writeFileSync(file, '{"version":1,"projects":[]}');
   const fsys = { ...fs, readFileSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } };
-  assert.throws(() => L.addTodo(file, { project: 'p1', text: 'x' }, fsys), (err) => err.code === 'EBUSY' && !/EBUSY/.test(err.message));
+  assert.throws(() => L.addTodo(file, { project: 'p1', text: 'x' }, fsys), (err) => err.code === 'EBUSY' && err.stage === 'read' && !/EBUSY/.test(err.message));
 });

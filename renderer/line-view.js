@@ -19,8 +19,33 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const PRIVACY_SWITCH = '“Hide file names, commands, survey answers and LINE chats”';
 const LIMIT = 5; // items shown before "Show N more"
-// A message longer than this is cut at six lines on the board, with its own Show all.
-const LONG = 280;
+// The board cuts a message at six lines (styles.css .line-text). Whether it
+// is cut, estimated for the narrowest board: a line holds about 34 narrow
+// characters, a CJK character or emoji counts as two, and each line break
+// starts a line. Errs towards offering Show all.
+const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}　-〿＀-￯]/u;
+const PER_LINE = 34;
+const CUT_AT = 6;
+export function isLong(text) {
+  let lines = 0;
+  for (const para of String(text ?? '').split('\n')) {
+    let units = 0;
+    for (const ch of para) units += WIDE.test(ch) ? 2 : 1;
+    lines += Math.max(1, Math.ceil(units / PER_LINE));
+    if (lines > CUT_AT) return true;
+  }
+  return false;
+}
+
+// After Add or Dismiss hides an item: the item whose same button takes the
+// focus, the next one still listed, else the one before, else null (the
+// section). keys: the items in board order; pending: keys being hidden.
+export function nextFocus(keys, pending, key) {
+  const at = keys.indexOf(key);
+  if (at < 0) return null;
+  const free = (k) => k !== key && !pending.has(k);
+  return keys.slice(at + 1).find(free) ?? keys.slice(0, at).reverse().find(free) ?? null;
+}
 const svg = (paths, cls = '') => `<svg class="ico${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
 // Why an item is listed: a glyph of its own and words, never colour alone.
@@ -78,7 +103,7 @@ function itemHtml(it, { privacy, now, ui, projects }) {
   // The add form shows its own error at the field; any other sits under the buttons.
   const error = ui.error && ui.errorKey === it.key && !adding ? `<p class="form-error">${esc(ui.error)}</p>` : '';
   const btn = (act, words, extra = '', cls = '') => `<button type="button" class="link-btn small line-act${cls}" data-line="${act}" data-item="${id}" data-key="line-${act}-${id}"${extra}>${svg(ICONS[act])}<span>${words}</span></button>`;
-  const more = String(it.text ?? '').length > LONG
+  const more = isLong(it.text)
     ? `<button type="button" class="link-btn inline line-more" data-line="expand" data-item="${id}" data-key="line-expand-${id}" aria-expanded="${open ? 'true' : 'false'}">${open ? 'Show less' : 'Show all'}</button>` : '';
   return `<li class="line-item">
     ${meta}
@@ -152,9 +177,8 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   } else {
     list = !chats.length ? `<p class="hint">${l.folderError ? esc(folderWords(l.folderError)) : 'No chats in the folder yet.'}</p>`
       : `<fieldset class="line-chats"><legend>Chats in the folder (only ticked chats are read)</legend><ul>${chats.map((c, i) => `<li class="line-chat-row">
-        <span class="line-chat-name">${esc(c.chat)}</span>
+        <label class="check" for="line-read-${i}"><input type="checkbox" id="line-read-${i}" data-chat="${esc(c.chat)}"${c.read ? ' checked' : ''}> <span class="line-chat-name">${esc(c.chat)}</span></label>
         <span class="line-chat-what">${plural(c.files, 'export')}${c.read && c.messages != null ? ` · ${plural(c.messages, 'message')}` : ''}${c.problems ? ` · ${plural(c.problems, 'problem')}, see Needs attention` : ''}</span>
-        <label class="check" for="line-read-${i}"><input type="checkbox" id="line-read-${i}" data-chat="${esc(c.chat)}"${c.read ? ' checked' : ''}> Read “${esc(c.chat)}”</label>
       </li>`).join('')}</ul></fieldset>`;
     words = `<form class="line-words" id="line-words-form">
         <label class="field" for="line-names">Your names in LINE (comma-separated, up to 10)
