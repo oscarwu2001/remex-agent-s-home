@@ -549,10 +549,20 @@ app.whenReady().then(() => {
   } catch (err) {
     if (err.code !== 'ENOENT') problem('The saved field feedback could not be read; it is fetched again', fieldCacheFile);
   }
+  let fieldSummaryError = null; // the summary could not be made from the rows kept
   function summariseField() {
-    fieldSummary = fieldCache?.rows
-      ? fieldSurvey.summarise(fieldCache.rows, { since: fieldCache.since ?? null, timeZone: fieldCache.timeZone })
-      : null;
+    try {
+      fieldSummary = fieldCache?.rows
+        ? fieldSurvey.summarise(fieldCache.rows, { since: fieldCache.since ?? null, timeZone: fieldCache.timeZone })
+        : null;
+      fieldSummaryError = null;
+    } catch (err) {
+      // Never stops the app from starting: the section shows no numbers and
+      // Needs attention says why.
+      fieldSummary = null;
+      fieldSummaryError = 'The answers read could not be summarised; see the system log.';
+      syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
+    }
   }
   function saveFieldCache() {
     try {
@@ -753,6 +763,7 @@ app.whenReady().then(() => {
     const err = fieldCache?.lastError;
     if (err) out.push({ label: `Field feedback: ${err.message}`, detail: '', count: 1 });
     if (fieldKey.error && fieldKey.error !== err?.message) out.push({ label: `Field feedback: ${fieldKey.error}`, detail: '', count: 1 });
+    if (fieldSummaryError) out.push({ label: `Field feedback: ${fieldSummaryError}`, detail: '', count: 1 });
     const unread = fieldSurvey.unreadableText(fieldSummary);
     if (unread) out.push({ label: `Field feedback: ${unread}`, detail: '', count: 1 });
     // Each new failure goes to the system log once.

@@ -196,6 +196,10 @@ test("Google's refusals become plain sentences with what to try", async () => {
   assert.match((await fail({}, { spreadsheetId: SHEET_ID, gid: 999 })).message, /tab in the link \(gid 999\)/);
   assert.match((await fail({ token: [400, { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' }] })).message, /Google refused the key/);
   assert.match((await fail({ token: new Error('net::ERR_INTERNET_DISCONNECTED') })).message, /No network/);
+  // Electron's words when a request is redirected and redirects are refused.
+  const moved = await fail({ meta: new Error("Attempted to redirect, but redirect policy was 'error'") });
+  assert.match(moved.message, /sent the request elsewhere/);
+  assert.equal(moved.kind, 'blocked');
   const slow = new Error('The operation was aborted due to timeout');
   slow.name = 'TimeoutError';
   assert.match((await fail({ meta: slow })).message, /did not answer in time/);
@@ -365,6 +369,15 @@ test('comments are cut to the newest few, and the total is kept', () => {
   const s = F.summarise(rows, { comments: 3 });
   assert.deepEqual(s.comments.map((c) => c.text), ['note 12', 'note 11', 'note 10']);
   assert.equal(s.commentCount, 12);
+});
+
+test('a very long sheet is summarised, not a stack overflow', () => {
+  const rows = [['Timestamp', 'Rating']];
+  for (let i = 0; i < 300_000; i += 1) rows.push([i === 7 ? '2026-11-12 09:00' : '2026-11-10 09:00', i % 2 ? 4 : 5]);
+  const s = F.summarise(rows);
+  assert.equal(s.responses, 300_000);
+  assert.equal(s.newest, iso(2026, 11, 12, 9));
+  assert.deepEqual(s.questions.map((q) => [q.n, q.mean, q.high]), [[300_000, 4.5, 5]]);
 });
 
 // ---- the schedule: Monday, Wednesday and Friday at 08:00 ---------------------------------

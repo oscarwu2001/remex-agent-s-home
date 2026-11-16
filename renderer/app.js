@@ -2645,8 +2645,10 @@ async function fieldAction(act) {
       fieldUi.note = snapshot.demo ? 'The demo reads no sheet.' : 'The preview cannot read the sheet.';
     } else {
       fieldUi.note = '';
-      // The outcome arrives with the snapshot (busy, then the rows or the error).
-      await bridge.fieldRefresh().catch((err) => ({ ok: false, error: err.message }));
+      // The outcome arrives with the snapshot (busy, then the rows or the
+      // error); only a failed call to the main process is shown from here.
+      fieldUi.error = '';
+      await bridge.fieldRefresh().catch((err) => { fieldUi.error = `The sheet could not be read: ${err.message}`; });
     }
     renderFieldSettings();
     renderField();

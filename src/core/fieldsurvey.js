@@ -190,6 +190,10 @@ function unreachable(err) {
   if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
     return new FieldSurveyError('network', 'Google did not answer in time; check the internet connection, then press Refresh now.');
   }
+  // Requests never follow a redirect (it could lead off the allowed hosts).
+  if (/redirect/i.test(String(err?.message))) {
+    return new FieldSurveyError('blocked', 'Google sent the request elsewhere, and the app only talks to Google’s sign-in and Sheets services; press Refresh now later.');
+  }
   const net = /net::(ERR_[A-Z_]+)/.exec(String(err?.message));
   if (net) return new FieldSurveyError('network', `No network: Google could not be reached (${net[1]}); check the internet connection or proxy.`);
   return new FieldSurveyError('network', `No network: Google could not be reached (${String(err?.message ?? err).slice(0, 120)}).`);
@@ -334,7 +338,7 @@ function scaleOf(header, ints) {
     const [low, high] = [Number(m[1]), Number(m[2])];
     if ((low === 0 || low === 1) && high > low && high <= 10) return { low, high, scaleFrom: 'header' };
   }
-  const max = Math.max(...ints);
+  const max = ints.reduce((a, b) => Math.max(a, b), 0);
   return { low: ints.includes(0) ? 0 : 1, high: [5, 7, 10].find((h) => h >= max) ?? 10, scaleFrom: 'answers' };
 }
 
@@ -399,7 +403,8 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
   };
   if (!Array.isArray(rows) || !rows.length) return { ...out, empty: true };
   const head = Array.isArray(rows[0]) ? rows[0] : [];
-  const width = Math.max(head.length, ...rows.slice(1).map((r) => (Array.isArray(r) ? r.length : 0)));
+  // Not Math.max(...rows): a long sheet would overflow the call stack.
+  const width = rows.reduce((w, r, k) => (k && Array.isArray(r) ? Math.max(w, r.length) : w), head.length);
   const headers = Array.from({ length: width }, (_, i) => text(head[i]) || `Column ${columnName(i)}`);
   const untitled = Array.from({ length: width }, (_, i) => !text(head[i]));
   const data = [];
@@ -424,8 +429,8 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone } = {}) {
     });
     const known = times.filter((t) => t != null);
     if (known.length) {
-      out.newest = isoOf(Math.max(...known));
-      out.oldest = isoOf(Math.min(...known));
+      out.newest = isoOf(known.reduce((a, b) => Math.max(a, b)));
+      out.oldest = isoOf(known.reduce((a, b) => Math.min(a, b)));
     }
     const after = toMs(since);
     if (after != null && Number.isFinite(after)) out.newSince = known.filter((t) => t > after).length;
