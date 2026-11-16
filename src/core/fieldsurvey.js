@@ -293,7 +293,7 @@ const ID_LABEL = new RegExp(`^(?:${PERSON} )?(?:name|e-?mail(?: address)?|phone(
 const PERSON_ROLE = /^(?:surgeon|doctor|physician|nurse|respondent|reporter|interviewer|filled in by|submitted by)$/i;
 const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|number|#)|medical records?)\b|\b(?:case|chart) ?#/i;
 const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|聯繫方式|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
-const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者)(?:姓名)?$/;
+const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者|聯絡人|联络人|聯繫人|联系人|負責人|负责人)(?:姓名)?$/;
 const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
@@ -467,11 +467,10 @@ function suggest(header, values, untitled) {
   const answers = values.map(text);
   const counts = new Map();
   for (const a of answers) counts.set(a, (counts.get(a) ?? 0) + 1);
-  // Personal data is mostly different from one answer to the next; Title
-  // Case answers or numbers that repeat are choices or counts.
-  const distinct = values.length < 4 || counts.size >= values.length / 2;
-  if (distinct && share(values, looksLikeName) >= 0.7) return { role: 'identifying', reason: 'names', confidence: LOW };
-  if (distinct && share(answers, (a) => LONG_NUMBER.test(a)) >= 0.7) return { role: 'identifying', reason: 'numbers', confidence: LOW };
+  // Names and long numbers, repeated or not (the same few coordinators
+  // answer again and again): before the choice and number rules.
+  if (share(values, looksLikeName) >= 0.7) return { role: 'identifying', reason: 'names', confidence: LOW };
+  if (share(answers, (a) => LONG_NUMBER.test(a)) >= 0.7) return { role: 'identifying', reason: 'numbers', confidence: LOW };
   if (scoreLike) {
     const stated = statedScale(header);
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
@@ -576,10 +575,13 @@ const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 // rows: the tab, row 0 the headers. since: count answers after this time.
 // comments: how many of the newest to keep. timeZone: the sheet's. roles:
 // the user's confirmed column roles. redacted: columns whose answers the
-// cache does not keep (identifying when they were read); guessed: those of
-// them that were only a guess, so the user is still asked; doubted: those
-// checked as comments or choices whose answers read as emails or phones.
-function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], guessed = [], doubted = [] } = {}) {
+// cache does not keep; hiddenAs: what the app suggested for each of them
+// when they were read (an unsure guess still asks, a checked column whose
+// answers read as emails stays flagged, an ignored date column stays one).
+// Roles whose answers, or numbers made of them, the board shows.
+const SHOWN = new Set(['comment', 'choice', 'score', 'number']);
+
+function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], hiddenAs = [] } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
@@ -603,15 +605,15 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   }
   out.responses = data.length;
   const hidden = new Set(redacted);
-  const unsure = new Set(guessed);
-  const doubts = new Set(doubted);
+  const was = new Map(hiddenAs.map((h) => [h.index, h]));
   // A hidden column's answers are not here to look at.
   const columns = headers.map((_, i) => (hidden.has(i) ? [] : data.map((r) => r[i]).filter((v) => !isEmpty(v))));
   const saved = matchRoles(headers, roles);
   const suggested = headers.map((h, i) => {
     if (!hidden.has(i)) return suggest(h, columns[i], untitled[i]);
-    if (doubts.has(i)) return { role: 'identifying', reason: 'answers', confidence: HIGH };
-    return { role: 'identifying', reason: 'hidden', confidence: unsure.has(i) ? LOW : HIGH };
+    const w = was.get(i);
+    if (!w) return { role: 'identifying', reason: 'hidden', confidence: HIGH };
+    return { role: w.role, confidence: w.confidence, ...(w.reason ? { reason: w.reason } : {}), ...(w.role === 'score' ? { low: w.low, high: w.high, scaleFrom: w.scaleFrom } : {}) };
   });
   const titles = new Map();
   for (const h of headers) titles.set(h, (titles.get(h) ?? 0) + 1);
@@ -653,7 +655,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
       needsChoice: !conf && sug.confidence === LOW,
       // Checked as answers to show, but they now read as emails or phone
       // numbers: kept off the board, and flagged, until checked again.
-      ...(conf && (role === 'comment' || role === 'choice') && sug.role === 'identifying' && sug.reason === 'answers' ? { doubt: true } : {}),
+      ...(conf && SHOWN.has(role) && sug.role === 'identifying' && sug.reason === 'answers' ? { doubt: true } : {}),
       ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}), ...(titles.get(header) > 1 ? { repeated: true } : {}),
     };
     if (role === 'score') {
@@ -765,8 +767,9 @@ function nextRun(now, lastOk) {
 // the decisions are here, where they are tested.
 
 const RETRY_MS = 30 * 60_000;
-// 3: an identifying guess keeps no answers either (2 kept them, off the board).
-const CACHE_VERSION = 3;
+// 4: ignored columns keep no answers either, and hidden columns keep what
+// was suggested for them (3 kept an ignored column's answers; 2 a guess's).
+const CACHE_VERSION = 4;
 
 const sameSheet = (cache, link) => Boolean(cache && link && cache.spreadsheetId === link.spreadsheetId && (cache.gid ?? null) === (link.gid ?? null));
 
@@ -793,14 +796,16 @@ function planFetch({ now, settings, cache, busy = false }) {
 // A good read -> the cache to keep. Identifying columns' answers are not
 // kept. "New since" counts answers after the newest one of the last read
 // that brought something new, so pressing Refresh twice does not reset it.
-// The columns whose answers the cache drops: every identifying one, sure,
-// confirmed or only guessed, and one checked as comments whose answers now
-// read as emails or phones. The cache names the guesses the user has not
-// chosen for yet, so the row still asks, and the doubted ones, so they
-// stay flagged.
-const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying' || c.doubt).map((c) => c.index);
-const guessesIn = (summary, hide) => hide.filter((i) => summary.columns[i] && !summary.columns[i].confirmed && summary.columns[i].suggested.confidence === LOW);
-const doubtsIn = (summary, hide) => hide.filter((i) => summary.columns[i]?.doubt);
+// The columns whose answers the cache drops: every identifying one (sure,
+// confirmed or only guessed), every ignored one with answers, and a checked
+// one whose answers now read as emails or phones. With them, what the app
+// suggested for each, so it reads the same after a restart.
+const toRedact = (summary) => summary.columns
+  .filter((c) => c.role === 'identifying' || c.doubt || (c.role === 'ignore' && (c.answers > 0 || c.hidden))).map((c) => c.index);
+const hiddenAsIn = (summary, hide) => hide.filter((i) => summary.columns[i]).map((i) => {
+  const { role, reason, confidence, low, high, scaleFrom } = summary.columns[i].suggested;
+  return { index: i, role, confidence, ...(reason ? { reason } : {}), ...(role === 'score' ? { low, high, scaleFrom } : {}) };
+});
 
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const first = summarise(got.rows, { timeZone: got.timeZone, roles });
@@ -811,7 +816,7 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
   return {
     version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null,
     tab: got.tab ?? null, timeZone: got.timeZone ?? null,
-    rows: redactRows(got.rows, hide), redacted: hide, guessed: guessesIn(first, hide), doubted: doubtsIn(first, hide),
+    rows: redactRows(got.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
     since: changed ? before : same ? prev.since ?? null : null,
     sinceFetchedAt: changed ? prev.fetchedAt : same ? prev.sinceFetchedAt ?? null : null,
@@ -828,7 +833,7 @@ function afterFailure(prev, err, { now, started, link }) {
     ...(known && err.detail ? { detail: err.detail } : {}),
   };
   const base = sameSheet(prev, link) ? prev
-    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], guessed: [], doubted: [], fetchedAt: null };
+    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], hiddenAs: [], fetchedAt: null };
   return { ...base, lastAttemptAt: started, lastError };
 }
 
@@ -837,14 +842,14 @@ function afterFailure(prev, err, { now, started, link }) {
 // until the next read brings them back.
 function reroleCache(cache, roles) {
   if (!cache?.rows) return cache;
-  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [], doubted: cache.doubted ?? [] });
+  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [] });
   const hide = [...new Set([...(cache.redacted ?? []), ...toRedact(s)])].sort((a, b) => a - b);
-  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, guessed: guessesIn(s, hide), doubted: doubtsIn(s, hide) };
+  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(s, hide) };
 }
 
 function summariseCache(cache, roles) {
   if (!cache?.rows) return null;
-  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [], doubted: cache.doubted ?? [] });
+  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [] });
 }
 
 // The cache file as read -> { cache, problem }. A cache that is not this
@@ -864,7 +869,9 @@ function validCache(raw, link) {
     && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId)
     && (raw.gid == null || Number.isInteger(raw.gid))
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
-    && [raw.guessed, raw.doubted].every((list) => list == null || (Array.isArray(list) && list.every((i) => Number.isInteger(i) && i >= 0)))
+    && (raw.hiddenAs == null || (Array.isArray(raw.hiddenAs) && raw.hiddenAs.every((h) => h && Number.isInteger(h.index) && h.index >= 0
+      && ROLES.includes(h.role) && (h.confidence === HIGH || h.confidence === LOW) && str(h.reason)
+      && (h.role !== 'score' || (Number.isInteger(h.low) && Number.isInteger(h.high) && typeof h.scaleFrom === 'string')))))
     && (e == null || (typeof e === 'object' && typeof e.kind === 'string' && typeof e.message === 'string' && num(e.at) && str(e.detail)))
     && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
     && !(raw.rows && raw.fetchedAt == null);
@@ -925,6 +932,15 @@ function changeSettings(current, change, { summary = null } = {}) {
   return { settings: next, sheetChanged, ...(note ? { note } : {}) };
 }
 
+// The reply to a columns save: a checked column whose answers read as
+// emails or phones stays hidden unless chosen Identifying or Ignore.
+function columnsReply(summary) {
+  const n = summary?.doubtful?.length ?? 0;
+  if (!n) return 'Columns saved.';
+  return n === 1 ? 'Kept hidden: its answers look like emails or phone numbers; choose Identifying or Ignore.'
+    : `Kept hidden: ${n} columns’ answers look like emails or phone numbers; choose Identifying or Ignore for them.`;
+}
+
 // Everything that needs the user's attention, as { label, detail }: the
 // label is safe on a shared screen, the detail shows only with privacy off.
 function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
@@ -944,7 +960,7 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     const unsure = summary.needsChoice ?? 0;
     if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`);
     const doubt = summary.doubtful?.length ?? 0;
-    if (doubt) add(`${doubt === 1 ? '1 column' : `${doubt} columns`} checked as comments or choices now look like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`);
+    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Field feedback → Check the columns)`);
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);
@@ -955,6 +971,6 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  summarise, unreadableText, checkRoles, checkSubmission, keyFileError, redactRows, nextRun, dateOf,
+  summarise, unreadableText, checkRoles, checkSubmission, columnsReply, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };

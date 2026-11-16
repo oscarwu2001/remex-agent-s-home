@@ -155,7 +155,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const unread = (s.unreadable?.scores ?? 0) + (s.unreadable?.numbers ?? 0) + (s.unreadable?.timestamps ?? 0);
   if (unread) left.push(`${plural(unread, 'answer')} could not be read and ${unread === 1 ? 'is' : 'are'} left out (see Needs attention).`);
   const doubt = s.doubtful?.length ?? 0;
-  if (doubt) left.push(`${plural(doubt, 'column')} checked as comments or choices now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
+  if (doubt) left.push(`${plural(doubt, 'column')} you checked now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
   return `${head}${hint}${checkNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
@@ -205,7 +205,7 @@ function rowTags(r) {
     r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.scaleFrom === 'answers' ? 'Scale guessed' : '',
     c.isNew ? 'New column, not checked' : '',
     c.repeated ? 'Repeated title' : '',
-    c.hidden && r.role && r.role !== 'identifying' ? 'Answers show after the next update' : '',
+    c.hidden && !c.doubt && r.role && r.role !== 'identifying' && r.role !== 'ignore' ? 'Answers show after the next update' : '',
     c.doubt ? 'Answers look like emails or phone numbers' : '',
   ].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
 }

@@ -2727,7 +2727,7 @@ $('field-settings').addEventListener('submit', async (e) => {
     const res = await bridge.fieldSet({ columns: roles }).catch((err) => ({ ok: false, error: err.message }));
     if (res.ok) {
       fieldUi.draft = {};
-      fieldUi.checkNote = 'Columns saved.';
+      fieldUi.checkNote = res.note ?? 'Columns saved.'; // or "Kept hidden: …" from the main process
     } else fieldUi.checkError = res.error;
     renderFieldSettings();
     setTimeout(renderFieldSettings, 600);

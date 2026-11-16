@@ -113,7 +113,7 @@ test('a checked comment column whose answers now look like emails is tagged in t
   for (const privacy of [true, false]) {
     assert.match(fieldColumnsHtml(field(s), { privacy }), /Answers look like emails or phone numbers/);
     const sheet = fieldSheetHtml(field(s), { privacy });
-    assert.match(sheet, /1 column checked as comments or choices now looks like emails or phone numbers/);
+    assert.match(sheet, /1 column you checked now looks like emails or phone numbers/);
     assert.doesNotMatch(sheet, /example\.org/);
   }
 });
@@ -125,4 +125,24 @@ test('a column whose answers the cache does not keep is not said to have no answ
   const html = fieldColumnsHtml(field(F.summariseCache(cache, [])), { privacy: false });
   assert.match(html, /Needs a choice/);
   assert.doesNotMatch(html, /No answers yet/);
+});
+
+test('an ignored column read back without its answers is not promised them after the next update', async () => {
+  const { fieldColumnsHtml } = await view();
+  const sheet = [['Timestamp', 'Visit date'], ['2026-11-10 09:00', '2026-11-02'], ['2026-11-11 09:00', '2026-11-05'], ['2026-11-12 09:00', '2026-11-09'], ['2026-11-13 09:00', '2026-11-12']];
+  const cache = F.afterFetch(null, { rows: sheet, tab: { id: 0, title: 'T' }, timeZone: 'UTC' }, { now: 1, started: 1, link: { spreadsheetId: 'C'.repeat(30), gid: 0 } });
+  assert.deepEqual(cache.redacted, [1]);
+  const html = fieldColumnsHtml(field(F.summariseCache(cache, [])), { privacy: false });
+  assert.match(html.split('<li').find((x) => x.includes('Visit date')), /<option value="ignore" selected>/);
+  assert.doesNotMatch(html, /Answers show after the next update/);
+});
+
+test('a flagged column read back from the cache is not promised its answers either', async () => {
+  const { fieldColumnsHtml } = await view();
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role: 'comment' }]);
+  const sheet = [['Timestamp', 'Anything else?'], ['2026-11-10 09:00', 'a@example.org'], ['2026-11-11 09:00', 'b@example.org'], ['2026-11-12 09:00', 'Fine']];
+  const cache = F.afterFetch(null, { rows: sheet, tab: { id: 0, title: 'T' }, timeZone: 'UTC' }, { now: 1, started: 1, link: { spreadsheetId: 'C'.repeat(30), gid: 0 }, roles });
+  const html = fieldColumnsHtml(field(F.summariseCache(cache, roles)), { privacy: false });
+  assert.match(html, /Answers look like emails or phone numbers/);
+  assert.doesNotMatch(html, /Answers show after the next update/);
 });

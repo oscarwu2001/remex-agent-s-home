@@ -707,7 +707,10 @@ app.whenReady().then(() => {
     }
     summariseField();
     fieldTick(); // reads now when on, set up and due
-    return { ok: true, ...(res.note ? { note: res.note } : {}) };
+    // After a columns save, the reply says if one stays hidden (its answers
+    // read as emails or phones) whatever was chosen for it.
+    const note = change && 'columns' in change ? fieldSurvey.columnsReply(fieldSummary) : res.note;
+    return { ok: true, ...(note ? { note } : {}) };
   });
   ipcMain.handle('home:field-choose-key', async () => {
     const res = await dialog.showOpenDialog(win, {

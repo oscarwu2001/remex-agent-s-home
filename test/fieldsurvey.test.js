@@ -437,9 +437,12 @@ test('names under headers no list knows are found by their shape', () => {
   const people = ['Ann Lee', 'Bo Chan', 'Cy Wu', 'Di Ho', 'Ed Ng', 'Fa Li'];
   const s = F.summarise(form(['Who filled this in?', '名前', 'Respondent', 'Rating (1-5)'], people.map((n, i) => [n, ['王小明', '陳大文', '林美玲', '張家豪', '李志明', '黃淑芬'][i], n, 4])));
   assert.deepEqual(s.identifying, ['Who filled this in?', '名前', 'Respondent']);
-  // Title Case answers that repeat are choices, not names; short comments are comments.
-  const c = F.summarise(form(['How was it?', 'Comments'], [['Very Easy', 'Works well'], ['Very Easy', '很好'], ['Quite Easy', 'Faster start-up'], ['Very Easy', '太慢了'], ['Quite Easy', 'Quieter fan']]));
-  assert.equal(roleOf(c, 'How was it?'), 'choice');
+  // Title Case answers have a name's shape even when they repeat: an unsure
+  // guess the user settles once. Answers in sentence case are a choice; short
+  // comments are comments.
+  const c = F.summarise(form(['How was it?', 'Comments', 'Overall'], [['Very Easy', 'Works well', 'Very easy'], ['Very Easy', '很好', 'Very easy'], ['Quite Easy', 'Faster start-up', 'Quite easy'], ['Very Easy', '太慢了', 'Very easy'], ['Quite Easy', 'Quieter fan', 'Quite easy']]));
+  assert.deepEqual([roleOf(c, 'How was it?'), col(c, 'How was it?').suggested.confidence], ['identifying', 'low']);
+  assert.equal(roleOf(c, 'Overall'), 'choice');
   assert.equal(roleOf(c, 'Comments'), 'comment');
 });
 
@@ -599,9 +602,9 @@ test('a saved cache is used only when it is whole and this sheet\'s', () => {
   assert.match(F.validCache([], LINK).problem, /could not be read/);
   // The first version kept names and emails: set aside, quietly, to be read again.
   assert.deepEqual(F.validCache({ rows: [], fetchedAt: 1 }, LINK), { cache: null, problem: null });
-  // Version 2 kept the answers of columns only guessed to be identifying: set aside too.
-  assert.deepEqual(F.validCache({ ...good, version: 2 }, LINK), { cache: null, problem: null });
-  assert.match(F.validCache({ ...good, guessed: ['x'] }, LINK).problem, /could not be read/);
+  // Versions 2 and 3 kept the answers of guessed or ignored columns: set aside too.
+  for (const version of [2, 3]) assert.deepEqual(F.validCache({ ...good, version }, LINK), { cache: null, problem: null });
+  assert.match(F.validCache({ ...good, hiddenAs: 'x' }, LINK).problem, /could not be read/);
 });
 
 test('Settings changes: an empty link keeps the saved one; a bad link or roles are refused', () => {
@@ -690,39 +693,45 @@ test('a guessed scale is a low-confidence suggestion that needs the user\'s choi
   assert.deepEqual(after.questions.map((q) => [q.scaleFrom, q.high]), [['confirmed', 10], ['confirmed', 5]]);
 });
 
-test('short answers shaped like names are at most an unsure guess, never surely identifying', () => {
-  const cases = [
-    ['使用心得', ['方便', '高效', '周到', '很好', '方便快速']],
-    ['What did you like most?', ['Tracking Accuracy', 'Screen Size', 'Easy Setup', 'Fast Boot', 'the holder']],
-    ['Best part', ['Tracking Accuracy', 'Screen Size', 'Easy Setup', 'Fast Boot', 'Good Support']],
-  ];
-  for (const [h, vals] of cases) {
-    const c = col(F.summarise(form([h], vals.map((v) => [v]))), h);
-    assert.ok(c.role === 'comment' || (c.role === 'identifying' && c.suggested.confidence === 'low' && c.needsChoice), `${h}: ${c.role}, ${c.suggested.confidence}`);
-  }
-  // Two of five start with a common family name: a comment, as it reads.
+// An unsure identifying guess: off the board, needs a choice, and nothing
+// of it in the cache, before or after a restart.
+const unsureHidden = (rows, h, roles = []) => {
+  const s = F.summarise(rows, { roles });
+  assert.deepEqual([roleOf(s, h), col(s, h).suggested.confidence, col(s, h).needsChoice, s.commentCount, s.choices.length], ['identifying', 'low', true, 0, 0], h);
+  const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
+  const k = col(s, h).index;
+  assert.ok(c.redacted.includes(k), h);
+  assert.ok(rows.slice(1).every((r) => r[k] == null || !JSON.stringify(c.rows).includes(JSON.stringify(r[k]))), `${h}: an answer is in the cache`);
+  assert.equal(col(F.summariseCache(c, roles), h).needsChoice, true, `${h}: read back from the cache`);
+};
+
+test('short answers shaped like names: Title Case phrases are an unsure guess, most Chinese comments are comments', () => {
   const zh = F.summarise(form(['使用心得'], [['方便'], ['高效'], ['周到'], ['很好'], ['方便快速']]));
-  assert.deepEqual([roleOf(zh, '使用心得'), zh.commentCount], ['comment', 5]);
+  // Three of five start with a common family name, under the 70% a guess needs.
+  assert.deepEqual([roleOf(zh, '使用心得'), col(zh, '使用心得').suggested.confidence, zh.commentCount], ['comment', 'high', 5]);
+  unsureHidden(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['the holder']]), 'What did you like most?');
+  unsureHidden(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]), 'Best part');
 });
 
-test('names found by their shape are an unsure guess under any title, and their answers are not kept', () => {
+test('names found by their shape are an unsure guess under any title, repeated or not; person titles are sure', () => {
   const names = [['Ann Lee'], ['Bo Chan'], ['Cy Wu'], ['Di Ho'], ['Ed Ng']];
-  for (const h of ['Who filled this in?', 'Notes', 'Nombre']) {
-    const s = F.summarise(form([h], names));
-    assert.deepEqual([roleOf(s, h), col(s, h).suggested.confidence, col(s, h).needsChoice], ['identifying', 'low', true], h);
+  for (const h of ['Who filled this in?', 'Notes', 'Nombre']) unsureHidden(form([h], names), h);
+  // Ten answers from three coordinators: names that repeat are still names, not a choice.
+  const en = ['Ann Lee', 'Bo Chan', 'Cy Wu', 'Ann Lee', 'Bo Chan', 'Ann Lee', 'Cy Wu', 'Ann Lee', 'Bo Chan', 'Ann Lee'].map((n) => [n]);
+  const tw = ['王小明', '陳美玲', '林志豪', '王小明', '陳美玲', '王小明', '林志豪', '王小明', '陳美玲', '王小明'].map((n) => [n]);
+  const cn = ['王小明', '陈美玲', '林志豪', '王小明', '陈美玲', '王小明', '林志豪', '王小明', '陈美玲', '王小明'].map((n) => [n]);
+  unsureHidden(form(['Site coordinator'], en), 'Site coordinator');
+  unsureHidden(form(['窗口'], tw), '窗口');
+  unsureHidden(form(['对接人'], cn), '对接人');
+  // Contact people and those in charge, by title: sure, and kept out of the cache.
+  for (const [h, vals] of [['聯絡人', tw], ['負責人', tw], ['联系人', cn], ['负责人', cn], ['Contact person', en]]) {
+    const s = F.summarise(form([h], vals));
+    assert.deepEqual([roleOf(s, h), s.choices.length], ['identifying', 0], h);
+    const c = F.afterFetch(null, got(form([h], vals)), { now: 1, started: 1, link: LINK });
+    assert.deepEqual(c.redacted, [1], h);
+    assert.ok(!JSON.stringify(c.rows).includes(vals[0][0]), h);
   }
-  // Contact people and those in charge, in Chinese: no title word needed.
-  const zhNames = [['王小明'], ['陳美玲'], ['林志豪'], ['黃淑芬']];
-  for (const h of ['聯絡人', '負責人']) {
-    const rows = form([h], zhNames);
-    const s = F.summarise(rows);
-    assert.deepEqual([roleOf(s, h), col(s, h).suggested.confidence, col(s, h).needsChoice, s.commentCount], ['identifying', 'low', true, 0], h);
-    const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
-    assert.deepEqual([c.redacted, c.guessed], [[1], [1]], h);
-    assert.ok(!JSON.stringify(c.rows).includes('王小明'), h);
-    // Read back from the cache, the row still asks for a choice.
-    assert.equal(col(F.summariseCache(c, []), h).needsChoice, true, h);
-  }
+  for (const h of ['聯絡人', '負責人', '联系人', '负责人']) assert.equal(col(F.summarise(form([h], tw)), h).suggested.confidence, 'high', h);
   const zh = F.summarise(form(['填寫人'], [['王小明'], ['陳大文'], ['林美玲']]));
   assert.deepEqual([roleOf(zh, '填寫人'), col(zh, '填寫人').suggested.confidence], ['identifying', 'high']);
   // Clear labels and email-shaped answers are sure.
@@ -732,11 +741,10 @@ test('names found by their shape are an unsure guess under any title, and their 
 
 test('phone numbers the sheet stored as numbers are not averaged: an unsure guess, or sure under a contact title', () => {
   const phones = [[912345678], [933222111], [987654321], [955000111]];
-  const s = F.summarise(form(['How can we reach you?'], phones));
-  assert.deepEqual([roleOf(s, 'How can we reach you?'), col(s, 'How can we reach you?').suggested.confidence], ['identifying', 'low']);
-  assert.deepEqual(s.numbers, []);
-  const c = F.afterFetch(null, got(form(['How can we reach you?'], phones)), { now: 1, started: 1, link: LINK });
-  assert.ok(!JSON.stringify(c.rows).includes('912345678'));
+  unsureHidden(form(['How can we reach you?'], phones), 'How can we reach you?');
+  assert.deepEqual(F.summarise(form(['How can we reach you?'], phones)).numbers, []);
+  // The same few people answering again: still phone numbers.
+  unsureHidden(form(['How can we reach you?'], [...phones, ...phones, [912345678]]), 'How can we reach you?');
   for (const h of ['聯繫方式', '联系方式']) {
     const t = F.summarise(form([h], phones));
     assert.deepEqual([roleOf(t, h), col(t, h).suggested.confidence], ['identifying', 'high'], h);
@@ -752,42 +760,70 @@ test('a column wrongly guessed identifying and then chosen a comment gets its an
   assert.deepEqual([roleOf(s, 'Patient positioning issues'), col(s, 'Patient positioning issues').suggested.confidence], ['identifying', 'low']);
   assert.equal(roleOf(s, 'Patient comfort (1-5)'), 'score');
   assert.equal(s.commentCount, 0);
-  // Unsure or not, an identifying guess keeps nothing on disk.
+  // Unsure or not, an identifying guess keeps nothing on disk, and still asks after a restart.
   const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
-  assert.deepEqual([c.redacted, c.guessed], [[1, 2], [1]]);
+  assert.deepEqual(c.redacted, [1, 2]);
   assert.ok(!JSON.stringify(c.rows).includes('Arm board slipped'));
   assert.ok(!JSON.stringify(c.rows).includes('@example.com'));
+  assert.deepEqual(F.summariseCache(c, []).columns.map((k) => k.needsChoice), [false, true, false, false]);
   // Chosen as a comment: nothing to show until the next read, and the row says so.
   const asComment = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Patient positioning issues', index: 1, role: 'comment' },
     { header: 'Email address', index: 2, role: 'identifying' }, { header: 'Patient comfort (1-5)', index: 3, role: 'score', low: 1, high: 5 }]);
   const now = F.summariseCache(F.reroleCache(c, asComment), asComment);
   assert.deepEqual([col(now, 'Patient positioning issues').hidden, col(now, 'Patient positioning issues').needsChoice, now.commentCount], [true, false, 0]);
-  assert.deepEqual(F.reroleCache(c, asComment).guessed, []);
   const next = F.afterFetch(F.reroleCache(c, asComment), got(rows), { now: 2, started: 2, link: LINK, roles: asComment });
   assert.deepEqual(next.redacted, [2]);
   assert.equal(F.summariseCache(next, asComment).commentCount, 2);
 });
 
-test('a column checked as comments whose answers turn into emails is kept off the board and flagged', () => {
-  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role: 'comment' }]);
+test('a checked column whose answers turn into emails is kept off the board, out of the cache and flagged', () => {
+  const R = (role, extra = {}) => F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role, ...extra }]);
   const rows = form(['Anything else?'], [['Bigger font'], ['Quieter fan'], ['a.b@example.org'], ['c.d@example.org'], ['e.f@example.org']]);
-  const s = F.summarise(rows, { roles });
-  assert.equal(col(s, 'Anything else?').role, 'comment');
-  assert.equal(col(s, 'Anything else?').doubt, true);
-  assert.deepEqual([s.commentCount, s.comments.length, s.doubtful], [0, 0, ['Anything else?']]);
-  const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
-  assert.ok(lines.some((l) => /checked as comments or choices now look like emails or phone numbers/.test(l)), lines.join('\n'));
-  // The emails are not kept either, and the cache still knows why the column is held back.
-  const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
-  assert.deepEqual([c.redacted, c.doubted], [[1], [1]]);
-  assert.ok(!JSON.stringify(c.rows).includes('@example.org'));
-  const again = F.summariseCache(c, roles);
-  assert.deepEqual([col(again, 'Anything else?').doubt, again.doubtful], [true, ['Anything else?']]);
-  assert.deepEqual(F.reroleCache(c, roles).doubted, [1]);
-  assert.match(F.validCache({ ...c, doubted: [-1] }, LINK).problem, /could not be read/);
+  for (const roles of [R('comment'), R('choice'), R('score', { low: 1, high: 5 }), R('number')]) {
+    const role = roles[1].role;
+    const s = F.summarise(rows, { roles });
+    assert.deepEqual([col(s, 'Anything else?').role, col(s, 'Anything else?').doubt], [role, true], role);
+    assert.deepEqual([s.commentCount, s.choices.length, s.questions.length, s.numbers.length, s.doubtful], [0, 0, 0, 0, ['Anything else?']], role);
+    const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
+    assert.ok(lines.includes('Field feedback: 1 column you checked now looks like emails or phone numbers; its answers are hidden and not stored (Settings → Field feedback → Check the columns)'), `${role}: ${lines.join('\n')}`);
+    // Saved like that, the reply says it stays hidden.
+    assert.equal(F.columnsReply(s), 'Kept hidden: its answers look like emails or phone numbers; choose Identifying or Ignore.');
+    const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
+    assert.deepEqual(c.redacted, [1], role);
+    assert.ok(!JSON.stringify(c.rows).includes('@example.org'), role);
+    const again = F.summariseCache(F.reroleCache(c, roles), roles);
+    assert.deepEqual([col(again, 'Anything else?').doubt, again.doubtful], [true, ['Anything else?']], role);
+  }
+  // Chosen identifying or ignore: nothing left to flag, and nothing kept.
+  for (const roles of [R('identifying'), R('ignore')]) {
+    const s = F.summarise(rows, { roles });
+    assert.deepEqual([s.doubtful, F.columnsReply(s)], [[], 'Columns saved.'], roles[1].role);
+    const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK, roles });
+    assert.ok(!JSON.stringify(c.rows).includes('@example.org'), roles[1].role);
+  }
   // Before the emails came, nothing to say.
-  const before = F.summarise(form(['Anything else?'], [['Bigger font'], ['Quieter fan']]), { roles });
+  const before = F.summarise(form(['Anything else?'], [['Bigger font'], ['Quieter fan']]), { roles: R('comment') });
   assert.deepEqual([col(before, 'Anything else?').doubt ?? false, before.commentCount], [false, 2]);
+});
+
+test('an ignored column keeps no answers in the cache, and reads the same after a restart', () => {
+  const rows = form(['Anything else?', 'Visit date'], [['Bigger font', '2026-11-02'], ['Quieter fan', '2026-11-05'], ['Fine', '2026-11-09'], ['Ok', '2026-11-12'], ['Good', '2026-11-13']]);
+  const s = F.summarise(rows);
+  assert.deepEqual([roleOf(s, 'Visit date'), col(s, 'Visit date').suggested.reason], ['ignore', 'dates']);
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role: 'ignore' }, { header: 'Visit date', index: 2, role: 'ignore' }]);
+  // Only suggested: the date column's answers go; read back, it is still an ignored date column.
+  const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
+  assert.deepEqual(c.redacted, [2]);
+  assert.ok(!JSON.stringify(c.rows).includes('2026-11-05'));
+  const back = F.summariseCache(c, []);
+  assert.deepEqual([roleOf(back, 'Visit date'), col(back, 'Visit date').suggested.reason, col(back, 'Visit date').needsChoice], ['ignore', 'dates', false]);
+  // Chosen ignore: the comments go too.
+  const ig = F.reroleCache(c, roles);
+  assert.deepEqual(ig.redacted, [1, 2]);
+  assert.ok(!JSON.stringify(ig.rows).includes('Quieter fan'));
+  // A cache whose notes on hidden columns do not read is set aside.
+  assert.match(F.validCache({ ...c, hiddenAs: [{ index: 'x', role: 'ignore', confidence: 'high' }] }, LINK).problem, /could not be read/);
+  assert.match(F.validCache({ ...c, hiddenAs: [{ index: 2, role: 'nope', confidence: 'high' }] }, LINK).problem, /could not be read/);
 });
 
 test('columns waiting for a choice are a Needs attention line, privacy mode or not', () => {
