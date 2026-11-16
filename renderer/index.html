@@ -87,6 +87,11 @@
       <div id="field-body"></div>
     </section>
 
+    <section class="board-section line-section" id="line" hidden aria-labelledby="line-h">
+      <h2 id="line-h">LINE</h2>
+      <div id="line-body"></div>
+    </section>
+
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
 
     <section class="board-section usage" id="usage" hidden aria-labelledby="usage-h">
@@ -226,7 +231,13 @@
             <p class="hint"><strong>Git status folder</strong> (pull only): your other computers post a short status every hour, 9:00–19:00, to the <code>agents-status</code> branch, with no Claude tokens. Clone that branch here and pick the clone; the app pulls it every 10 minutes and writes nothing.</p>
             <p class="hint">Sessions in the cloud (claude.ai, or the Claude app's cloud tasks) keep no files on your computers, so they can't be shown here. Code-tab sessions and Cowork tasks that run on a computer are shown.</p>
           </section>
-          <!-- Later connections (such as LINE) go here, as their own section. -->
+
+          <section class="settings-group" aria-labelledby="line-settings-h">
+            <h4 id="line-settings-h" tabindex="-1">LINE chats</h4>
+            <p class="hint">Requests for you in your LINE group chats, on the board: messages that mention your names or your keywords, and what you said you would do. LINE cannot be read directly, so you save a chat from the LINE desktop app into a folder and the app reads it there. Only the chats you tick are read; the files are never changed, and nothing goes online. Chat names, senders and messages are hidden while privacy mode is on.</p>
+            <label class="switch"><input type="checkbox" id="opt-line"> <span>Read the LINE chats I save (stays on this computer)</span></label>
+            <div class="field-settings line-settings" id="line-settings"></div>
+          </section>
         </div>
       </section>
 
@@ -267,7 +278,7 @@
           <section class="settings-group" aria-labelledby="demo-h">
             <h4 id="demo-h" tabindex="-1">Demo</h4>
             <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
-            <p class="hint">Made-up sessions, helpers and sample field feedback, to try the app out. Your own sessions show again when it is off.</p>
+            <p class="hint">Made-up sessions, helpers, sample field feedback and LINE items, to try the app out. Your own sessions show again when it is off.</p>
           </section>
 
           <section class="settings-group" aria-labelledby="update-h">
@@ -305,6 +316,16 @@
       </button>
     </header>
     <div id="field-sheet-body"></div>
+  </section>
+
+  <section class="field-sheet line-sheet" id="line-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="line-sheet-h" tabindex="-1">
+    <header class="settings-head">
+      <h2 id="line-sheet-h">Send to agent</h2>
+      <button type="button" class="icon-btn" id="line-sheet-close" aria-label="Close Send to agent" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div id="line-sheet-body"></div>
   </section>
 
   <script type="module" src="app.js"></script>

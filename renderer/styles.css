@@ -845,3 +845,53 @@ body.no-select, body.no-select * { user-select: none; }
 .field-comment-text { margin: 0 0 2px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .field-choice { display: grid; gap: 2px; margin: 0 0 var(--s-2); font-size: 13px; }
 .field-sheet .muted { margin: 0; }
+
+/* ---- LINE chats ---------------------------------------------------------------- */
+
+.line-head { margin: 0 0 var(--s-2); font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.line-items { list-style: none; margin: 0 0 var(--s-2); padding: 0; }
+.line-item { padding: var(--s-2) 0; border-top: 1px solid var(--line); }
+.line-item:first-child { border-top: 0; padding-top: 0; }
+.line-item p { margin: 0; }
+.line-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px var(--s-2); font-size: 13px; color: var(--ink); }
+.line-reason { display: inline-flex; align-items: center; gap: var(--s-1); min-width: 0; overflow-wrap: anywhere; }
+.line-when { flex: none; font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.line-from { margin-top: 2px !important; font-size: 12px; color: var(--ink-muted); overflow-wrap: anywhere; }
+.line-chat { color: var(--ink); }
+/* A long message is cut at six lines on the board; the sheet has all of it. */
+.line-text {
+  margin-top: var(--s-1) !important; font-size: 14px; line-height: 1.45; color: var(--ink);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden;
+}
+.line-actions { display: flex; flex-wrap: wrap; gap: 0 var(--s-1); margin: var(--s-1) 0 0 calc(-1 * var(--s-2)); }
+.line-act { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; }
+.line-add { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-sunk); }
+.line-add .field input, .line-add .field select { width: 100%; min-width: 0; }
+.line-add .line-source { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.line-section .form-actions > .link-btn:first-child { margin-left: calc(-1 * var(--s-2)); }
+/* Settings: the chats in the folder, each with its tick. */
+.line-chats { border: 0; margin: 0; padding: 0; min-width: 0; }
+.line-chats legend { padding: 0; margin-bottom: var(--s-1); font-size: 13px; color: var(--ink-muted); }
+.line-chats ul { list-style: none; margin: 0; padding: 0; }
+/* Name, what it holds, then its tick on a line of its own: the panel is narrow. */
+.line-chat-row { display: grid; gap: 0; padding: var(--s-1) 0; border-top: 1px solid var(--line); }
+.line-chat-row:first-child { border-top: 0; }
+.line-chat-name { font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.line-chat-what { font-size: 12px; color: var(--ink-muted); }
+.line-words { display: grid; gap: var(--s-2); }
+.line-words .field input { width: 100%; min-width: 0; }
+/* The Send to agent sheet. */
+.line-send { display: grid; gap: var(--s-3); }
+.line-send .hint, .line-send .form-error { margin: 0; }
+.line-send textarea {
+  width: 100%; min-height: 220px; resize: vertical; padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-raised); color: var(--ink);
+  font: 13px/1.5 var(--font); overflow-wrap: anywhere;
+}
+.line-folder-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-2); }
+.line-folder-row .field { flex: 1 1 240px; min-width: 0; }
+.line-folder-row select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.line-run { gap: var(--s-2); }
+.line-run .field select { width: 100%; }
+.line-where { display: inline-flex; align-items: center; gap: var(--s-2); margin: 0; font-size: 14px; color: var(--ink); }

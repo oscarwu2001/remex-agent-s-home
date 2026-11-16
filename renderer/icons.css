@@ -199,3 +199,8 @@
 .link-btn { min-height: 32px; padding: 0 4px; border: 0; background: none; color: var(--accent); font: 500 12.5px var(--font); cursor: pointer; border-radius: var(--r-sm); }
 .link-btn:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 .link-btn.small { min-height: 28px; font-size: 12px; }
+
+/* LINE chats: why an item is listed (a glyph of its own, with words). */
+.line-glyph { color: var(--accent); }
+.line-act .ico { width: 14px; height: 14px; }
+.line-where .ico { color: var(--ink-muted); }

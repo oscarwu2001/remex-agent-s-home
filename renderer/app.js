@@ -15,6 +15,7 @@ import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, problemLabel, age as fieldAge } from './field-view.js';
+import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices } from './line-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1359,6 +1360,7 @@ function render(force = false) {
   $('census').textContent = renderCensus(snapshot);
   renderProjects();
   renderField();
+  renderLine();
   $('running-head').innerHTML = `<span class="badges">${running.badges}</span>`;
   renderUsage(snapshot);
   $('source').textContent = renderSource(snapshot);
@@ -1367,7 +1369,8 @@ function render(force = false) {
   $('problems').hidden = problems.length === 0;
   $('problem-list').innerHTML = problems
     // A fix button keeps its focus across redraws by its data-key.
-    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
+    // LINE chats' fix opens its Settings (data-settings); the others are field feedback's.
+    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix === 'line' ? ` <button type="button" class="link-btn" data-settings="line-settings-h" data-key="problem-fix-${i}">Open Settings</button>` : p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
@@ -2792,6 +2795,315 @@ setInterval(() => {
   if (!$('settings').hidden) renderFieldSettings();
 }, 1000);
 
+// ---- LINE chats -----------------------------------------------------------------
+//
+// What in the user's LINE chats concerns them (snapshot.line, or the demo's
+// sample). The main process reads the exports and starts Claude; this
+// shows the items and passes on the user's choices.
+
+// adding: the item whose add form is open, with what is typed in it;
+// all: every item shown; error/errorHash: the last button's failure.
+const lineUi = { adding: null, todo: null, project: null, all: false, error: '', errorHash: null, note: '' };
+// names/keywords: what is typed in Settings, kept across redraws until saved.
+const lineSettingsUi = { error: '', note: '', names: null, keywords: null };
+const lineDemoMarks = new Set(); // the demo's added and dismissed items, until it is turned off
+let lineSwitchedAt = 0;
+let lineSend = null; // the open sheet: { item, prompt, cwd, session, status, busy, browsed }
+let lineTargets = null; // { sessions, why } once asked
+let lineOpener;
+const lineState = () => {
+  const l = snapshot.line;
+  return l?.demo ? { ...l, items: l.items.filter((it) => !lineDemoMarks.has(it.hash)) } : l;
+};
+const lineProjects = () => (prefs.demo ? demoProj.snapshot() : snapshot.projects)?.list ?? [];
+function renderLine() {
+  const l = lineState();
+  $('line').hidden = !l?.enabled;
+  // Privacy on: nothing to read or act on, so open forms and the sheet close.
+  if (prefs.private || !l?.enabled) {
+    lineUi.adding = null;
+    if (!$('line-sheet').hidden) setLineSheet(false);
+  }
+  if (lineUi.adding && !l.items.some((it) => it.hash === lineUi.adding)) lineUi.adding = null;
+  if (!l?.enabled) return;
+  // The add form shows what the user typed, not the draft, once they type.
+  const item = l.items?.find((it) => it.hash === lineUi.adding);
+  const shown = item && lineUi.todo != null ? { ...l, items: l.items.map((it) => (it === item ? { ...it, draft: { ...it.draft, text: lineUi.todo } } : it)) } : l;
+  paint($('line-body'), lineHtml(shown, { privacy: prefs.private, ui: lineUi, projects: lineProjects() }));
+  const sel = lineUi.adding && $(`line-project-${lineUi.adding}`);
+  if (sel && lineUi.project && sel.value !== lineUi.project) sel.value = lineUi.project;
+}
+function renderLineSettings() {
+  const l = snapshot.line;
+  const online = Boolean(bridge.lineSet);
+  if (Date.now() - lineSwitchedAt > 1500) $('opt-line').checked = Boolean(l?.enabled);
+  $('opt-line').disabled = !online || Boolean(l?.demo);
+  const shown = l?.enabled ? {
+    ...l,
+    names: lineSettingsUi.names != null ? [lineSettingsUi.names] : l.names,
+    keywords: lineSettingsUi.keywords != null ? [lineSettingsUi.keywords] : l.keywords,
+  } : l;
+  paint($('line-settings'), lineSettingsHtml(shown, { privacy: prefs.private, online, state: lineSettingsUi }));
+}
+// The sheet is modal like the field feedback one: the board and the map
+// behind it are inert until it closes.
+function setLineSheet(open) {
+  if (open === !$('line-sheet').hidden) return;
+  $('line-sheet').hidden = !open;
+  for (const el of document.querySelectorAll('.board, .stage')) el.inert = open;
+  if (open) {
+    lineOpener = document.activeElement;
+    paintLineSheet();
+    $('line-prompt')?.focus();
+    $('line-prompt')?.setSelectionRange(0, 0);
+  } else {
+    lineSend = null;
+    // The board may have been redrawn meanwhile: find the opener by its key.
+    const key = lineOpener?.dataset?.key;
+    const back = lineOpener?.isConnected ? lineOpener : key && $('line-body').querySelector(`[data-key="${CSS.escape(key)}"]`);
+    (back || $('line-body').querySelector('button'))?.focus();
+    lineOpener = undefined;
+  }
+}
+// The sheet is drawn only when something in it changes (never on a timer),
+// after taking what the user typed or chose, so nothing they edit is lost.
+function paintLineSheet() {
+  if (!lineSend) return;
+  if ($('line-prompt')) {
+    lineSend.prompt = $('line-prompt').value;
+    lineSend.cwd = $('line-cwd').value;
+    if ($('line-session')) lineSend.session = $('line-session').value;
+  }
+  const at = document.activeElement?.id;
+  $('line-sheet-body').innerHTML = lineSheetHtml(lineSend, { folders: folderChoices(lineProjects(), lineSend.browsed), targets: lineTargets });
+  if (at && $(at) && $('line-sheet').contains($(at))) $(at).focus({ preventScroll: true });
+}
+async function openLineSend(hash) {
+  const item = lineState()?.items?.find((it) => it.hash === hash);
+  if (!item || prefs.private) return;
+  lineSend = { item, prompt: item.prompt, cwd: '', session: '', status: null, busy: false, browsed: [] };
+  lineTargets = null;
+  setLineSheet(true);
+  lineTargets = snapshot.demo || !bridge.lineTargets ? { sessions: ['work', 'notes'], why: null }
+    : await bridge.lineTargets().catch((err) => ({ sessions: [], why: `WSL could not be asked for its tmux sessions: ${err.message}` }));
+  lineSend && (lineSend.session = lineSend.session || lineTargets.sessions[0] || '');
+  paintLineSheet();
+}
+async function lineMark(hash, what) {
+  if (snapshot.demo) {
+    lineDemoMarks.add(hash);
+    return { ok: true };
+  }
+  if (!bridge.lineSet) return { ok: false, error: 'The browser preview cannot save this; it works in the app.' };
+  return bridge.lineSet({ mark: { hash, what } }).catch((err) => ({ ok: false, error: err.message }));
+}
+async function lineAction(act, hash) {
+  lineUi.error = '';
+  lineUi.note = '';
+  if (act === 'settings') showInSettings('line-settings-h');
+  else if (act === 'choose-folder' && (snapshot.demo || !bridge.lineChooseFolder)) {
+    lineSettingsUi.note = snapshot.demo ? 'The demo chooses no folder.' : 'The preview cannot choose a folder; this works in the app.';
+    renderLineSettings();
+    return;
+  } else if (act === 'privacy') {
+    showInSettings('screen-h');
+    $('opt-private').focus();
+  } else if (act === 'more' || act === 'fewer') lineUi.all = act === 'more';
+  else if (act === 'add') {
+    const open = lineUi.adding === hash;
+    Object.assign(lineUi, { adding: open ? null : hash, todo: null, project: null });
+    renderLine();
+    if (!open) $(`line-todo-${hash}`)?.focus();
+    return;
+  } else if (act === 'cancel-add') {
+    lineUi.adding = null;
+    renderLine();
+    document.querySelector(`[data-key="line-add-${CSS.escape(hash)}"]`)?.focus();
+    return;
+  } else if (act === 'dismiss') {
+    const res = await lineMark(hash, 'dismissed');
+    if (!res.ok) Object.assign(lineUi, { error: `Not dismissed: ${res.error}`, errorHash: hash });
+    else lineUi.note = 'Dismissed. It will not be listed again.';
+  } else if (act === 'send') {
+    openLineSend(hash);
+    return;
+  } else if (act === 'choose-folder') {
+    const res = await bridge.lineChooseFolder().catch((err) => ({ ok: false, error: err.message }));
+    lineSettingsUi.error = res.ok || res.canceled ? '' : res.error;
+    renderLineSettings();
+    setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+    return;
+  }
+  renderLine();
+  setTimeout(renderLine, 600);
+  if (act === 'dismiss') $('line-body').querySelector('.line-act, [data-line]')?.focus({ preventScroll: true });
+}
+for (const id of ['line-body', 'line-settings']) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-line]');
+    if (b && !b.disabled) lineAction(b.dataset.line, b.dataset.hash);
+  });
+}
+// What is typed in the add form survives the board's redraws.
+$('line-body').addEventListener('input', (e) => {
+  if (e.target.id?.startsWith('line-todo-')) lineUi.todo = e.target.value;
+});
+$('line-body').addEventListener('change', (e) => {
+  if (e.target.id?.startsWith('line-project-')) lineUi.project = e.target.value;
+});
+$('line-body').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target.closest('form.line-add');
+  if (!form) return;
+  const hash = form.dataset.hash;
+  const text = $(`line-todo-${hash}`).value.trim();
+  const project = $(`line-project-${hash}`).value;
+  if (!text) {
+    Object.assign(lineUi, { error: 'Type the to-do first.', errorHash: hash });
+    renderLine();
+    return;
+  }
+  let res;
+  if (snapshot.demo) {
+    res = await demoProj.change({ op: 'add-todo', project, text });
+    if (res.ok) lineDemoMarks.add(hash);
+  } else if (!bridge.lineAdd) res = { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
+  else res = await bridge.lineAdd({ hash, project, text }).catch((err) => ({ ok: false, error: err.message }));
+  if (res.ok) {
+    const name = lineProjects().find((p) => p.id === project)?.name ?? 'the project';
+    Object.assign(lineUi, { adding: null, todo: null, project: null, note: res.note ?? `Added to ${name}.` });
+    renderProjects();
+  } else Object.assign(lineUi, { error: `Not added: ${res.error}`, errorHash: hash });
+  renderLine();
+  setTimeout(() => { renderLine(); renderProjects(); }, 600);
+  if (res.ok) $('line-body').querySelector('[data-line]')?.focus({ preventScroll: true });
+});
+$('line-settings').addEventListener('input', (e) => {
+  if (e.target.id === 'line-names') lineSettingsUi.names = e.target.value;
+  if (e.target.id === 'line-keywords') lineSettingsUi.keywords = e.target.value;
+});
+$('line-settings').addEventListener('change', async (e) => {
+  const tick = e.target.closest('input[type="checkbox"][data-chat]');
+  if (!tick) return;
+  if (snapshot.demo || !bridge.lineSet) {
+    tick.checked = !tick.checked;
+    lineSettingsUi.note = snapshot.demo ? 'The demo saves nothing; with your own folder this ticks the chat.' : 'The preview cannot save; this works in the app.';
+    renderLineSettings();
+    return;
+  }
+  const res = await bridge.lineSet({ tick: { chat: tick.dataset.chat, on: tick.checked } }).catch((err) => ({ ok: false, error: err.message }));
+  lineSettingsUi.error = res.ok ? '' : `Not saved: ${res.error}`;
+  if (!res.ok) tick.checked = !tick.checked;
+  renderLineSettings();
+  setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+});
+$('line-settings').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (e.target.id !== 'line-words-form') return;
+  if (snapshot.demo || !bridge.lineSet) {
+    lineSettingsUi.note = snapshot.demo ? 'The demo saves nothing; with your own folder this saves your names and keywords.' : 'The preview cannot save; this works in the app.';
+    renderLineSettings();
+    return;
+  }
+  const res = await bridge.lineSet({ names: $('line-names').value, keywords: $('line-keywords').value }).catch((err) => ({ ok: false, error: err.message }));
+  lineSettingsUi.error = res.ok ? '' : `Not saved: ${res.error}`;
+  if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: 'Names and keywords saved.' });
+  renderLineSettings();
+  setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+});
+$('opt-line').addEventListener('change', async (e) => {
+  if (!bridge.lineSet) return;
+  lineSwitchedAt = Date.now();
+  const res = await bridge.lineSet({ enabled: e.target.checked }).catch((err) => ({ ok: false, error: err.message }));
+  lineSettingsUi.error = res.ok ? '' : res.error;
+  if (!res.ok) lineSwitchedAt = 0;
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '' });
+  Object.assign(lineUi, { adding: null, todo: null, project: null, note: '', error: '' });
+  renderLineSettings();
+  setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+});
+$('line-sheet-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-line="browse"]');
+  if (!b || !lineSend) return;
+  const res = snapshot.demo || !bridge.lineBrowse ? { ok: false, error: snapshot.demo ? 'The demo browses no folders.' : 'The browser preview cannot browse; this works in the app.' }
+    : await bridge.lineBrowse().catch((err) => ({ ok: false, error: err.message }));
+  if (res.canceled || !lineSend) return;
+  paintLineSheet(); // take what is typed first
+  if (res.ok) {
+    lineSend.browsed = [...new Set([...lineSend.browsed, res.path])];
+    lineSend.cwd = res.path;
+    lineSend.status = null;
+  } else lineSend.status = { ok: false, text: res.error };
+  $('line-sheet-body').innerHTML = lineSheetHtml(lineSend, { folders: folderChoices(lineProjects(), lineSend.browsed), targets: lineTargets });
+  $('line-browse')?.focus();
+});
+$('line-sheet-body').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!lineSend || lineSend.busy) return;
+  paintLineSheet();
+  const target = lineTargets?.sessions?.length ? 'tmux' : 'wt';
+  const req = { hash: lineSend.item.hash, prompt: lineSend.prompt, cwd: lineSend.cwd, target, session: lineSend.session };
+  if (!req.cwd) {
+    lineSend.status = { ok: false, text: 'Choose a folder first.' };
+    paintLineSheet();
+    $('line-cwd')?.focus();
+    return;
+  }
+  if (!req.prompt.trim()) {
+    lineSend.status = { ok: false, text: 'The prompt is empty.' };
+    paintLineSheet();
+    return;
+  }
+  if (snapshot.demo || !bridge.lineStart) {
+    lineSend.status = { ok: Boolean(snapshot.demo), text: snapshot.demo ? `The demo starts nothing. In the app this opens ${target === 'tmux' ? `a new tmux window in “${req.session}”` : 'a new Windows Terminal tab'} and starts Claude there.` : 'The browser preview cannot start Claude; this works in the app.' };
+    paintLineSheet();
+    return;
+  }
+  lineSend.busy = true;
+  lineSend.status = null;
+  paintLineSheet();
+  const res = await bridge.lineStart(req).catch((err) => ({ ok: false, error: err.message }));
+  if (!lineSend) return;
+  lineSend.busy = false;
+  lineSend.status = res.ok ? { ok: true, text: `Started in ${res.label}.` } : { ok: false, text: res.error };
+  paintLineSheet();
+  $('line-start')?.focus();
+});
+$('line-sheet-close').addEventListener('click', () => setLineSheet(false));
+document.addEventListener('pointerdown', (e) => {
+  if ($('line-sheet').hidden || $('line-sheet').contains(e.target)) return;
+  setLineSheet(false);
+  // The press then moves focus to the page itself; put it back on what
+  // setLineSheet just focused, unless the press landed on a control.
+  const back = document.activeElement;
+  setTimeout(() => {
+    if (document.activeElement === document.body) back?.focus({ preventScroll: true });
+  }, 0);
+});
+$('line-sheet').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    setLineSheet(false);
+  } else if (e.key === 'Tab') {
+    // Tab and Shift+Tab go round inside the sheet.
+    const stops = [...$('line-sheet').querySelectorAll('button, select, input, textarea, [tabindex="0"]')].filter((el) => !el.disabled && el.offsetParent);
+    if (!stops.length) return;
+    const [first, last] = [stops[0], stops[stops.length - 1]];
+    const at = document.activeElement;
+    if (e.shiftKey && (at === first || at === $('line-sheet'))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && at === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+setInterval(() => {
+  renderLine();
+  if (!$('settings').hidden) renderLineSettings();
+}, 1000);
+
 // ---- the mini window and other computers --------------------------------------
 
 $('cam-mini').addEventListener('click', () => {
@@ -2904,7 +3216,7 @@ function groupSummaries() {
   return {
     look: `${theme} · ${time}`,
     privacy: `Privacy ${prefs.private ? 'on' : 'off'} · ${wait ? `waiting alert after ${wait} min` : 'no waiting alerts'}`,
-    connect: `${field} · ${snapshot?.fleet?.on ? 'sharing with other computers' : 'other computers off'}`,
+    connect: `${field} · ${lineSummary(lineState())} · ${snapshot?.fleet?.on ? 'sharing with other computers' : 'other computers off'}`,
     agents: `Report for the ${$('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? 'last 28 days'}`,
     app: `${updateSummary}${prefs.demo ? ' · demo patients on' : ''}`,
   };
@@ -2925,6 +3237,7 @@ function setSettings(open) {
     showLogStatus();
     showFleet();
     renderFieldSettings();
+    renderLineSettings();
     renderGroupSummaries();
     $('settings-close').focus();
   }

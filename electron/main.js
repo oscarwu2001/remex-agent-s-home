@@ -24,6 +24,7 @@ const {
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
 const fieldSurvey = require('../src/core/fieldsurvey');
+const lineChat = require('../src/core/linechat');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
 const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
@@ -1147,6 +1148,207 @@ app.whenReady().then(() => {
     return error ? { ok: false, file: projectsPath, error: `The folder could not be opened: ${error}` } : { ok: true, file: projectsPath };
   });
 
+  // ---- LINE chats ------------------------------------------------------------
+  // The user's LINE group chats, from the text files LINE desktop's "Save
+  // chat" writes into a folder they picked. Off until turned on in
+  // Settings; only the chats the user ticks are read past their header; the
+  // exports are only read, never written, moved or deleted, and nothing goes
+  // online. The decisions (parsing, what concerns the user, the command
+  // that starts Claude) are in src/core/linechat.js; this keeps the
+  // settings file, the scan timer and the IPC, and runs Send to agent's one
+  // command when the user presses Start Claude.
+  const lineFile = path.join(app.getPath('userData'), 'line-chats.json');
+  const linePromptDir = path.join(app.getPath('userData'), 'line-prompts');
+  const LINE_SCAN_MS = 10_000;
+  let line = lineChat.changeSettings(undefined, {}).settings;
+  let lineScan = null; // { error, files } from the last look at the folder
+  let lineFiles = new Map(); // file -> its entry, reused while it is unchanged
+  let lineChats = []; // the ticked chats, re-exports merged
+  let lineItems = []; // what concerns the user, newest first
+  let lineScannedAt = null;
+  let lineScanError = null;
+  let lineTmux = { sessions: [], why: null }; // as last asked, when the sheet opened
+  let lineLogged = '';
+  try {
+    line = lineChat.changeSettings(JSON.parse(fs.readFileSync(lineFile, 'utf8')), {}).settings;
+  } catch (err) {
+    if (err.code !== 'ENOENT') problem('LINE chats: its settings could not be read; it is off until it is set again in Settings → Connections → LINE chats', lineFile, 'line');
+  }
+  function scanLine() {
+    if (!line.enabled || !line.folder) {
+      [lineScan, lineFiles, lineChats, lineItems, lineScanError] = [null, new Map(), [], [], null];
+      return;
+    }
+    try {
+      lineScan = lineChat.scanFolder(line.folder, { read: new Set(line.read), prev: lineFiles });
+      lineFiles = new Map(lineScan.files.map((f) => [f.file, f]));
+      lineChats = lineChat.mergeChats(lineScan.files.filter((f) => f.read && f.messages));
+      const since = Date.now() - lineChat.WINDOW_DAYS * 86_400_000;
+      lineItems = lineChats
+        .flatMap((c) => lineChat.relatedToYou(c.messages, { names: line.names, keywords: line.keywords, since }))
+        .filter((h) => !line.marks[h.hash])
+        .sort((a, b) => b.ms - a.ms)
+        .map((h) => ({ ...h, draft: lineChat.draftTodo(h), prompt: lineChat.promptDraft(h) }));
+      lineScanError = null;
+    } catch (err) {
+      // Not a file problem the scan words itself: a bug. Shown, and the
+      // stack (no chat text: the parser keeps none in its errors) logged.
+      lineScanError = 'LINE chats: the exports could not be read; see the system log';
+      syslog?.write('errors', 'line-chats', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
+    }
+    lineScannedAt = Date.now();
+  }
+  setInterval(scanLine, LINE_SCAN_MS);
+  scanLine();
+  function saveLine(next) {
+    writeJsonFile(lineFile, next);
+    const turnedOff = line.enabled && !next.enabled;
+    line = next;
+    if (turnedOff) {
+      // Off keeps nothing: the prompt files hold chat text too.
+      lineTmux = { sessions: [], why: null };
+      const gone = lineChat.prunePrompts(linePromptDir, { maxAgeMs: 0 });
+      if (gone.failed.length) problem(`LINE chats: ${gone.failed.length} prompt ${gone.failed.length === 1 ? 'file' : 'files'} could not be removed (${[...new Set(gone.failed)].join(', ')})`, linePromptDir);
+    }
+    scanLine();
+  }
+  ipcMain.handle('home:line-set', (_event, change = {}) => {
+    // The folder is set only through the folder dialog below.
+    const allowed = Object.fromEntries(Object.entries(change ?? {}).filter(([k]) => ['enabled', 'names', 'keywords', 'tick', 'mark'].includes(k)));
+    const res = lineChat.changeSettings(line, allowed);
+    if (res.error) return { ok: false, error: res.error };
+    try {
+      saveLine(res.settings);
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('home:line-choose-folder', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Choose the folder you save LINE chats into',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      saveLine(lineChat.changeSettings(line, { folder: res.filePaths[0] }).settings);
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+    return { ok: true };
+  });
+  const lineItem = (hash) => lineItems.find((h) => h.hash === hash);
+  // Add to project: the to-do goes through projects.js (read afresh, written
+  // whole, unknown fields kept); then the item is remembered as added.
+  ipcMain.handle('home:line-add', (_event, { hash, project, text } = {}) => {
+    if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
+    if (!lineItem(hash)) return { ok: false, error: 'That item is no longer listed.' };
+    try {
+      lineChat.addTodo(projectsPath, { project, text });
+    } catch (err) {
+      return { ok: false, error: err.code ? `The project list could not be saved (${err.code})` : err.message };
+    }
+    readProjects(true);
+    const res = lineChat.changeSettings(line, { mark: { hash, what: 'added' } });
+    try {
+      saveLine(res.settings);
+    } catch (err) {
+      return { ok: true, note: `Added. The app could not note that it was (${err.code || err.message}), so the item stays listed.` };
+    }
+    return { ok: true };
+  });
+  // Where Send to agent can start Claude: the user's tmux sessions in WSL
+  // (asked only when WSL is already running), else a Windows Terminal tab.
+  ipcMain.handle('home:line-targets', async () => {
+    lineTmux = await lineChat.tmuxSessions();
+    return lineTmux;
+  });
+  ipcMain.handle('home:line-browse', async () => {
+    const res = await dialog.showOpenDialog(win, { title: 'Choose the folder Claude works in', properties: ['openDirectory'] });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    return { ok: true, path: res.filePaths[0] };
+  });
+  // Start Claude: only on the user's press, with the prompt they edited.
+  // The prompt goes to a file; the one command is built by launchPlan.
+  ipcMain.handle('home:line-start', async (_event, req = {}) => {
+    if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
+    if (req.target === 'tmux' && !lineTmux.sessions.includes(req.session)) return { ok: false, error: 'That tmux session is not listed any more; close the sheet and open it again.' };
+    if (typeof req.cwd === 'string' && /^[A-Za-z]:[\\/]|^\\\\/.test(req.cwd)) {
+      let isDir = false;
+      try {
+        isDir = fs.statSync(req.cwd).isDirectory();
+      } catch {
+        isDir = false; // missing or unreadable: said below
+      }
+      if (!isDir) return { ok: false, error: 'That folder is not there any more; choose another.' };
+    }
+    const promptFile = path.join(linePromptDir, `${Date.now()}-${require('crypto').randomBytes(3).toString('hex')}.txt`);
+    let plan;
+    try {
+      plan = lineChat.launchPlan({ target: req.target, session: req.session, cwd: req.cwd, prompt: req.prompt, promptFile, name: lineChat.windowName() });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    const old = lineChat.prunePrompts(linePromptDir);
+    if (old.failed.length) syslog?.write('errors', 'line-chats', { error: `old prompt files not removed: ${[...new Set(old.failed)].join(', ')}` });
+    try {
+      fs.mkdirSync(linePromptDir, { recursive: true });
+      fs.writeFileSync(plan.write.file, plan.write.text, { mode: 0o600 });
+    } catch (err) {
+      return { ok: false, error: `The prompt could not be saved (${err.code || err.message})` };
+    }
+    return new Promise((resolve) => {
+      // wsl.exe is a console program: hidden. wt.exe opens the terminal
+      // itself, which hiding could hide too.
+      execFile(plan.file, plan.args, { timeout: 15_000, windowsHide: req.target === 'tmux' }, (err, _stdout, stderr) => {
+        if (!err) return resolve({ ok: true, label: plan.label });
+        fs.rm(plan.write.file, { force: true }, (rmErr) => {
+          if (rmErr) syslog?.write('errors', 'line-chats', { error: `prompt file not removed: ${rmErr.code || rmErr.message}` });
+        });
+        const said = String(stderr || '').replace(/\0/g, '').split('\n').map((s) => s.trim()).find(Boolean);
+        const why = err.code === 'ENOENT' ? `${plan.file} was not found` : err.killed ? 'it did not answer in time' : said || err.message;
+        syslog?.write('errors', 'line-chats', { error: `start failed: ${err.code ?? ''} ${err.killed ? 'timeout' : ''}`.trim() });
+        return resolve({ ok: false, error: `Claude could not be started: ${why}` });
+      });
+    });
+  });
+  function lineState() {
+    if (!line.enabled) return { enabled: false };
+    const byChat = new Map();
+    for (const f of lineScan?.files ?? []) {
+      const c = byChat.get(f.chat) ?? { chat: f.chat, files: 0, read: line.read.includes(f.chat), problems: 0 };
+      c.files += 1;
+      if (f.problem) c.problems += 1;
+      byChat.set(f.chat, c);
+    }
+    for (const c of lineChats) if (byChat.has(c.chat)) byChat.get(c.chat).messages = c.messages.length;
+    return {
+      enabled: true,
+      // A path and the user's own words: the board shows them only with privacy off.
+      folder: line.folder,
+      names: line.names,
+      keywords: line.keywords,
+      chats: [...byChat.values()].sort((a, b) => a.chat.localeCompare(b.chat)),
+      readCount: lineChats.length,
+      folderError: lineScan?.error ? lineScan.error.code : null,
+      scannedAt: lineScannedAt,
+      windowDays: lineChat.WINDOW_DAYS,
+      // Chat names, senders and words: shown only with privacy off.
+      items: lineItems.map(({ hash, chat, at, ms, sender, text, reason, matched, draft, prompt }) => ({ hash, chat, at, ms, sender, text, reason, matched, draft, prompt })),
+    };
+  }
+  function lineProblemsNow() {
+    const out = [
+      ...lineChat.lineProblems({ enabled: line.enabled, folder: line.folder, scan: lineScan }),
+      ...(lineScanError ? [{ label: lineScanError, detail: '' }] : []),
+    ].map((p) => ({ ...p, count: 1 }));
+    // Each new set of problems goes to the system log once (labels only).
+    const text = out.map((p) => p.label).join(' | ');
+    if (text && text !== lineLogged) for (const p of out) syslog?.write('errors', 'problem', { what: p.label });
+    lineLogged = text;
+    return out;
+  }
+
   // ---- long jobs and the machine ------------------------------------------------
   // Jobs report with agents_progress.py into ~/.agents-home/jobs (read every
   // 2 s). The machine line: CPU from the system's own counters, GPU from
@@ -1409,8 +1611,10 @@ app.whenReady().then(() => {
       roster: roster.agents,
       usage: usageSummary,
       field: fieldState(),
+      line: lineState(),
       problems: [
         ...fieldProblems(),
+        ...lineProblemsNow(),
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
         ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems, ...jobs.problems,
         ...(work.problem ? [{ label: work.problem, detail: '', count: 1 }] : []),
