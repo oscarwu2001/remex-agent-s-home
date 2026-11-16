@@ -2747,7 +2747,14 @@ $('opt-field').addEventListener('change', async (e) => {
 $('field-sheet-close').addEventListener('click', () => setFieldSheet(false));
 // A press outside the open sheet (on the inert board or map) closes it.
 document.addEventListener('pointerdown', (e) => {
-  if (!$('field-sheet').hidden && !$('field-sheet').contains(e.target)) setFieldSheet(false);
+  if ($('field-sheet').hidden || $('field-sheet').contains(e.target)) return;
+  const back = fieldOpener?.isConnected ? fieldOpener : $('field-open');
+  setFieldSheet(false);
+  // The press then moves focus to the page itself; put it back where the
+  // sheet was opened from, unless the press landed on a control.
+  setTimeout(() => {
+    if (document.activeElement === document.body) back?.focus({ preventScroll: true });
+  }, 0);
 });
 $('field-sheet').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
