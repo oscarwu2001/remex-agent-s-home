@@ -262,7 +262,7 @@ which you share the sheet with, so the sheet stays private:
    answers** off and open **Check the columns** (the board links to it): the
    app guessed what each column is. Change any that are wrong, choose the
    ones marked **Needs a choice** (guesses it is unsure of, such as a scale
-   read from the answers), and press **Save the columns**; Save waits until
+   read from the answers or a guessed "higher is worse"), and press **Save the columns**; Save waits until
    every column has a choice. Until then the board says its numbers are the
    app's guesses.
 
@@ -272,7 +272,7 @@ separately; multiple choice, counted; a comment; identifying; or ignored.
 The app suggests a role from each column's title and answers, and **Check
 the columns** lets you confirm it. Only scores whose scale you confirmed, or
 that the question states (like "(1-5)"), count in the average; a guessed
-scale is marked "scale guessed". Columns with names, email addresses, phone
+scale is marked "scale guessed", a guessed direction "direction guessed". Columns with names, email addresses, phone
 numbers or patient and case numbers are hidden, and their answers are not
 kept on your computer. Answers that only look personal (shaped like names,
 or long numbers such as a phone number the sheet stored as a number) are
@@ -315,18 +315,29 @@ update):
 
 **Higher is worse.** On a question such as "How difficult was setup?
 (1-5)", a high answer is the bad one. Check the columns has a **Higher is
-worse** tick on each score column, already ticked when the title speaks of
-difficulty, effort, pain or problems (also 困難, 難, 麻煩); untick it if it
-is wrong. For a ticked column the flags count the top quarter of the scale
-("3 high scores … (4 or more on 1–5, higher is worse)") and flag an average
-going up.
+worse** tick on each score column. When the title speaks of difficulty,
+effort, pain, discomfort, fatigue or problems (also 困難, 難, 麻煩, 痛, 疼,
+不適), the app only guesses it, since "Pain relief achieved" is the other
+way round: the column is marked **Needs a choice** and "Direction guessed",
+and stays out of the flags and the average until you choose. Choose Score
+and the guess shows as the tick, already ticked; untick it if it is wrong.
+For a ticked column the flags count the top quarter of the scale ("3 high
+scores … (4 or more on 1–5, higher is worse)") and flag an average going
+up, and the headline average counts its answers turned round (5 on 1–5
+counts as 1); the sheet says "higher is worse, counted inverted in the
+average".
 
 "Nothing to flag" shows only when the 7 days were compared. Otherwise the
-section says why: "Flags show after the first update", "Flags show after
-the next update" (a timestamp column chosen after its dates were dropped),
-or "No dates to compare: choose the timestamp column". Scores on a guessed
-scale raise no flags, as they are not in the average either. With privacy
-on, a flag names a question only as "Question N".
+section says why: "The sheet has no answers yet", "No answers in the last
+7 days (newest: …)", or "No dates to compare yet." with **Check the
+columns** on its own line. Before the first update there is no Flags block
+at all. While a timestamp column chosen after its dates were dropped waits
+for them, one line says "Dates show after the next update" with a
+**Refresh now** link, and Flags lists set-up problems only. While the
+section shows a failed update, Flags does not list it again (failed, or
+not shared). Scores on a guessed scale or direction raise no flags, as they
+are not in the average either. With privacy on, a flag names a question only
+as "Question N".
 
 When something goes wrong, the section and **Needs attention** say what to
 try, for example "Share the sheet with the key's reader address as Viewer"
