@@ -274,9 +274,15 @@ the columns** lets you confirm it. Only scores whose scale you confirmed, or
 that the question states (like "(1-5)"), count in the average; a guessed
 scale is marked "scale guessed". Columns with names, email addresses, phone
 numbers or patient and case numbers are hidden, and their answers are not
-kept on your computer; a column the app only guesses is identifying stays
-off the board, and its answers are kept until you choose. A column added to the form later is flagged under
-**Needs attention** until you check it. Answers the app cannot read, such as
+kept on your computer. Answers that only look personal (shaped like names,
+or long numbers such as a phone number the sheet stored as a number) are
+treated the same until you choose: the column needs a choice, and if it is
+not identifying, its answers come back at the next update. A column you
+checked as comments whose answers turn into emails or phone numbers is kept
+off the board and flagged. A column added to the form later, and columns
+waiting for a choice, are flagged under **Needs attention** until you check
+them. Turning field feedback off deletes the answers kept and your checked
+columns; turned on again, the columns are checked afresh. Answers the app cannot read, such as
 a word in a score question, are counted under **Needs attention**, never
 dropped quietly. With **Hide file names, commands and survey answers** on,
 the section shows only counts, scores and dates; question wording, comments
