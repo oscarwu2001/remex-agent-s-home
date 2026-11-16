@@ -210,19 +210,37 @@ function demoField(nowMs) {
   const h = 3_600_000;
   const day = 24 * h;
   const at = (ms) => new Date(nowMs - ms).toISOString();
+  const col = (index, header, role, extra = {}) => ({ index, header, role, confirmed: false, isNew: false, answers: 24, suggested: { role, ...extra }, ...extra });
   return {
     enabled: true, demo: true, sheetUrl: '', keyName: 'sample-key.json', clientEmail: 'sample-reader@sample-project.iam.gserviceaccount.com',
     busy: false, fetchedAt: nowMs - 2 * h, lastAttemptAt: nowMs - 2 * h, error: null, errorKind: null, errorAt: null,
     sinceFetchedAt: nowMs - 2 * day - 2 * h, tab: 'Sample responses', nextAt: nowMs + 2 * day - 2 * h,
     summary: {
-      responses: 24, blankRows: 0, timestampColumn: 'Timestamp', timeZone: 'local',
+      responses: 24, blankRows: 0, timestampColumn: 'Timestamp', timeZone: 'local', timeZoneUnknown: null,
       newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,
-      questions: [
-        { question: 'Sample: how easy was the setup?', n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'header', unreadable: 0 },
-        { question: 'Sample: how clear was the screen in theatre?', n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', unreadable: 0 },
-        { question: 'Sample: how well did the tracking keep up?', n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'answers', unreadable: 0 },
+      // Not checked yet, as a new sheet is: the board says so and links to
+      // Settings → Check the columns.
+      checked: false, newColumns: [],
+      columns: [
+        col(0, 'Timestamp', 'timestamp'),
+        col(1, 'Email address', 'identifying', { reason: 'header' }),
+        col(2, 'Your name', 'identifying', { reason: 'header' }),
+        col(3, 'Sample: how easy was the setup? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
+        col(4, 'Sample: how clear was the screen in theatre?', 'score', { low: 1, high: 5, scaleFrom: 'answers' }),
+        col(5, 'Sample: how well did the tracking keep up? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
+        col(6, 'Sample: how many times did you restart it?', 'number', { reason: 'count' }),
+        col(7, 'Sample: your role', 'choice'),
+        col(8, 'Sample: what should we improve?', 'comment'),
+        col(9, 'Sample: anything else?', 'comment'),
       ],
-      overall: { mean: 4.03, high: 5, rescaled: false, n: 71 },
+      questions: [
+        { question: 'Sample: how easy was the setup? (1-5)', index: 3, n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'header', guessed: false, unreadable: 0 },
+        { question: 'Sample: how clear was the screen in theatre?', index: 4, n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', guessed: true, unreadable: 0 },
+        { question: 'Sample: how well did the tracking keep up? (1-5)', index: 5, n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'header', guessed: false, unreadable: 0 },
+      ],
+      numbers: [{ question: 'Sample: how many times did you restart it?', index: 6, n: 24, mean: 0.6, unreadable: 0 }],
+      // The two stated scales only: (4.3 × 24 + 4.0 × 24) / 48.
+      overall: { mean: 4.15, high: 5, rescaled: false, n: 48 }, scalesGuessed: 1,
       comments: [
         { question: 'Sample: what should we improve?', text: 'Sample comment: a larger font for the distance readout.', at: at(5 * h) },
         { question: 'Sample: what should we improve?', text: 'Sample comment: the start-up check took a while.', at: at(day + 3 * h) },
@@ -230,8 +248,8 @@ function demoField(nowMs) {
       ],
       commentCount: 9,
       choices: [{ question: 'Sample: your role', n: 24, answers: [{ answer: 'Surgeon', count: 11 }, { answer: 'Nurse', count: 8 }, { answer: 'Engineer', count: 5 }] }],
-      identifying: ['Email address', 'Your name'], skipped: [], columns: [],
-      unreadable: { scores: 0, timestamps: 0 },
+      identifying: ['Email address', 'Your name'], skipped: [],
+      unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
     },
   };
 }

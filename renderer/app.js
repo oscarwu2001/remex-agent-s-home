@@ -14,7 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { fieldHtml, fieldSheetHtml, fieldSettingsHtml } from './field-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom } from './field-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -761,7 +761,11 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'q' || e.key === 'Q') turnView(-1);
   else if (e.key === 'e' || e.key === 'E') turnView(1);
   else if (e.key === 'Escape') {
-    if (liveMapFor) openLiveMap(undefined);
+    // A panel open over the board closes first, even when focus has fallen
+    // to the page (a click on its text): the map stays where it is.
+    if (!$('field-sheet').hidden) setFieldSheet(false);
+    else if (!$('settings').hidden) setSettings(false);
+    else if (liveMapFor) openLiveMap(undefined);
     else if (decorating) setDecorating(false);
     else showOverview();
   }
@@ -1231,7 +1235,7 @@ const TODO_WORDS = { completed: 'Done', in_progress: 'Doing now', pending: 'To d
 function todoListHtml(todos) {
   if (!todos?.total) return '';
   const head = `<p class="todo-head">To-do list · ${todos.done} of ${todos.total} done${todos.doing ? ` · ${todos.doing} in progress` : ''}</p>`;
-  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names and commands” to see what each item says.</p>`;
+  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names, commands and survey answers” to see what each item says.</p>`;
   const items = todos.items.map((t) => `<li class="todo ${t.status}"><span class="todo-mark" aria-hidden="true"></span>
       <span>${escapeXml(t.status === 'in_progress' && t.active ? t.active : t.text || 'Untitled')}</span><span class="visually-hidden"> (${TODO_WORDS[t.status]})</span></li>`).join('');
   return `${head}<ol class="todos">${items}</ol>`;
@@ -2600,13 +2604,15 @@ setInterval(renderProjects, 1000);
 // The field survey's answers (snapshot.field, or the demo's sample). The
 // main process fetches; this only shows and passes on the user's changes.
 
-const fieldUi = { editing: false, error: '', note: '' };
+// editing: the link field is open. error/note: the reply to the last button.
+// draft: the column roles being changed in "Check the columns".
+const fieldUi = { editing: false, error: '', note: '', draft: {}, checkNote: '', checkError: '' };
 let fieldSwitchedAt = 0; // the switch was just pressed: wait for the snapshot before echoing it back
 let fieldOpener;
 function renderField() {
   const f = snapshot.field;
   $('field').hidden = !f?.enabled;
-  if (f?.enabled) paint($('field-body'), fieldHtml(f));
+  if (f?.enabled) paint($('field-body'), fieldHtml(f, { privacy: prefs.private }));
   if (!$('field-sheet').hidden) {
     if (!f?.enabled) setFieldSheet(false);
     else paint($('field-sheet-body'), fieldSheetHtml(f, { privacy: prefs.private }));
@@ -2619,9 +2625,12 @@ function renderFieldSettings() {
   $('opt-field').disabled = !online || Boolean(f?.demo);
   paint($('field-settings'), fieldSettingsHtml(f, { privacy: prefs.private, online, state: fieldUi }));
 }
+// The sheet is modal: the board and the map behind it are inert until it
+// closes, so Tab and Shift+Tab stay inside it.
 function setFieldSheet(open) {
   if (open === !$('field-sheet').hidden) return;
   $('field-sheet').hidden = !open;
+  for (const el of document.querySelectorAll('.board, .stage')) el.inert = open;
   if (open) {
     fieldOpener = document.activeElement;
     paint($('field-sheet-body'), fieldSheetHtml(snapshot.field, { privacy: prefs.private }));
@@ -2631,8 +2640,15 @@ function setFieldSheet(open) {
     fieldOpener = undefined;
   }
 }
+function openFieldCheck() {
+  setFieldSheet(false);
+  setSettings(true);
+  $('field-check-h')?.scrollIntoView({ block: 'start' });
+  $(`fc-role-${snapshot.field?.summary?.columns?.find((c) => !c.confirmed)?.index ?? 0}`)?.focus({ preventScroll: true });
+}
 async function fieldAction(act) {
   if (act === 'open') setFieldSheet(true);
+  else if (act === 'check') openFieldCheck();
   else if (act === 'settings') {
     setSettings(true);
     $('field-settings-h').scrollIntoView({ block: 'start' });
@@ -2641,17 +2657,24 @@ async function fieldAction(act) {
     renderFieldSettings();
     $('field-link')?.focus();
   } else if (act === 'refresh') {
+    fieldUi.error = '';
     if (snapshot.demo || !bridge.fieldRefresh) {
       fieldUi.note = snapshot.demo ? 'The demo reads no sheet.' : 'The preview cannot read the sheet.';
     } else {
       fieldUi.note = '';
-      // The outcome arrives with the snapshot (busy, then the rows or the
-      // error); only a failed call to the main process is shown from here.
-      fieldUi.error = '';
+      // The outcome arrives with the snapshot (updating, then the rows or
+      // the error); only a failed call to the main process is shown here.
       await bridge.fieldRefresh().catch((err) => { fieldUi.error = `The sheet could not be read: ${err.message}`; });
     }
     renderFieldSettings();
     renderField();
+  } else if (act === 'copy-reader') {
+    const address = snapshot.field?.clientEmail;
+    const res = bridge.fieldCopyReader ? await bridge.fieldCopyReader().catch((err) => ({ ok: false, error: err.message }))
+      : await navigator.clipboard.writeText(address ?? '').then(() => ({ ok: true }), (err) => ({ ok: false, error: err.message }));
+    fieldUi.note = res.ok ? 'Reader address copied: paste it in the sheet’s Share box.' : '';
+    fieldUi.error = res.ok ? '' : `The address could not be copied: ${res.error}`;
+    renderFieldSettings();
   } else if (act === 'choose-key') {
     if (!bridge.fieldChooseKey) return;
     const res = await bridge.fieldChooseKey().catch((err) => ({ ok: false, error: err.message }));
@@ -2660,14 +2683,40 @@ async function fieldAction(act) {
     setTimeout(renderFieldSettings, 600);
   }
 }
-for (const id of ['field-body', 'field-settings']) {
+for (const id of ['field-body', 'field-settings', 'field-sheet-body']) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('[data-field]');
     if (b && !b.disabled) fieldAction(b.dataset.field);
   });
 }
+// "Check the columns": each choice goes into the draft, and the row redraws
+// (a score shows its scale).
+$('field-settings').addEventListener('change', (e) => {
+  const el = e.target.closest('select[data-col]');
+  if (!el) return;
+  const col = Number(el.dataset.col);
+  fieldUi.draft[col] = { ...fieldUi.draft[col], [el.dataset.part]: el.dataset.part === 'role' ? el.value : Number(el.value) };
+  fieldUi.checkNote = '';
+  renderFieldSettings();
+});
 $('field-settings').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (e.target.id === 'field-check-form') {
+    fieldUi.checkError = '';
+    if (snapshot.demo || !bridge.fieldSet) {
+      fieldUi.checkNote = snapshot.demo ? 'The demo keeps its sample columns; your own sheet’s choices are saved.' : 'The preview cannot save; this works in the app.';
+      renderFieldSettings();
+      return;
+    }
+    const res = await bridge.fieldSet({ columns: rolesFrom(snapshot.field, fieldUi.draft) }).catch((err) => ({ ok: false, error: err.message }));
+    if (res.ok) {
+      fieldUi.draft = {};
+      fieldUi.checkNote = 'Columns saved.';
+    } else fieldUi.checkError = res.error;
+    renderFieldSettings();
+    setTimeout(renderFieldSettings, 600);
+    return;
+  }
   if (!bridge.fieldSet) return;
   const res = await bridge.fieldSet({ sheetUrl: $('field-link').value }).catch((err) => ({ ok: false, error: err.message }));
   fieldUi.error = res.ok ? '' : res.error;
@@ -2689,6 +2738,20 @@ $('field-sheet').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.stopPropagation();
     setFieldSheet(false);
+  } else if (e.key === 'Tab') {
+    // Tab and Shift+Tab go round inside the sheet: with everything behind
+    // it inert, the browser would otherwise drop focus on the page itself.
+    const stops = [...$('field-sheet').querySelectorAll('button, a[href], select, input, [tabindex="0"]')].filter((el) => !el.disabled && el.offsetParent);
+    if (!stops.length) return;
+    const [first, last] = [stops[0], stops[stops.length - 1]];
+    const at = document.activeElement;
+    if (e.shiftKey && (at === first || at === $('field-sheet'))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && at === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 });
 setInterval(() => {

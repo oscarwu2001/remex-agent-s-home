@@ -101,6 +101,9 @@ body.no-tags .person:not(.selected):not(:focus-visible) .tag { display: none; }
 /* ---- board ------------------------------------------------------------ */
 
 .board {
+  /* Pinned to its cell: the field feedback sheet shares it, over the board. */
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -251,7 +254,6 @@ details > summary h2 { margin: 0; }
 .todo.completed .todo-mark { border-color: var(--accent); background: var(--accent); border-radius: 3px; }
 .todo.completed .todo-mark::after { content: ""; position: absolute; left: 3px; top: 0.5px; width: 3px; height: 6px; border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .todo.completed > span:nth-child(2) { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--line); }
-.todo.in_progress > span:nth-child(2) { font-weight: 400; }
 
 .chart dl { display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-3); margin: 0 0 var(--s-3); font-size: 13px; }
 .chart dt { color: var(--ink-muted); }
@@ -436,7 +438,7 @@ details > summary h2 { margin: 0; }
 .link-btn:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:disabled { color: var(--ink-muted); cursor: not-allowed; }
 .hint { font-size: 13px; color: var(--ink-muted); margin: 0 0 var(--s-2); }
-.form-error { color: var(--warn); font-size: 13px; font-weight: 400; margin: 0 0 var(--s-2); }
+.form-error { color: var(--warn); font-size: 13px; font-weight: 500; margin: 0 0 var(--s-2); }
 .dept-form { display: grid; gap: var(--s-3); margin-bottom: var(--s-3); }
 .field { display: grid; gap: var(--s-1); font-size: 13px; color: var(--ink-muted); border: 0; padding: 0; margin: 0; }
 .field legend { padding: 0; margin-bottom: var(--s-1); }
@@ -448,9 +450,13 @@ details > summary h2 { margin: 0; }
 .check { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; color: var(--ink); font-size: 13px; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .form-actions { display: flex; align-items: center; gap: var(--s-2); }
-.field-error { color: var(--warn); font-weight: 400; font-size: 12px; }
+.field-error { color: var(--warn); font-weight: 500; font-size: 12px; }
 .add-row { display: flex; gap: var(--s-2); }
-.add-row input { flex: 1; min-width: 0; }
+.add-row input {
+  flex: 1; min-width: 0; height: 38px; padding: 0 var(--s-3); border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel-sunk); color: var(--ink); font: 13px var(--font); transition: border-color 0.2s, background-color 0.2s;
+}
+.add-row input:focus { border-color: var(--accent); background: var(--panel-raised); }
 
 /* ---- settings ------------------------------------------------------------ */
 
@@ -470,7 +476,7 @@ details > summary h2 { margin: 0; }
   animation: rise-in 0.45s var(--spring);
 }
 @keyframes rise-in { from { opacity: 0; transform: translateY(10px); } }
-@media (prefers-reduced-motion: reduce) { .settings, .live-map { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .settings, .live-map, .field-sheet { animation: none; } }
 .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-2); }
 .settings-head h2 { margin: 0; font: 400 22px var(--font-display); letter-spacing: -0.015em; color: var(--ink); }
 .settings-group { padding: var(--s-4) 0; border-top: 1px solid var(--line); }
@@ -736,8 +742,14 @@ body.no-select, body.no-select * { user-select: none; }
 
 /* ---- field feedback ---------------------------------------------------------- */
 
-.field-line { margin: 0 0 var(--s-3); font-size: 13px; color: var(--ink-muted); }
-.field-warn { margin-bottom: var(--s-3); }
+.field-line { margin: 0 0 var(--s-3); font-size: 12px; color: var(--ink-muted); }
+.nowrap { white-space: nowrap; }
+.field-note { margin: 0 0 var(--s-3); font-size: 12px; color: var(--ink-muted); }
+.field-note .link-btn { min-height: 0; padding: 0; }
+.field-failed { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); margin: 0 0 var(--s-3); }
+.field-failed .form-error { margin: 0; }
+.field-failed .link-btn { min-height: 32px; padding: 0; }
+.field-guess { color: var(--ink); }
 /* Link buttons line up with the text above them. */
 .field-section .form-actions > .link-btn:first-child { margin-left: calc(-1 * var(--s-2)); }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); margin: 0 0 var(--s-2); }
@@ -751,7 +763,19 @@ body.no-select, body.no-select * { user-select: none; }
 .field-settings .form-error, .field-settings .hint { margin: 0; }
 .field-set { margin: 0; font-size: 13px; color: var(--ink); display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); }
 .field-path { min-width: 0; overflow-wrap: anywhere; color: var(--ink-muted); }
-.field-robot { font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+.field-robot { color: var(--ink); overflow-wrap: anywhere; }
+.field-check-step { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.field-check-step .hint { margin: 0 0 var(--s-2); }
+.field-check-step h4 { margin: 0 0 var(--s-1); font: 400 14px var(--font); color: var(--ink); }
+.field-cols { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
+.field-col { padding: var(--s-2) 0; border-top: 1px solid var(--line); }
+.field-col:first-child { border-top: 0; }
+.field-col-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-2); margin: 0 0 var(--s-1); font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.field-col-name .tag { margin: 0; }
+.field-col-role { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); font-size: 12px; color: var(--ink-muted); }
+.field-col-role select { height: 32px; padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel-raised); color: var(--ink); font: 13px var(--font); }
+.field-scale { display: inline-flex; gap: var(--s-2); }
+.field-scale label { display: inline-flex; align-items: center; gap: var(--s-1); }
 
 /* The detail sheet lies over the board, in the board's own column, so it
    stays in view however far the board is scrolled. */

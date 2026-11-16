@@ -11,7 +11,7 @@ import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup, personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
-import { fieldMiniText } from './field-view.js';
+import { fieldBadge } from './field-view.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
@@ -97,7 +97,7 @@ function render() {
   const html = waits + (groups || '<p class="empty">No sessions yet.</p>');
   // Redraw only on change, so an open list and the scroll position stay put.
   const sig = JSON.stringify([html.replace(/(data-since="\d+">)[^<]*/g, '$1'), prefs.private]);
-  const head = headlineBadges(o);
+  const head = headlineBadges(o) + fieldBadge(snap.field);
   if ($('headline').dataset.sig !== head) {
     $('headline').innerHTML = `<span class="badges">${head}</span>`;
     $('headline').dataset.sig = head;
@@ -109,7 +109,7 @@ function render() {
     // Same picture: only the elapsed times move on.
     for (const el of $('list').querySelectorAll('.since')) el.textContent = elapsed(Number(el.dataset.since), Date.now());
   }
-  $('foot').textContent = [prefs.demo ? 'Demo' : '', fieldMiniText(snap.field)].filter(Boolean).join(' · ');
+  $('foot').textContent = prefs.demo ? 'Demo' : '';
 }
 
 // ---- the projects tab ----------------------------------------------------------

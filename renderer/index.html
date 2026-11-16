@@ -109,7 +109,7 @@
       <ul id="problem-list"></ul>
     </section>
 
-    <section class="settings" id="settings" hidden aria-labelledby="settings-h" role="dialog">
+    <section class="settings" id="settings" hidden aria-labelledby="settings-h" role="dialog" tabindex="-1">
       <header class="settings-head">
         <h2 id="settings-h">Settings</h2>
         <button type="button" class="icon-btn" id="settings-close" aria-label="Close settings" title="Close (Esc)">
@@ -161,7 +161,7 @@
 
       <section class="settings-group" aria-labelledby="screen-h">
         <h3 id="screen-h">On screen</h3>
-        <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names and commands</span></label>
+        <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names, commands and survey answers</span></label>
         <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
         <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
       </section>
@@ -256,7 +256,7 @@
     </section>
   </aside>
 
-  <section class="field-sheet" id="field-sheet" hidden role="dialog" aria-labelledby="field-sheet-h">
+  <section class="field-sheet" id="field-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="field-sheet-h" tabindex="-1">
     <header class="settings-head">
       <h2 id="field-sheet-h">Field feedback</h2>
       <button type="button" class="icon-btn" id="field-sheet-close" aria-label="Close field feedback" title="Close (Esc)">
