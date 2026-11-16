@@ -53,7 +53,7 @@ function setupStep(f) {
 // numbers are the app's guesses, and the board says so.
 // A timestamp column chosen after the cache dropped its answers: its dates
 // come back at the next read.
-const waitNote = (s) => (s?.datesWaiting ? '<p class="field-note">Dates show after the next update. Refresh now to see them sooner.</p>' : '');
+const waitNote = (s) => (s?.datesWaiting ? '<p class="field-note">Dates show after the next update. <button type="button" class="link-btn" data-field="refresh">Refresh now</button></p>' : '');
 
 // The note gives way to the flag that says the same (columns to choose).
 const noteUnlessFlagged = (f) => (f?.flags?.list?.some((x) => x.what === 'choose') ? '' : checkNote(f?.summary));
@@ -77,10 +77,8 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   if (!s) {
     if (f.busy) return '<p class="empty" role="status">Updating…</p>';
     const why = f.summaryError ?? (f.error ? `The sheet could not be read. ${f.error}` : null);
-    // The flags say when they will show, and list any set-up problem.
-    const flags = flagsBlock(f, privacy, 'field-flags-h');
-    if (why) return `<p class="form-error" role="status">${esc(why)}</p>${flags}<div class="form-actions">${refreshBtn('field-try')}</div>`;
-    return `<p class="empty">Not updated yet.</p>${flags}<div class="form-actions">${refreshBtn('field-try')}</div>`;
+    if (why) return `<p class="form-error" role="status">${esc(why)}</p><div class="form-actions">${refreshBtn('field-try')}</div>`;
+    return `<p class="empty">Not updated yet.</p><div class="form-actions">${refreshBtn('field-try')}</div>`;
   }
   const updated = f.fetchedAt
     ? `<span title="Updated ${esc(boardTime(f.fetchedAt, now))}">Updated ${esc(age(f.fetchedAt, now))}</span>` : '';
@@ -104,7 +102,9 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   const open = s.responses
     ? `<div class="form-actions"><button type="button" class="link-btn" id="field-open" data-field="open" aria-haspopup="dialog">${privacy ? 'See the score for each question' : 'See each question and the comments'}</button></div>`
     : '';
-  return `<p class="field-line">${line}</p>${failed}${noteUnlessFlagged(f)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h')}${open}`;
+  // One problem, one place: while the error line shows, its flag is left out.
+  const said = f.error ? ['share', 'failed'] : [];
+  return `<p class="field-line">${line}</p>${failed}${noteUnlessFlagged(f)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h', said)}${open}`;
 }
 
 // The detail sheet's body.
@@ -126,7 +126,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
         <p class="field-q-top"><span class="field-q-name">${label(q)}</span>
           <span class="field-q-n">${m != null ? `${m}<small> / ${q.high}</small>` : DASH}</span></p>
         <div class="meter" role="img" aria-label="${m != null ? `${m} of ${q.high}` : 'no answers'}"><span style="width:${along(q)}%"></span></div>
-        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
+        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ' · higher is worse, counted inverted in the average' : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
       </li>`;
     }).join('')}</ol>`
     : '<p class="empty">No question with scores was found yet.</p>';
@@ -206,7 +206,7 @@ export function draftWith(draft, col, part, value) {
 function guessWords(c) {
   const g = c.suggested ?? {};
   const words = ROLE_WORDS[g.role] ?? g.role ?? '';
-  return g.role === 'score' && g.low != null ? `${words}, ${g.low}–${g.high}` : words;
+  return g.role === 'score' && g.low != null ? `${words}, ${g.low}–${g.high}${g.worse ? ', higher is worse' : ''}` : words;
 }
 
 function rowTags(r) {
@@ -214,6 +214,7 @@ function rowTags(r) {
   return [
     r.missing ? 'Needs a choice' : r.touched ? 'Changed' : '',
     r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.scaleFrom === 'answers' ? 'Scale guessed' : '',
+    r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.worse ? 'Direction guessed' : '',
     c.isNew ? 'New column, not checked' : '',
     c.repeated ? 'Repeated title' : '',
     c.hidden && !c.doubt && r.role && r.role !== 'identifying' && r.role !== 'ignore' ? 'Answers show after the next update' : '',
@@ -371,30 +372,47 @@ export function flagText(flag, { privacy = true, days = 7 } = {}) {
 // Why the window could not be compared, in words.
 const WHY_WORDS = {
   unread: () => 'Flags show after the first update',
+  empty: () => 'The sheet has no answers yet',
   waiting: () => 'Flags show after the next update',
-  'no-dates': () => `No dates to compare: choose the timestamp column <button type="button" class="link-btn" data-field="check">${FIXES.check}</button>`,
+  quiet: (info, days) => `No answers in the last ${days} days${info.newest ? ` (newest: ${esc(boardDay(Date.parse(info.newest)))})` : ''}`,
+  'no-dates': () => 'No dates to compare yet.',
 };
+// A reason's own fix, on a line of its own like a flag's.
+const WHY_FIX = { 'no-dates': 'check' };
 
 // f.flags: { why, earlier, list } from the main process. "Nothing to flag"
 // only when the window was compared; otherwise why it was not, with any
 // set-up flags below. Nothing at all when no flags were worked out (an
 // older snapshot).
-export function flagsHtml(f, { privacy = true } = {}) {
+// said: set-up flags another line of the section already says.
+export function flagsHtml(f, { privacy = true, said = [] } = {}) {
   const info = f?.flags;
   if (!info || !Array.isArray(info.list)) return '';
+  const list = info.list.filter((x) => !said.includes(x.what));
   const days = f.summary?.window?.days ?? 7;
-  const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)()}</p>` : '';
-  const scored = (f.summary?.questions ?? []).some((q) => !q.guessed);
+  const fixOf = (why) => (WHY_FIX[why] ? `<p class="field-fix"><button type="button" class="link-btn" data-field="${WHY_FIX[why]}">${FIXES[WHY_FIX[why]]}</button></p>` : '');
+  const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)(info, days)}</p>${fixOf(info.why)}` : '';
+  const scored = (f.summary?.questions ?? []).some((q) => !q.guessed && !q.directionGuessed);
   const noEarlier = !info.why && !info.earlier && scored ? `<p class="field-calm">No answers from before the last ${days} days, so averages are not compared yet.</p>` : '';
-  if (!info.list.length) return why || `<p class="field-calm">Nothing to flag</p>${noEarlier}`;
-  const items = info.list.map((x) => {
+  if (!list.length) return why || `<p class="field-calm">Nothing to flag</p>${noEarlier}`;
+  const items = list.map((x) => {
     const fix = x.fix && FIXES[x.fix] ? `<button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
     const glyph = x.kind === 'falling' && x.worse ? 'rising' : x.kind;
     return `<li class="field-flag">${flagGlyph(glyph)}<span class="field-flag-text">${esc(flagText(x, { privacy, days }))}</span>${fix}</li>`;
   }).join('');
   return `${why}<ul class="field-flags">${items}</ul>${noEarlier}`;
 }
-const flagsBlock = (f, privacy, cls) => (f?.flags && Array.isArray(f.flags.list) ? `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy })}` : '');
+// The block with its heading. While dates are waiting the note above says
+// so, so the block shows only for set-up flags.
+const flagsBlock = (f, privacy, cls, said = []) => {
+  const info = f?.flags;
+  if (!info || !Array.isArray(info.list)) return '';
+  if (info.why === 'waiting') {
+    const left = info.list.filter((x) => !said.includes(x.what));
+    return left.length ? `<h3 class="${cls}">Flags</h3>${flagsHtml({ ...f, flags: { ...info, why: null, earlier: true, list: left } }, { privacy })}` : '';
+  }
+  return `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy, said })}`;
+};
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';
 

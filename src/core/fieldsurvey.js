@@ -102,7 +102,7 @@ function readKey(text) {
 // that is gone waits for the user; a busy or locked one (a synced drive, a
 // virus scan) passes.
 function keyFileError(err) {
-  if (err?.code === 'ENOENT') return new FieldSurveyError('key', 'The key file is no longer where it was chosen; choose it again in Settings.');
+  if (err?.code === 'ENOENT') return new FieldSurveyError('key', 'The key file is no longer where it was chosen; choose it again in Settings → Connections → Field feedback.');
   return new FieldSurveyError('keyfile', `The key file could not be read just now (${err?.code || err?.message}); it tries again in half an hour.`);
 }
 
@@ -299,8 +299,10 @@ const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
 // A score whose title speaks of difficulty, effort, pain or problems: higher
-// is worse. Only a suggestion, shown ticked in Check the columns.
-const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?)\b|困難|困难|難|难|麻煩|麻烦/i;
+// is worse. Only a guess ("Pain relief achieved" is the other way round),
+// so it is low confidence: shown ticked in Check the columns, and the
+// column stays out of the flags and the average until the user chooses.
+const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适/i;
 const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
@@ -423,7 +425,8 @@ function looksPersonal(v) {
 const SCALE_WORDS = new Set(['very', 'quite', 'somewhat', 'strongly', 'slightly', 'extremely', 'fairly', 'not', 'agree', 'disagree', 'neutral',
   'satisfied', 'dissatisfied', 'easy', 'difficult', 'hard', 'likely', 'unlikely', 'excellent', 'good', 'fair', 'poor', 'always', 'never', 'often',
   'sometimes', 'rarely', 'usually']);
-const SCALE_HAN = /非常|很|有點|有点|普通|同意|不同意|滿意|满意|容易|困難|困难/;
+// Only a whole answer made of these ("非常滿意"); a name with 很 in it is a name.
+const SCALE_HAN = /^(?:非常|很|有點|有点|普通|同意|不同意|滿意|满意|不滿意|不满意|容易|不容易|困難|困难)+$/;
 
 // "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape. "Easy
 // Setup" has the same shape, so a column of them is only ever a guess.
@@ -492,7 +495,7 @@ function suggest(header, values, untitled) {
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
     if (COUNT_HEADER.test(header)) return { role: 'number', reason: 'count', confidence: HIGH };
     if (!stated && ints.includes(0)) return { role: 'number', reason: 'count', confidence: LOW };
-    if (stated) return { role: 'score', ...stated, scaleFrom: 'header', confidence: HIGH, ...worseOf(header) };
+    if (stated) return { role: 'score', ...stated, scaleFrom: 'header', confidence: WORSE.test(header) ? LOW : HIGH, ...worseOf(header) };
     return { role: 'score', ...guessedScale(ints.filter(onScale)), scaleFrom: 'answers', confidence: LOW, ...worseOf(header) };
   }
   const dayFirst = dayFirstColumn(values);
@@ -533,6 +536,7 @@ function checkRoles(list) {
   if (!Array.isArray(list) || list.length > 1000) throw bad();
   return list.map((r) => {
     if (!r || typeof r.header !== 'string' || r.header.length > 5000 || !Number.isInteger(r.index) || r.index < 0 || !ROLES.includes(r.role)) throw bad();
+    if ('worse' in r && r.worse !== undefined && typeof r.worse !== 'boolean') throw bad();
     const out = { header: r.header, index: r.index, role: r.role };
     if (r.role === 'score') {
       const low = Number(r.low);
@@ -604,7 +608,7 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
     timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
     checked: false, needsChoice: 0, newColumns: [], columns: [],
-    questions: [], numbers: [], overall: null, scalesGuessed: 0, comments: [], commentCount: 0, choices: [],
+    questions: [], numbers: [], overall: null, scalesGuessed: 0, directionsGuessed: 0, comments: [], commentCount: 0, choices: [],
     identifying: [], doubtful: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
   if (!Array.isArray(rows) || !rows.length) return { ...out, empty: true };
@@ -668,7 +672,7 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
   // its dates; it keeps no state, so any number of reads gives the same.
   const nowMs = toMs(now);
   const windowFrom = nowMs != null && Number.isFinite(nowMs) && tsCol >= 0 && !out.datesWaiting ? nowMs - WINDOW_DAYS * MS_DAY : null;
-  out.window = windowFrom != null ? { from: isoOf(windowFrom), days: WINDOW_DAYS } : null;
+  out.window = windowFrom != null ? { from: isoOf(windowFrom), days: WINDOW_DAYS, answers: times.filter((t) => t != null && t >= windowFrom).length } : null;
   const windowOf = (i, low, high, worse) => {
     const recent = [];
     const before = [];
@@ -722,12 +726,17 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
-        worse: col.worse === true, ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
+        worse: col.worse === true, directionGuessed: !conf && sug.worse === true,
+        ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
-      // headline average; a guessed scale could make 3 of 5 out of 3 of 10.
+      // headline average; a guessed scale could make 3 of 5 out of 3 of 10,
+      // and a guessed direction could count a bad answer as a good one.
       if (col.scaleFrom === 'answers') out.scalesGuessed += 1;
-      else for (const v of ok) scored.push({ v, low: col.low, high: col.high });
+      else if (!conf && sug.worse === true) out.directionsGuessed += 1;
+      // Higher is worse: turned round (low + high - answer) so that every
+      // score in the average points the same way.
+      else for (const v of ok) scored.push({ v: col.worse ? col.low + col.high - v : v, low: col.low, high: col.high });
     } else if (role === 'number') {
       const ok = columns[i].map(numberOf).filter(Number.isFinite);
       out.unreadable.numbers += columns[i].length - ok.length;
@@ -1008,22 +1017,25 @@ const WINDOW_DAYS = 7;
 const FALL_SHARE = 0.1;
 const FALL_MIN_NEW = 3;
 
-// -> { why, earlier, list }. why: null when the window was compared, else
-// 'unread' (nothing read yet), 'no-dates' (no timestamp column) or
-// 'waiting' (its dates come with the next read); set-up flags show either
-// way. earlier: some score had answers before the window, so averages
+// -> { why, earlier, list, newest? }. why: null when the window was
+// compared, else 'unread' (nothing read yet), 'empty' (the sheet has no
+// answers), 'waiting' (the timestamp's dates come with the next read),
+// 'no-dates' (no timestamp column) or 'quiet' (no answer in the window);
+// set-up flags show either way. earlier: some score had answers before the window, so averages
 // could be compared.
 function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) {
   const out = [];
   const s = summary && !summary.empty ? summary : null;
-  const why = !s ? 'unread' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates' : !s.window ? 'unread' : null;
+  const why = !s ? 'unread' : !s.responses ? 'empty' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates'
+    : !s.window ? 'unread' : !s.window.answers ? 'quiet' : null;
   let earlier = false;
   if (!why) {
-    // Guessed scales are left out, as they are of the average: a low mark
-    // on the wrong scale would flag the wrong answers.
+    // Guessed scales and directions are left out, as they are of the
+    // average: a low mark on the wrong scale or end would flag the wrong
+    // answers.
     for (const q of s.questions ?? []) {
       const w = q.window;
-      if (q.guessed || !w) continue;
+      if (q.guessed || q.directionGuessed || !w) continue;
       if (w.earlierN > 0) earlier = true;
       const who = { index: q.index, no: q.no, question: q.question, low: q.low, high: q.high, worse: q.worse === true };
       if (w.bad > 0) out.push({ kind: 'low', ...who, count: w.bad, mark: w.mark });
@@ -1033,10 +1045,10 @@ function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) 
       }
     }
     if (s.recentComments > 0) out.push({ kind: 'comments', count: s.recentComments });
-    // Answers with no readable date cannot be placed in or out of the window.
-    const undated = s.unreadable?.timestamps ?? 0;
-    if (undated > 0) out.push({ kind: 'setup', what: 'undated', count: undated });
   }
+  // Answers with no readable date cannot be placed in or out of the window.
+  const undated = !why || why === 'quiet' ? s.unreadable?.timestamps ?? 0 : 0;
+  if (undated > 0) out.push({ kind: 'setup', what: 'undated', count: undated });
   if (s?.needsChoice > 0) out.push({ kind: 'setup', what: 'choose', count: s.needsChoice, fix: 'check' });
   if (s?.doubtful?.length) out.push({ kind: 'setup', what: 'doubt', count: s.doubtful.length, fix: 'check' });
   if (lastError) {
@@ -1044,7 +1056,9 @@ function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) 
     out.push({ kind: 'setup', what: share ? 'share' : 'failed', fix: share || !TRANSIENT.has(lastError.kind) ? 'settings' : 'refresh' });
   }
   if (keyError && keyError !== lastError?.message) out.push({ kind: 'setup', what: 'key', fix: 'settings' });
-  return { why, earlier, list: out };
+  // 'quiet': answers, but none in the window (a paused survey, or a form now
+  // writing to another tab); the newest says how long.
+  return { why, earlier, list: out, ...(why === 'quiet' ? { newest: s.newest } : {}) };
 }
 
 // The reply to a columns save: a checked column whose answers read as

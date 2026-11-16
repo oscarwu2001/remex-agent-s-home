@@ -147,11 +147,13 @@ test('a flagged column read back from the cache is not promised its answers eith
   assert.doesNotMatch(html, /Answers show after the next update/);
 });
 
-test('dates waiting for the next read say so on the board and in the sheet', async () => {
+test('dates waiting for the next read are one line with a Refresh now link, and no flags line', async () => {
   const { fieldHtml, fieldSheetHtml } = await view();
   const s = { ...F.summarise(rows), datesWaiting: true, newest: null, oldest: null, newSince: null };
-  for (const html of [fieldHtml(field(s), { privacy: true }), fieldSheetHtml(field(s), { privacy: true })]) {
-    assert.match(html, /Dates show after the next update\. Refresh now to see them sooner\./);
+  const f = { ...field(s), flags: F.fieldFlags({ summary: s }) };
+  for (const html of [fieldHtml(f, { privacy: true }), fieldSheetHtml(f, { privacy: true })]) {
+    assert.match(html, /Dates show after the next update. <button type="button" class="link-btn" data-field="refresh">Refresh now<\/button>/);
+    assert.doesNotMatch(html, /Flags show after the next update|to see them sooner/);
   }
 });
 
@@ -196,7 +198,8 @@ test('where higher is worse, the flags say high scores and an average going up, 
   const { flagsHtml, flagText } = await view();
   const head = ['Timestamp', 'How difficult was setup? (1-5)'];
   const rows = [head, ...Array.from({ length: 10 }, (_, k) => [`2026-10-${String(1 + k).padStart(2, '0')} 09:00`, 2]), ['2026-11-12 09:00', 5], ['2026-11-13 09:00', 4], ['2026-11-14 09:00', 4]];
-  const s = F.summarise(rows, { now: NOW });
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[1], index: 1, role: 'score', low: 1, high: 5, worse: true }]);
+  const s = F.summarise(rows, { now: NOW, roles });
   const f = { ...field(s), flags: F.fieldFlags({ summary: s }) };
   assert.deepEqual(f.flags.list.map((x) => flagText(x, { privacy: true })), [
     '3 high scores on Question 1 in the last 7 days (4 or more on 1–5, higher is worse)',
@@ -216,7 +219,7 @@ test('nothing to flag only when the window was compared; otherwise the board say
   const said = (why) => flagsHtml({ ...field(s), flags: { why, earlier: false, list: [] } });
   assert.match(said('unread'), /Flags show after the first update/);
   assert.match(said('waiting'), /Flags show after the next update/);
-  assert.match(said('no-dates'), /No dates to compare: choose the timestamp column/);
+  assert.match(said('no-dates'), /No dates to compare yet\./);
   assert.match(said('no-dates'), /data-field="check">Check the columns</);
   for (const why of ['unread', 'waiting', 'no-dates']) assert.doesNotMatch(said(why), /Nothing to flag/, why);
   // A set-up problem still shows under any of them.
@@ -236,32 +239,66 @@ test('a set-up flag for unchosen columns replaces the note above the numbers, an
   assert.match(fieldHtml(field(s)), /Columns not checked yet/);
 });
 
-test('"Higher is worse" is a tick on score rows, suggested by the title, kept in the roles', async () => {
+test('a guessed direction needs a choice; choosing Score shows the guess as a tick to keep or untick', async () => {
   const { fieldColumnsHtml, rolesFrom, draftWith } = await view();
   const s = F.summarise([['Timestamp', 'How difficult was setup? (1-5)', 'Ease (1-5)'], ['2026-11-10 09:00', 2, 4], ['2026-11-11 09:00', 3, 5]]);
   const f = field(s);
-  const html = fieldColumnsHtml(f, { privacy: false });
-  assert.match(html, /<input type="checkbox" id="fc-worse-1" data-col="1" data-part="worse" aria-label="How difficult was setup\? \(1-5\): higher is worse" checked>/);
-  assert.match(html, /<input type="checkbox" id="fc-worse-2" data-col="2" data-part="worse" aria-label="Ease \(1-5\): higher is worse">/);
-  assert.deepEqual(rolesFrom(f, {}).roles.filter((r) => r.role === 'score').map((r) => [r.index, r.worse ?? false]), [[1, true], [2, false]]);
-  const unticked = draftWith({}, 1, 'worse', false);
+  const row = (html) => html.split('<li').find((x) => x.includes('How difficult'));
+  const before = fieldColumnsHtml(f, { privacy: false });
+  assert.match(row(before), /Needs a choice/);
+  assert.match(row(before), /Direction guessed/);
+  assert.match(row(before), /The app’s guess: Score, 1–5, higher is worse./);
+  assert.equal(rolesFrom(f, {}).missing, 1);
+  // A sure score row has the tick, unticked.
+  assert.match(before, /<input type="checkbox" id="fc-worse-2" data-col="2" data-part="worse" aria-label="Ease \(1-5\): higher is worse">/);
+  const chosen = draftWith({}, 1, 'role', 'score');
+  assert.match(fieldColumnsHtml(f, { privacy: false, draft: chosen }), /<input type="checkbox" id="fc-worse-1" data-col="1" data-part="worse" aria-label="How difficult was setup\? \(1-5\): higher is worse" checked>/);
+  assert.deepEqual(rolesFrom(f, chosen).roles.filter((r) => r.role === 'score').map((r) => [r.index, r.worse ?? false]), [[1, true], [2, false]]);
+  const unticked = draftWith(chosen, 1, 'worse', false);
   assert.equal(rolesFrom(f, unticked).roles.find((r) => r.index === 1).worse, undefined);
-  assert.deepEqual(F.checkRoles(rolesFrom(f, {}).roles).find((r) => r.index === 1), { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true });
-  // With privacy on the step only reads, and says so.
-  assert.match(fieldColumnsHtml(f, { privacy: true }), /Score, 1–5, higher is worse/);
+  assert.deepEqual(F.checkRoles(rolesFrom(f, chosen).roles).find((r) => r.index === 1), { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true });
+  // With privacy on the step only reads, and says the guess.
+  assert.match(fieldColumnsHtml(f, { privacy: true }), /The app’s guess: Score, 1–5, higher is worse./);
 });
 
-test('the read-only step links to the privacy switch that opens it', async () => {
-  const { fieldColumnsHtml, FIXES } = await view();
-  assert.match(fieldColumnsHtml(field(F.summarise(rows)), { privacy: true }), /<button type="button" class="link-btn" id="field-goto-switch" data-field="privacy-switch">Go to the switch<\/button>/);
-  assert.deepEqual(Object.keys(FIXES), ['check', 'settings', 'refresh']);
-});
 
-test('before the first update the section says when flags will show, with any set-up problem', async () => {
+
+test('before the first read, or when the summary failed, the section has no Flags block', async () => {
   const { fieldHtml } = await view();
-  const f = { enabled: true, sheetUrl: 'x', keyName: 'k.json', summary: null, flags: { why: 'unread', earlier: false, list: [{ kind: 'setup', what: 'share', fix: 'settings' }] } };
-  const html = fieldHtml(f);
-  assert.match(html, /Flags show after the first update/);
-  assert.match(html, /not shared/);
-  assert.doesNotMatch(html, /Nothing to flag/);
+  const unread = { enabled: true, sheetUrl: 'x', keyName: 'k.json', summary: null, flags: { why: 'unread', earlier: false, list: [{ kind: 'setup', what: 'share', fix: 'settings' }] } };
+  assert.doesNotMatch(fieldHtml(unread), /Flags|not shared/);
+  assert.doesNotMatch(fieldHtml({ ...unread, summaryError: 'The answers kept could not be summarised.' }), /Flags/);
+});
+
+test('while the error line shows, the share and failed flags are not said again', async () => {
+  const { fieldHtml } = await view();
+  const s = F.summarise(rows);
+  for (const [kind, what] of [['share', 'share'], ['network', 'failed']]) {
+    const f = { ...field(s), error: 'Share the sheet with the key’s reader address…', errorKind: kind, flags: F.fieldFlags({ summary: s, lastError: { kind, message: 'x' } }) };
+    const html = fieldHtml(f);
+    assert.equal((html.match(/The last update failed/g) ?? []).length, 1, what);
+    assert.doesNotMatch(html, /not shared with the key/, what);
+    // The sheet has no error line, so there the flag stays.
+    assert.ok(f.flags.list.some((x) => x.what === what));
+  }
+});
+
+test('the board says why the window could not be compared, each in its own words', async () => {
+  const { flagsHtml } = await view();
+  const s = F.summarise(rows);
+  const said = (flags) => flagsHtml({ ...field(s), flags: { earlier: false, list: [], ...flags } });
+  assert.match(said({ why: 'empty' }), /The sheet has no answers yet/);
+  assert.match(said({ why: 'quiet', newest: new Date(2026, 10, 2, 9).toISOString() }), /No answers in the last 7 days \(newest: [^)]+\)/);
+  const noDates = said({ why: 'no-dates' });
+  assert.match(noDates, /<p class="field-calm">No dates to compare yet\.<\/p><p class="field-fix"><button type="button" class="link-btn" data-field="check">Check the columns<\/button><\/p>/);
+  for (const why of ['empty', 'quiet', 'no-dates']) assert.doesNotMatch(said({ why }), /Nothing to flag/, why);
+});
+
+test('the sheet says which scores are turned round in the average, and which are left out for a guessed direction', async () => {
+  const { fieldSheetHtml } = await view();
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true }]);
+  const head = [['Timestamp', 'How difficult was setup? (1-5)', 'Pain relief achieved (0-10)'], ['2026-11-10 09:00', 2, 8], ['2026-11-11 09:00', 1, 9]];
+  const html = fieldSheetHtml(field(F.summarise(head, { roles })), { privacy: true });
+  assert.match(html, /higher is worse, counted inverted in the average/);
+  assert.match(html, /direction guessed<\/span>, not in the average/);
 });

@@ -54,7 +54,8 @@ const startupProblems = [];
 const problems = new Map(); // label|detail -> { label, detail, count, at }
 const PROBLEM_LIMIT = 20;
 
-function problem(label, detail = '') {
+// fix: what the board links the line to ('check', 'settings' or 'refresh'), if any.
+function problem(label, detail = '', fix = null) {
   const key = `${label}|${detail}`;
   const p = problems.get(key);
   if (p) {
@@ -62,7 +63,7 @@ function problem(label, detail = '') {
     p.at = Date.now();
     return;
   }
-  problems.set(key, { label, detail, count: 1, at: Date.now() });
+  problems.set(key, { label, detail, count: 1, at: Date.now(), ...(fix ? { fix } : {}) });
   syslog?.write('errors', 'problem', { what: label, detail });
   if (problems.size > PROBLEM_LIMIT) problems.delete(problems.keys().next().value);
 }
@@ -549,7 +550,7 @@ app.whenReady().then(() => {
     try {
       columns = fieldSurvey.checkRoles(saved.columns ?? []);
     } catch {
-      problem('The checked field feedback columns could not be read; check them again in Settings → Connections → Field feedback', fieldFile);
+      problem('The checked field feedback columns could not be read; check them again in Settings → Connections → Field feedback', fieldFile, 'check');
     }
     field = {
       enabled: saved.enabled === true,
@@ -558,7 +559,7 @@ app.whenReady().then(() => {
       columns,
     };
   } catch (err) {
-    if (err.code !== 'ENOENT') problem('The field feedback settings could not be read; field feedback is off until it is set again in Settings', fieldFile);
+    if (err.code !== 'ENOENT') problem('The field feedback settings could not be read; field feedback is off until it is set again in Settings → Connections → Field feedback', fieldFile, 'settings');
   }
   function dropFieldCache() {
     fieldCache = null;

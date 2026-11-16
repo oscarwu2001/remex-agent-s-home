@@ -1047,7 +1047,7 @@ test('answers with no readable date are a set-up flag, and stay out of the windo
   assert.deepEqual(list.map((f) => [f.kind, f.what ?? null, f.count ?? null]), [['setup', 'undated', 2]]);
 });
 
-test('on a scale where higher is worse, high answers and a rising average are flagged', () => {
+test('on a scale where higher is worse, once ticked, high answers and a rising average are flagged', () => {
   const head = ['How difficult was setup? (1-5)'];
   const s = F.summarise(dated(head, [[1, 2]]), { now: NOW });
   assert.deepEqual([s.columns[1].suggested.worse, s.columns[1].worse], [true, true]);
@@ -1056,18 +1056,77 @@ test('on a scale where higher is worse, high answers and a rising average are fl
     assert.equal(F.summarise(dated([h], [[1, 2]]), { now: NOW }).columns[1].suggested.worse, true, h);
   }
   const rows = dated(head, [...earlier([2]), [3, 5], [2, 4], [1, 4]]);
-  const { list } = flagsOf(rows);
-  assert.deepEqual(list.map((f) => [f.kind, f.count ?? null, f.mark ?? null, f.worse]), [['low', 3, 4, true], ['falling', null, null, true]]);
+  const ticked = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: true }]);
+  assert.deepEqual(flagsOf(rows, { roles: ticked }).list.map((f) => [f.kind, f.count ?? null, f.mark ?? null, f.worse]), [['low', 3, 4, true], ['falling', null, null, true]]);
   // Unticked by the user: a plain scale again, where those are good answers.
   const plain = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5 }]);
   assert.deepEqual(flagsOf(rows, { roles: plain }).list, []);
   // Ticked and saved: kept through checkRoles, the cache and a change of roles.
-  const ticked = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: true }]);
   assert.equal(ticked[1].worse, true);
   const cache = F.afterFetch(null, got(rows), { now: NOW, started: NOW, link: LINK, roles: ticked });
   assert.equal(F.summariseCache(cache, ticked, { now: NOW }).columns[1].worse, true);
   assert.equal(F.summariseCache(F.reroleCache(cache, ticked), ticked, { now: NOW }).columns[1].worse, true);
   assert.equal(F.summariseCache(JSON.parse(JSON.stringify(cache)), ticked, { now: NOW }).columns[1].worse, true);
+});
+
+test('a guessed direction is unsure: out of the flags and the average until the user chooses', () => {
+  const head = ['Pain relief achieved (0-10)'];
+  const rows = dated(head, [...earlier([9]), [3, 2], [2, 2], [1, 2]]);
+  const s = F.summarise(rows, { now: NOW });
+  const c = s.columns[1];
+  assert.deepEqual([c.role, c.suggested.worse, c.suggested.confidence, c.needsChoice], ['score', true, 'low', true]);
+  assert.equal(s.overall, null);
+  assert.deepEqual(F.fieldFlags({ summary: s }).list.map((f) => [f.kind, f.what ?? null]), [['setup', 'choose']]);
+  // Chosen "higher is better": the fall from 9 to 2 is flagged.
+  const better = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10 }]);
+  const chosen = F.summarise(rows, { now: NOW, roles: better });
+  assert.deepEqual(F.fieldFlags({ summary: chosen }).list.map((f) => [f.kind, f.worse]), [['low', false], ['falling', false]]);
+  assert.ok(chosen.overall);
+  for (const h of ['Discomfort (1-5)', 'Fatigue (1-5)', 'How tired were you? (1-5)', '術後疼痛 (1-5)', '頭痛 (1-5)', '不適程度 (1-5)', '不适程度 (1-5)']) {
+    const t = F.summarise(dated([h], [[1, 2]]), { now: NOW }).columns[1];
+    assert.deepEqual([t.suggested.worse, t.needsChoice], [true, true], h);
+  }
+});
+
+test('set-up problems are flags too, each with its fix', () => {
+  const s = F.summarise(form(['How satisfied are you overall?'], [[6], [7], [5]]));
+  const of = (o) => F.fieldFlags(o).list.map((f) => [f.kind, f.what, f.fix]);
+  assert.deepEqual(of({ summary: s }), [['setup', 'choose', 'check']]);
+  assert.deepEqual(of({ summary: null, lastError: { kind: 'network', message: 'No network' } }), [['setup', 'failed', 'refresh']]);
+  assert.deepEqual(of({ summary: null, lastError: { kind: 'missing', message: 'No sheet' } }), [['setup', 'failed', 'settings']]);
+  assert.deepEqual(of({ summary: null, lastError: { kind: 'share', message: 'Share the sheet…' } }), [['setup', 'share', 'settings']]);
+  assert.deepEqual(of({ summary: null, keyError: 'The key file…' }), [['setup', 'key', 'settings']]);
+});
+
+test('a window with no answers says so, with the newest answer; a sheet with no answers says that', () => {
+  const quiet = flagsOf(dated(['Ease (1-5)'], earlier([4])));
+  assert.deepEqual([quiet.why, quiet.list, quiet.newest], ['quiet', [], F.summarise(dated(['Ease (1-5)'], earlier([4]))).newest]);
+  assert.ok(quiet.newest);
+  assert.equal(F.fieldFlags({ summary: F.summarise([['Timestamp', 'Ease (1-5)']], { now: NOW }) }).why, 'empty');
+});
+
+test('a saved "higher is worse" that is neither true nor false is refused, not dropped', () => {
+  const role = (worse) => [{ header: 'Q', index: 0, role: 'score', low: 1, high: 5, worse }];
+  assert.throws(() => F.checkRoles(role('yes')), /could not be read/);
+  assert.throws(() => F.checkRoles(role(null)), /could not be read/);
+  assert.equal(F.checkRoles(role(false))[0].worse, undefined);
+  assert.equal(F.checkRoles([{ header: 'Q', index: 0, role: 'score', low: 1, high: 5 }])[0].worse, undefined);
+});
+
+test('a Chinese name with 很 in it is still a name; answers made only of scale words are choices', () => {
+  const s = F.summarise(form(['窗口'], [['王很美'], ['陳很好'], ['林很強'], ['王很美'], ['陳很好']]));
+  assert.deepEqual([roleOf(s, '窗口'), col(s, '窗口').needsChoice], ['identifying', true]);
+  const z = F.summarise(form(['整體'], [['非常滿意'], ['滿意'], ['非常滿意'], ['普通'], ['滿意'], ['非常滿意']]));
+  assert.equal(roleOf(z, '整體'), 'choice');
+});
+
+test('a chosen higher-is-worse column is turned round in the headline average', () => {
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5 },
+    { header: 'How difficult was setup? (1-5)', index: 2, role: 'score', low: 1, high: 5, worse: true }]);
+  const s = F.summarise(form(['Ease (1-5)', 'How difficult was setup? (1-5)'], [[4, 2], [5, 1]]), { roles });
+  // Ease 4 and 5; difficulty 2 and 1 count as 4 and 5.
+  assert.equal(s.overall.mean, 4.5);
+  assert.deepEqual(s.questions.map((q) => [q.worse, q.mean]), [[false, 4.5], [true, 1.5]]);
 });
 
 test('names with a scale word in them stay hidden names; answers made only of scale words are choices', () => {
