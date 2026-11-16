@@ -1287,7 +1287,7 @@ function renderProblems(s) {
   const list = (s.problems || []).map((p) => ({
     label: problemLabel(p, { privacy: prefs.private }),
     detail: p.detail,
-    fix: FIXES[p.fix] ? p.fix : null,
+    fix: FIXES[p.fix] || p.fix === 'line' ? p.fix : null, // 'line': LINE chats' own Settings
   }));
   for (const r of s.watcher.roots || []) {
     if (r.state !== 'ok' && r.state !== 'missing' && r.state !== 'pending') {

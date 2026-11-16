@@ -441,8 +441,9 @@ function scanFolder(dir, { read = new Set(), fsys = fs, prev = new Map() } = {})
     if (!st.isFile()) continue;
     entry.mtimeMs = st.mtimeMs;
     entry.size = st.size;
+    // Reused while unchanged; one that failed is tried again (a lock passes).
     const before = prev.get(file);
-    if (before && before.mtimeMs === st.mtimeMs && before.size === st.size && before.read === read.has(before.chat)) {
+    if (before && !before.problem && before.mtimeMs === st.mtimeMs && before.size === st.size && before.read === read.has(before.chat)) {
       files.push(before);
       continue;
     }
@@ -517,6 +518,8 @@ function lineProblems({ enabled, folder, scan }) {
 // ---- settings ------------------------------------------------------------------------
 
 // { enabled, folder, names, keywords, read: ticked chat names, marks: { hash: { what, at } } }
+// The file is the app's own and only ever written through here, so a value
+// of the wrong kind (a hand edit) is dropped rather than reported.
 const strList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : []);
 function normalise(s) {
   const marks = {};
@@ -645,7 +648,12 @@ const TMUX_SCRIPT = [
 
 const NAME_OK = /^[A-Za-z0-9_-]{1,40}$/;
 const WINDOWS_PATH = /^[A-Za-z]:[\\/]|^[A-Za-z]:$|^\\\\[^\\]/;
-const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+// PowerShell reads ' and the curly quotes ‘ ’ ‚ ‛ alike: each is doubled
+// inside a single-quoted string, where nothing else is special.
+const psQuote = (s) => `'${String(s).replace(/['‘’‚‛]/g, (q) => q + q)}'`;
+// The prompt is one argument to claude: Linux takes at most 128 KB in one,
+// and 20,000 UTF-16 units are at most 60 KB of UTF-8.
+const PROMPT_MAX = 20_000;
 
 // The one command that starts Claude, and the file to write first.
 // target 'tmux': a new window in the user's tmux session in WSL, in the
@@ -659,6 +667,7 @@ const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 function launchPlan({ target, session, cwd, prompt, promptFile, name }) {
   if (target !== 'tmux' && target !== 'wt') throw launchError('That is not a place the app can start Claude.');
   if (typeof prompt !== 'string' || !prompt.trim()) throw launchError('The prompt is empty.');
+  if (prompt.length > PROMPT_MAX) throw launchError(`The prompt is too long: at most ${PROMPT_MAX} characters.`);
   if (!NAME_OK.test(name ?? '')) throw launchError('That window name cannot be used.');
   if (typeof cwd !== 'string' || !cwd.trim()) throw launchError('Choose a folder first.');
   if (typeof promptFile !== 'string' || !WINDOWS_PATH.test(promptFile)) throw launchError('The prompt file has no place to go.');
@@ -746,7 +755,7 @@ function prunePrompts(dir, { now = Date.now(), maxAgeMs = 24 * 3600_000, fsys = 
 }
 
 module.exports = {
-  LineChatError, HEAD_BYTES, MAX_BYTES, WINDOW_DAYS, TMUX_SCRIPT, INFO_LINE,
+  LineChatError, HEAD_BYTES, MAX_BYTES, WINDOW_DAYS, TMUX_SCRIPT, INFO_LINE, PROMPT_MAX,
   decodeExport, parseExport, readHeader, mergeChats, relatedToYou, draftTodo,
   scanFolder, lineProblems, changeSettings, addTodo, localMs,
   promptDraft, toWslPath, launchPlan, windowName, parseSessions, tmuxSessions, prunePrompts,

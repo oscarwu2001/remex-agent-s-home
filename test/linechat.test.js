@@ -322,6 +322,20 @@ test('a missing folder, an unreadable export, an empty one, a bad encoding and u
   assert.deepEqual(L.lineProblems({ enabled: false, folder: dir, scan }), []);
 });
 
+test('an export that could not be read is tried again at the next scan, even when its time and size are the same', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, '[LINE] Busy.txt'), exp('[LINE] Chat history with Busy', '2026/11/16（一）', '10:00\tKen\thi'));
+  let locked = true;
+  const fsys = { ...fs, openSync: (f, ...a) => { if (locked) { const e = new Error('locked'); e.code = 'EBUSY'; throw e; } return fs.openSync(f, ...a); } };
+  const first = L.scanFolder(dir, { read: new Set(['Busy']), fsys });
+  assert.equal(first.files[0].problem, 'unreadable');
+  locked = false;
+  const prev = new Map(first.files.map((f) => [f.file, f]));
+  const second = L.scanFolder(dir, { read: new Set(['Busy']), fsys, prev });
+  assert.equal(second.files[0].problem, undefined);
+  assert.equal(second.files[0].messages[0].text, 'hi');
+});
+
 // ---- settings -------------------------------------------------------------------
 
 test('settings: names and keywords split on either comma, ticks by chat, marks by hash', () => {
@@ -439,6 +453,19 @@ test('a folder name with a quote is quoted for PowerShell, not broken out of', (
   const plan = L.launchPlan({ target: 'wt', cwd: "C:\\Users\\O'Neil\\repo", prompt: 'x', promptFile: "C:\\Users\\O'Neil\\p.txt", name: 'line-1' });
   const script = Buffer.from(plan.args[9], 'base64').toString('utf16le');
   assert.ok(script.includes("Set-Location -LiteralPath 'C:\\Users\\O''Neil\\repo'"), script);
+});
+
+test('PowerShell reads curly quotes as quotes too, so a folder name with one cannot end the string', () => {
+  const cwd = 'C:\\x\u2019; Write-Output INJECTED; \u2018\u201a\u201b';
+  const plan = L.launchPlan({ target: 'wt', cwd, prompt: 'x', promptFile: PROMPT_FILE, name: 'line-1' });
+  const script = Buffer.from(plan.args[9], 'base64').toString('utf16le');
+  assert.ok(script.includes("Set-Location -LiteralPath 'C:\\x\u2019\u2019; Write-Output INJECTED; \u2018\u2018\u201a\u201a\u201b\u201b'"), script);
+});
+
+test('launchPlan refuses a prompt longer than one command argument can carry', () => {
+  const base = { target: 'tmux', session: 'w', cwd: CWD, promptFile: PROMPT_FILE, name: 'line-1' };
+  assert.throws(() => L.launchPlan({ ...base, prompt: '字'.repeat(L.PROMPT_MAX + 1) }), /prompt is too long/);
+  assert.equal(L.launchPlan({ ...base, prompt: '字'.repeat(L.PROMPT_MAX) }).write.text.length, L.PROMPT_MAX);
 });
 
 test('launchPlan refuses what it cannot run: no session, no prompt, a folder the target cannot reach, an odd target', () => {
