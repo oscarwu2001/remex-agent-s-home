@@ -117,7 +117,10 @@ function weekdayOf(token) {
 // line shaped like one that it cannot (no such day, or the weekday is not
 // that day's: "Mon, 02/11/2026" is a Wednesday read month first); null for
 // a line that is not a date line at all.
-const DATE_YMD = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})\s*([（(][^)）]*[)）]|\S+)?$/;
+const DATE_YMD = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})\s*([（(][^)）]*[)）]|\S+)?$/;
+// Any line opening with a year and a separator is shaped like a date line:
+// one the app cannot read puts the day in doubt rather than being skipped.
+const DATE_SHAPED = /^\d{4}[/.-]/;
 const DATE_WMDY = /^([A-Za-z]+\.?),?\s+(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 function dateLine(line) {
   let y;
@@ -128,7 +131,7 @@ function dateLine(line) {
   if (m) [y, mo, d, token] = [Number(m[1]), Number(m[2]), Number(m[3]), m[4]];
   else {
     m = DATE_WMDY.exec(line);
-    if (!m) return null;
+    if (!m) return DATE_SHAPED.test(line) ? { bad: true } : null;
     [y, mo, d, token] = [Number(m[4]), Number(m[2]), Number(m[3]), m[1]];
   }
   const day = realDay(y, mo, d);
@@ -181,18 +184,38 @@ const MEDIA = {
   '[貼圖]': 'sticker', '[Sticker]': 'sticker', '[照片]': 'photo', '[Photo]': 'photo',
   '[檔案]': 'file', '[File]': 'file', '[影片]': 'video', '[Video]': 'video',
 };
+// A system line with no sender: the name it opens with (who joined, left or
+// unsent) is captured as its actor.
 const SYSTEM = [
-  ['joined', /^.+ (?:joined the (?:group|chat)|invited .+ to the (?:group|chat))\.?$/i],
-  ['joined', /^.+?(?:已)?(?:加入|邀請.+加入)(?:了)?(?:群組|聊天)。?$/],
-  ['left', /^.+ left the (?:group|chat)\.?$/i],
-  ['left', /^.+?(?:已)?(?:退出|離開)(?:了)?(?:群組|聊天)。?$/],
-  ['unsent', /^.+ unsent a message\.?$/i],
-  ['unsent', /^.+?(?:已)?收回(?:了)?(?:一則)?訊息。?$/],
+  ['joined', /^(.+?) (?:joined the (?:group|chat)|invited .+ to the (?:group|chat))\.?$/i],
+  ['joined', /^(.+?)(?:已)?(?:加入|邀請.+加入)(?:了)?(?:群組|群组|聊天)。?$/],
+  ['left', /^(.+?) left the (?:group|chat)\.?$/i],
+  ['left', /^(.+?)(?:已)?(?:退出|離開|离开)(?:了)?(?:群組|群组|聊天)。?$/],
+  ['unsent', /^(.+?) unsent a message\.?$/i],
+  ['unsent', /^(.+?)(?:已)?收回(?:了)?(?:一則|一则)?(?:訊息|讯息|消息)。?$/],
 ];
-const systemKind = (text) => SYSTEM.find(([, re]) => re.test(text))?.[0] ?? null;
-// Under a sender, a system line names that sender first ("Ken\tKen unsent a
-// message."); otherwise it is the sender's own words, however it reads.
-const senderSystemKind = (text, sender) => (text.startsWith(sender) ? systemKind(text) : null);
+function systemLine(text) {
+  for (const [kind, re] of SYSTEM) {
+    const m = re.exec(text);
+    if (m) return { kind, actor: m[1].trim() };
+  }
+  return null;
+}
+// Under a sender, a line is a system line only when it is exactly that
+// sender joining, leaving or unsending; anything else is their own words,
+// however it reads ("Anna joined the group." under Ann is a message).
+function senderSystemKind(text, sender) {
+  const s = escapeRe(sender);
+  const exact = [
+    ['joined', new RegExp(`^${s} joined the (?:group|chat)\\.?$`)],
+    ['left', new RegExp(`^${s} left the (?:group|chat)\\.?$`)],
+    ['unsent', new RegExp(`^${s} unsent a message\\.?$`)],
+    ['joined', new RegExp(`^${s}已加入(?:群組|群组)。?$`)],
+    ['left', new RegExp(`^${s}已退出(?:群組|群组)。?$`)],
+    ['unsent', new RegExp(`^${s}已收回(?:訊息|讯息|消息)。?$`)],
+  ];
+  return exact.find(([, re]) => re.test(text))?.[0] ?? null;
+}
 
 // A line that is a message line: its clock and what follows the first tab.
 function messageParts(line) {
@@ -261,11 +284,15 @@ function parseExport(input, { fileName = '' } = {}) {
   let foreign = false; // another chat's export pasted in: nothing after it is filed here
   const messages = [];
   let times = new Map(); // at|sender|kind|text -> how many so far
-  const push = (at, sender, kind, body) => {
+  // actor: who a system line is about (its sender, or the name it opens
+  // with when it has none); it is not part of the hash.
+  const push = (at, sender, kind, body, actor = sender) => {
     const key = `${at}\u0000${sender}\u0000${kind}\u0000${body}`;
     const n = (times.get(key) ?? 0) + 1;
     times.set(key, n);
-    messages.push({ at, ms: localMs(at), sender, kind, text: body, hash: hashOf(at, sender, kind, body, n) });
+    const m = { at, ms: localMs(at), sender, kind, text: body, hash: hashOf(at, sender, kind, body, n) };
+    if (kind !== 'text') m.actor = actor;
+    messages.push(m);
   };
   // A second export of this chat pasted after the first (its BOM or its
   // header again): counting starts over, so each message gets the hash it
@@ -321,18 +348,32 @@ function parseExport(input, { fileName = '' } = {}) {
       continue;
     }
     const parts = messageParts(line);
-    if (!parts || !day) {
+    if (!parts) {
       unread += 1;
       continue;
     }
-    const at = `${day} ${parts.time}`;
     const tab = parts.rest.indexOf('\t');
     const sender = tab < 0 ? '' : parts.rest.slice(0, tab).trim();
     let body = tab < 0 ? parts.rest : parts.rest.slice(tab + 1);
+    if (!day) {
+      // A message under a day in doubt is counted, not kept. A quoted one
+      // is followed to its end: all its lines are counted with it, and a
+      // date line among them gives no day.
+      let end = i;
+      if (sender && body.startsWith('"')) {
+        const q = quoted(body, lines, i);
+        if (q.unclosed) end = q.stop - 1;
+        else if (!q.literal) end = q.last;
+      }
+      unread += lines.slice(i, end + 1).filter((l) => l.trim()).length;
+      i = end;
+      continue;
+    }
+    const at = `${day} ${parts.time}`;
     // A line with no sender is a system line or nothing the app knows.
     if (!sender) {
-      const kind = systemKind(body.trim());
-      if (kind) push(at, '', kind, '');
+      const sys = systemLine(body.trim());
+      if (sys) push(at, '', sys.kind, '', sys.actor);
       else unread += 1;
       continue;
     }
@@ -403,27 +444,45 @@ function mergeChats(exports) {
   for (const [chat, list] of groups) {
     const when = (e) => localMs(e.savedAt) ?? e.mtimeMs ?? 0;
     const newestFirst = [...list].sort((a, b) => when(b) - when(a));
-    // The newest export is the truth for the time it covers (its first to
-    // last message): a message unsent since, or edited, is as it says. An
-    // older export adds only what lies outside every newer one's span.
+    // Each message once, by its hash. Inside the time a newer export covers
+    // (its first to last message), an older export's message the newer one
+    // lacks is dropped only when the newer one shows that sender unsending
+    // a message that minute; any other is kept and counted (olderOnly), as
+    // the newer export may have been cut or saved from another device.
     const spans = [];
     const byHash = new Map();
+    const unsent = new Map(); // at|actor -> unsent events not yet matched
+    const unsentKey = (at, who) => `${at}\u0000${who}`;
+    let olderOnly = 0;
     for (const e of newestFirst) {
       let lo = Infinity;
       let hi = -Infinity;
+      const own = [];
       for (const m of e.messages ?? []) {
         const ms = m.ms ?? 0;
         if (ms < lo) lo = ms;
         if (ms > hi) hi = ms;
-        if (spans.some(([a, b]) => ms >= a && ms <= b) || byHash.has(m.hash)) continue;
+        if (m.kind === 'unsent') own.push(unsentKey(m.at, m.actor ?? m.sender));
+        if (byHash.has(m.hash)) continue;
+        if (spans.some(([a, b]) => ms >= a && ms <= b)) {
+          const k = unsentKey(m.at, m.sender);
+          const left = unsent.get(k) ?? 0;
+          if (m.sender && left > 0) {
+            unsent.set(k, left - 1);
+            continue;
+          }
+          olderOnly += 1;
+        }
         byHash.set(m.hash, { ...m, chat });
       }
+      // This export's unsent events stand for the exports older than it.
+      for (const k of own) unsent.set(k, (unsent.get(k) ?? 0) + 1);
       if (lo <= hi) spans.push([lo, hi]);
     }
     const messages = [...byHash.values()].sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0));
     out.push({
       chat, file: newestFirst[0].file, files: newestFirst.map((e) => e.file), savedAt: newestFirst[0].savedAt ?? null,
-      messages, unread: list.reduce((n, e) => n + (e.unread ?? 0), 0),
+      messages, unread: list.reduce((n, e) => n + (e.unread ?? 0), 0), olderOnly,
       newestMs: messages.length ? messages[messages.length - 1].ms : null,
     });
   }
@@ -442,14 +501,16 @@ function mentions(text, name) {
   const t = text.normalize('NFKC');
   const n = name.normalize('NFKC');
   if (CJK.test(n)) return t.toLowerCase().includes(n.toLowerCase());
-  return new RegExp(`(?<![\\p{L}\\p{N}_@.\\-])@?${escapeRe(n)}(?![\\p{L}\\p{N}_@]|[.\\-][\\p{L}\\p{N}])`, 'iu').test(t);
+  // Bounded only by Latin letters and digits: "請@Mei", "麻煩Mei看" and
+  // "ok@Mei" are mentions; "mei@…" (an address) and "bob@mei.com" are not.
+  return new RegExp(`(?<![\\p{Script=Latin}\\p{Nd}_.\\-])${escapeRe(n)}(?![\\p{Script=Latin}\\p{Nd}_@]|[.\\-][\\p{Script=Latin}\\p{Nd}])`, 'iu').test(t);
 }
 // The user's own words that take something on. The text is first made
 // plain (full-width to half-width, curly apostrophes straight), and the
 // phrases that only look like one (我來不及 "I can't make it", 我來了
 // "I'm here") are taken out.
 const COMMITMENT = /我來|我来|我處理|我处理|我會處理|我会处理|我負責|我负责|\bI'll\b|\bI will\b/i;
-const NOT_COMMITMENT = /我[來来]不及|我[來来]了/g;
+const NOT_COMMITMENT = /我[來来]不及|我[來来]了(?!解)/g; // 我來了解 "let me look into it" stays one
 const plainText = (s) => s.normalize('NFKC').replace(/[‘’‛′]/g, "'");
 const commitmentIn = (text) => COMMITMENT.exec(plainText(text).replace(NOT_COMMITMENT, ' '));
 
@@ -506,9 +567,10 @@ function readHead(file, size, fsys) {
 
 // Every .txt export in the folder, named from its first lines; the chats in
 // `read` (ticked by the user) are parsed in full. prev: the last scan's
-// entries by file, reused while a file's time, size and tick are the same;
-// one that failed is tried again a minute after it failed (a lock passes),
-// not on every scan. Each entry: { file, name, chat, chatFrom, savedAt,
+// entries by file, reused while a file's time, size and tick are the same.
+// One that could not be read is tried again a minute after it failed (a
+// lock passes), not on every scan; one in an unknown encoding, empty or too
+// large stays as it is until the file changes. Each entry: { file, name, chat, chatFrom, savedAt,
 // mtimeMs, size, read, messages?, unread?, problem?: unreadable | encoding |
 // empty | too-large, code?, failedAt? }.
 const RETRY_MS = 60_000;
@@ -536,7 +598,7 @@ function scanFolder(dir, { read = new Set(), fsys = fs, prev = new Map(), now = 
     entry.size = st.size;
     const before = prev.get(file);
     if (before && before.mtimeMs === st.mtimeMs && before.size === st.size && before.read === read.has(before.chat)
-      && (!before.problem || now - (before.failedAt ?? 0) < RETRY_MS)) {
+      && (before.problem !== 'unreadable' || now - (before.failedAt ?? 0) < RETRY_MS)) {
       files.push(before);
       continue;
     }
@@ -582,8 +644,9 @@ function scanFolder(dir, { read = new Set(), fsys = fs, prev = new Map(), now = 
 // label never holds a chat's name or words, and says what to do next; the
 // raw error codes go in `detail` (file names, the folder), which shows only
 // with privacy mode off. fix 'line': a link to Settings. read: the ticked
-// chats, to count those with no export in the folder.
-function lineProblems({ enabled, folder, scan, read = [] }) {
+// chats, to count those with no export in the folder. olderOnly: messages
+// only older exports hold inside a newer export's time (mergeChats).
+function lineProblems({ enabled, folder, scan, read = [], olderOnly = 0 }) {
   if (!enabled || !folder || !scan) return [];
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
@@ -614,6 +677,11 @@ function lineProblems({ enabled, folder, scan, read = [] }) {
   const gone = read.filter((c) => !present.has(c)).length;
   if (gone) {
     add(`${gone === 1 ? '1 ticked chat has' : `${gone} ticked chats have`} no export in the folder; save ${them(gone)} from LINE again, or untick ${them(gone)} in Settings`, '', 'line');
+  }
+  if (olderOnly > 0) {
+    add(olderOnly === 1
+      ? '1 message in older exports is not in the newest export of its chat; it is still listed'
+      : `${olderOnly} messages in older exports are not in the newest export of their chat; they are still listed`);
   }
   return out;
 }
@@ -703,10 +771,15 @@ function changeSettings(current, change = {}, { now = Date.now() } = {}) {
 
 // A to-do on a project of the shared list, through projects.js: read afresh,
 // changed, written whole (temp file + rename), fields it does not know kept.
-// A list it cannot read or parse is left alone and the reason thrown.
+// A list it cannot read or parse is left alone and the reason thrown; a
+// read failure's error code goes on the error (err.code), not in its words.
 function addTodo(file, { project, text }, fsys = fs) {
   const loaded = projectList.loadProjects(file, fsys);
-  if (!loaded.raw) throw new Error(`The project list cannot be changed: ${loaded.problems[0]}`);
+  if (!loaded.raw) {
+    const unread = /could not be read \(([^)]+)\)/.exec(loaded.problems[0] ?? '');
+    if (unread) throw Object.assign(new Error('The project list could not be read.'), { code: unread[1] });
+    throw new Error(`The project list cannot be changed: ${loaded.problems[0]}`);
+  }
   const next = projectList.applyChange(loaded.raw, { op: 'add-todo', project, text });
   projectList.saveProjects(file, next, fsys);
 }
@@ -811,10 +884,13 @@ function launchPlan({ target, session, cwd, prompt, promptFile, name, distro = n
   const write = { file: promptFile, text: prompt };
   if (target === 'tmux') {
     if (typeof session !== 'string' || !session.trim()) throw launchError('Choose a tmux session.');
+    // tmux reads an argument ending in ; as the end of its command: such a
+    // folder goes as \; which tmux turns back into ;.
+    const tmuxArg = (a) => (a.endsWith(';') ? `${a.slice(0, -1)}\\;` : a);
     return {
       write,
       file: 'wsl.exe',
-      args: ['-e', 'tmux', 'new-window', '-t', `=${session}:`, '-n', name, 'sh', '-c', TMUX_SCRIPT, 'agents-home', toWslPath(promptFile), toWslPath(cwd, { distro })],
+      args: ['-e', 'tmux', 'new-window', '-t', `=${session}:`, '-n', name, 'sh', '-c', TMUX_SCRIPT, 'agents-home', tmuxArg(toWslPath(promptFile)), tmuxArg(toWslPath(cwd, { distro }))],
       label: `tmux window ${name}`,
     };
   }
@@ -844,8 +920,9 @@ function parseSessions(text) {
 }
 
 // The user's tmux sessions in WSL, asked only when a distro is already
-// running (asking would start one). { sessions, why }: why says, in words,
-// why there are none.
+// running (asking would start one). { sessions, why, code? }: why says, in
+// words, why there are none and what to do; code (for the system log) is
+// the error code when WSL could not be asked.
 async function tmuxSessions({ platform = process.platform, execFile = childProcess.execFile } = {}) {
   if (platform !== 'win32') return { sessions: [], why: 'Starting Claude from here works only on Windows.' };
   const { distros, problem } = await runningDistros({ platform, execFile });
@@ -857,8 +934,10 @@ async function tmuxSessions({ platform = process.platform, execFile = childProce
         const said = stderr ? decode(Buffer.from(stderr)) : '';
         if (typeof err.code === 'number') {
           resolve({ sessions: [], why: /not found|no such file|execvp/i.test(said) ? 'tmux is not installed in WSL.' : 'No tmux session is running in WSL.' });
+        } else if (err.killed) {
+          resolve({ sessions: [], why: 'WSL did not answer in time. Choose New Windows Terminal tab, or open this sheet again.', code: err.code || 'timeout' });
         } else {
-          resolve({ sessions: [], why: `WSL could not be asked for its tmux sessions (${err.killed ? 'timed out' : err.code || err.message}).` });
+          resolve({ sessions: [], why: 'WSL did not answer. Choose New Windows Terminal tab, or start WSL and open this sheet again.', code: err.code || 'error' });
         }
         return;
       }
@@ -890,32 +969,54 @@ function wslProbe(dir, { execFile = childProcess.execFile } = {}) {
 
 // Prompt files hold a chat's words: each is removed a day after it was
 // written (all of them when maxAgeMs is 0, as the feature is turned off).
-// Returns how many went and the error codes of those that did not.
+// A file dated in the future (a clock set back) is kept and counted.
+// Returns { removed, kept, failed: codes of files that could not go,
+// folderError: the code when the folder itself could not be listed }; no
+// folder yet is not an error.
 function prunePrompts(dir, { now = Date.now(), maxAgeMs = 24 * 3600_000, fsys = fs } = {}) {
   let names;
   try {
     names = fsys.readdirSync(dir);
   } catch (err) {
-    return { removed: 0, failed: err.code === 'ENOENT' ? [] : [err.code || 'error'] };
+    return { removed: 0, kept: 0, failed: [], folderError: err.code === 'ENOENT' ? null : err.code || 'error' };
   }
   let removed = 0;
+  let kept = 0;
   const failed = [];
   for (const name of names) {
     const file = path.join(dir, name);
     try {
-      if (maxAgeMs > 0 && now - fsys.statSync(file).mtimeMs < maxAgeMs) continue;
+      if (maxAgeMs > 0 && now - fsys.statSync(file).mtimeMs < maxAgeMs) {
+        kept += 1;
+        continue;
+      }
       fsys.rmSync(file, { force: true });
       removed += 1;
     } catch (err) {
       failed.push(err.code || 'error');
     }
   }
-  return { removed, failed };
+  return { removed, kept, failed, folderError: null };
+}
+
+// Marks (added, dismissed) saved under a message's hash by an earlier
+// version move to the item's key, unless one is already there. hits:
+// [{ key, hash }]. Returns { marks, changed }.
+function migrateMarks(marks, hits) {
+  const out = { ...marks };
+  let changed = false;
+  for (const h of hits) {
+    if (!h.hash || h.hash === h.key || !Object.hasOwn(out, h.hash)) continue;
+    if (!Object.hasOwn(out, h.key)) out[h.key] = out[h.hash];
+    delete out[h.hash];
+    changed = true;
+  }
+  return { marks: out, changed };
 }
 
 module.exports = {
   LineChatError, HEAD_BYTES, MAX_BYTES, WINDOW_DAYS, TMUX_SCRIPT, INFO_LINE, PROMPT_MAX,
   decodeExport, parseExport, readHeader, mergeChats, relatedToYou, draftTodo,
   scanFolder, lineProblems, changeSettings, addTodo, localMs,
-  promptDraft, wslTarget, toWslPath, launchPlan, windowName, parseSessions, tmuxSessions, wslProbe, prunePrompts,
+  promptDraft, wslTarget, toWslPath, launchPlan, windowName, parseSessions, tmuxSessions, wslProbe, prunePrompts, migrateMarks,
 };

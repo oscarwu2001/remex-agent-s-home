@@ -694,7 +694,143 @@ test('prunePrompts removes prompt files older than a day and keeps the rest', ()
   fs.writeFileSync(path.join(dir, 'new.txt'), 'y');
   const day = 24 * 3600_000;
   fs.utimesSync(path.join(dir, 'old.txt'), new Date(Date.now() - 2 * day), new Date(Date.now() - 2 * day));
-  assert.deepEqual(L.prunePrompts(dir, { now: Date.now() }), { removed: 1, failed: [] });
+  assert.deepEqual(L.prunePrompts(dir, { now: Date.now() }), { removed: 1, kept: 1, failed: [], folderError: null });
   assert.deepEqual(fs.readdirSync(dir), ['new.txt']);
-  assert.deepEqual(L.prunePrompts(path.join(dir, 'none')), { removed: 0, failed: [] });
+  assert.deepEqual(L.prunePrompts(path.join(dir, 'none')), { removed: 0, kept: 0, failed: [], folderError: null });
+});
+
+test('prunePrompts keeps a future-dated file and counts it, and says apart when the folder cannot be read', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'future.txt'), 'x');
+  const later = new Date(Date.now() + 2 * 24 * 3600_000);
+  fs.utimesSync(path.join(dir, 'future.txt'), later, later);
+  assert.deepEqual(L.prunePrompts(dir), { removed: 0, kept: 1, failed: [], folderError: null });
+  // Turned off: everything goes, a future-dated file too.
+  assert.deepEqual(L.prunePrompts(dir, { maxAgeMs: 0 }), { removed: 1, kept: 0, failed: [], folderError: null });
+  const fsys = { ...fs, readdirSync: () => { throw Object.assign(new Error('no'), { code: 'EACCES' }); } };
+  assert.deepEqual(L.prunePrompts(dir, { fsys }), { removed: 0, kept: 0, failed: [], folderError: 'EACCES' });
+});
+
+// ---- round 3 -------------------------------------------------------------------------
+
+test('an @mention right after any character is found, and a Latin name between CJK characters too', () => {
+  const hits = (text) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
+  for (const text of ['請@Mei 確認一下', '麻煩@Mei 看報告', '好的@Mei Lin 明天交', 'ok@Mei please', '麻煩Mei看一下']) assert.equal(hits(text), 1, text);
+  for (const text of ['mei@example.com', 'Mei-Ling', 'bob@mei.com']) assert.equal(hits(text), 0, text);
+});
+
+test('a line is a system line under its sender only when it is exactly that sender joining, leaving or unsending', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with S2', '2026/11/16（一）',
+    '10:00\tAnn\tAnnouncement: @Mei please make sure the new hire joined the group',
+    '10:01\tAnn\tAnn here, @Mei can you check whether Bob left the chat.',
+    '10:02\tAnn\tAnn: @Mei I unsent a message',
+    '10:03\t小明\t小明請@梅幫忙收回訊息',
+    '10:04\tAnn\tAnna joined the group.',
+    '10:05\tKen\tKenji joined the group.',
+    '10:06\tAnn\tAnn joined the group.',
+    '10:07\t小明\t小明已退出群組',
+    '10:08\t小華\t小華已收回訊息',
+    '10:09\t小華\t小華已加入群組'));
+  assert.equal(r.unread, 0);
+  assert.deepEqual(r.messages.map((m) => m.kind), ['text', 'text', 'text', 'text', 'text', 'text', 'joined', 'left', 'unsent', 'joined']);
+  assert.equal(r.messages[5].text, 'Kenji joined the group.');
+});
+
+test('a quoted message under a day in doubt is followed to its end and counted, and its lines give no day', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with Q3',
+    '2026/11/16（一）', '09:00\tKen\tok',
+    '2026/13/40（一）', '09:01\tKen\t"line one', '2026/11/20（五）', 'end"', '09:02\tKen\tstill no day',
+    '2026/11/21（六）', '09:03\tKen\tback'));
+  assert.equal(r.unread, 5);
+  assert.deepEqual(r.messages.map((m) => `${m.at} ${m.text}`), ['2026-11-16 09:00 ok', '2026-11-21 09:03 back']);
+});
+
+test('inside the newest export’s span an older message is dropped only when the newest unsent it; one the newest just lacks is kept and counted', () => {
+  const parse = (file, ...lines) => ({ ...L.parseExport(exp('[LINE] Chat history with G', ...lines)), file, mtimeMs: 1 });
+  const older = parse('old.txt', 'Saved on: 11/16/2026, 10:40', '2026/11/16（一）', '10:00\tAna\tstart', '10:30\tKen\t@Mei gap message', '10:35\tKen\t@Mei unsent later');
+  const newer = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen\tKen unsent a message.', '11:00\tAna\tend');
+  const [chat] = L.mergeChats([older, newer]);
+  assert.deepEqual(chat.messages.map((m) => `${m.at} ${m.kind} ${m.text}`), [
+    '2026-11-16 10:00 text start', '2026-11-16 10:30 text @Mei gap message', '2026-11-16 10:35 unsent ', '2026-11-16 11:00 text end',
+  ]);
+  assert.equal(chat.olderOnly, 1);
+  // A system line with no sender names who unsent: that works too.
+  const newer2 = parse('new2.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tAna\tstart', '10:35\tKen unsent a message.', '11:00\tAna\tend');
+  const [chat2] = L.mergeChats([older, newer2]);
+  assert.ok(!chat2.messages.some((m) => m.text.includes('unsent later')));
+  assert.equal(chat2.olderOnly, 1);
+  const labels = L.lineProblems({ enabled: true, folder: 'x', scan: { error: null, files: [] }, olderOnly: 2 }).map((p) => p.label);
+  assert.deepEqual(labels, ['LINE chats: 2 messages in older exports are not in the newest export of their chat; they are still listed']);
+});
+
+test('an export with an encoding, empty or size problem is not read again until it changes; an unreadable one is retried', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, '[LINE] Odd.txt');
+  fs.writeFileSync(file, Buffer.from([0x41, 0xff, 0xfe, 0x80, 0x0a]));
+  let opens = 0;
+  const fsys = { ...fs, openSync: (...a) => { opens += 1; return fs.openSync(...a); } };
+  const now = Date.now();
+  const first = L.scanFolder(dir, { read: new Set(['Odd']), fsys, now });
+  assert.equal(first.files[0].problem, 'encoding');
+  const later = L.scanFolder(dir, { read: new Set(['Odd']), fsys, now: now + 120_000, prev: new Map(first.files.map((f) => [f.file, f])) });
+  assert.equal(later.files[0].problem, 'encoding');
+  assert.equal(opens, 1, 'not read again while unchanged');
+  fs.writeFileSync(file, exp('[LINE] Chat history with Odd', '2026/11/16（一）', '10:00\tKen\tfixed'));
+  const changed = L.scanFolder(dir, { read: new Set(['Odd']), fsys, now: now + 130_000, prev: new Map(later.files.map((f) => [f.file, f])) });
+  assert.equal(changed.files[0].messages[0].text, 'fixed');
+});
+
+test('a line starting with a year and a separator is date-shaped: YYYY-MM-DD reads, anything else there puts the day in doubt', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with D2',
+    '2026-11-16（一）', '09:00\tKen\ta',
+    '2026/11/16 is the deadline', '09:01\tKen\tlost',
+    '2026-11-17', '09:02\tKen\tb'));
+  assert.equal(r.unread, 2);
+  assert.deepEqual(r.messages.map((m) => `${m.at} ${m.text}`), ['2026-11-16 09:00 a', '2026-11-17 09:02 b']);
+});
+
+test('commitment: “我來了解一下” is one; only “我來了” on its own is not', () => {
+  const hits = (text) => L.relatedToYou(chatOf(`09:00\tMei\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
+  assert.equal(hits('我來了解一下'), 1);
+  assert.equal(hits('我來了'), 0);
+});
+
+test('marks saved under a message hash move to the item’s key', () => {
+  const hits = [{ key: 'aaaaaaaaaaaaaaa1', hash: 'bbbbbbbbbbbbbbb1' }, { key: 'aaaaaaaaaaaaaaa2', hash: 'bbbbbbbbbbbbbbb2' }];
+  const r = L.migrateMarks({ bbbbbbbbbbbbbbb1: { what: 'dismissed', at: 5 }, aaaaaaaaaaaaaaa2: { what: 'added', at: 6 }, cccccccccccccccc: { what: 'added', at: 7 } }, hits);
+  assert.deepEqual(r, {
+    marks: { aaaaaaaaaaaaaaa1: { what: 'dismissed', at: 5 }, aaaaaaaaaaaaaaa2: { what: 'added', at: 6 }, cccccccccccccccc: { what: 'added', at: 7 } },
+    changed: true,
+  });
+  assert.equal(L.migrateMarks(r.marks, hits).changed, false);
+});
+
+test('a folder name ending in ; reaches tmux as \\; so tmux does not end its command there', () => {
+  const plan = L.launchPlan({ target: 'tmux', session: 'work', cwd: 'C:\\work\\a;', prompt: 'x', promptFile: PROMPT_FILE, name: 'line-0905' });
+  assert.deepEqual(plan.args, tmuxArgs('/mnt/c/work/a\\;'));
+  assert.deepEqual(L.launchPlan({ target: 'tmux', session: 'work', cwd: 'C:\\work\\a;b', prompt: 'x', promptFile: PROMPT_FILE, name: 'line-0905' }).args, tmuxArgs('/mnt/c/work/a;b'));
+});
+
+test('tmuxSessions says what to do in words and keeps the error code apart', async () => {
+  const exec = (second) => {
+    let n = 0;
+    return (file, args, opts, cb) => {
+      n += 1;
+      if (n === 1) return cb(null, Buffer.from('Ubuntu\r\n', 'utf16le'), Buffer.from(''));
+      return cb(second, Buffer.from(''), Buffer.from(''));
+    };
+  };
+  for (const err of [Object.assign(new Error('x'), { code: 'EPERM' }), Object.assign(new Error('x'), { killed: true, code: null })]) {
+    const r = await L.tmuxSessions({ platform: 'win32', execFile: exec(err) });
+    assert.doesNotMatch(r.why, /EPERM|ETIMEDOUT|timed out|\(/, r.why);
+    assert.match(r.why, /Choose New Windows Terminal tab/);
+    assert.equal(r.code, err.code ?? 'timeout');
+  }
+});
+
+test('a project list that cannot be read is refused with its code apart from the words', () => {
+  const file = path.join(tmpDir(), 'projects.json');
+  fs.writeFileSync(file, '{"version":1,"projects":[]}');
+  const fsys = { ...fs, readFileSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } };
+  assert.throws(() => L.addTodo(file, { project: 'p1', text: 'x' }, fsys), (err) => err.code === 'EBUSY' && !/EBUSY/.test(err.message));
 });

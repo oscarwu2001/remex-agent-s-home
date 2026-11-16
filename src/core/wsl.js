@@ -31,7 +31,12 @@ function runningDistros({ platform = process.platform, execFile = childProcess.e
         // be running either, so nothing that could be shown is hidden.
         resolve({ distros: [], problem: null });
       } else if (err) {
-        resolve({ distros: [], problem: `WSL could not be asked for its running distros (${err.killed ? 'timed out' : err.code || err.message})` });
+        resolve({
+          distros: [],
+          problem: err.killed
+            ? 'WSL timed out when asked which distros are running; its sessions show again once it answers. If this stays, restart WSL with wsl --shutdown.'
+            : 'WSL could not be asked which distros are running; its sessions show again once it answers. If this stays, restart WSL with wsl --shutdown.',
+        });
       } else {
         const distros = decode(stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
         resolve({ distros, problem: null });

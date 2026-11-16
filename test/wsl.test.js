@@ -58,6 +58,14 @@ test('a non-zero exit (nothing running) is not a problem', async () => {
   assert.deepEqual(await runningDistros({ platform: 'win32', execFile }), { distros: [], problem: null });
 });
 
+test('a failure to ask WSL is reported in words that say what to do, without its error code', async () => {
+  for (const err of [errWith('EPERM'), errWith(null, { killed: true, signal: 'SIGTERM' })]) {
+    const got = await runningDistros({ platform: 'win32', execFile: fakeExec({ err }).execFile });
+    assert.doesNotMatch(got.problem, /EPERM|SIGTERM|\(/);
+    assert.match(got.problem, /restart WSL/);
+  }
+});
+
 test('wsl.exe timing out is reported', async () => {
   const { execFile } = fakeExec({ err: errWith(null, { killed: true, signal: 'SIGTERM' }) });
   const got = await runningDistros({ platform: 'win32', execFile });
