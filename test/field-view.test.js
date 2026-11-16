@@ -86,3 +86,43 @@ test('a column turned into a score has no scale until the user picks one', async
   const draft = draftWith(draftWith(draftWith({}, GUESSED, 'role', 'comment'), 3, 'role', 'score'), 3, 'high', '5');
   assert.equal(rolesFrom(f, draft).missing, 1);
 });
+
+test('the reply to Save shows even when the step has no rows to draw, and with privacy on', async () => {
+  const { fieldColumnsHtml } = await view();
+  assert.match(fieldColumnsHtml({ summary: null }, { privacy: false, error: 'Not saved: the sheet has not been read yet.' }), /Not saved: the sheet has not been read yet\./);
+  assert.match(fieldColumnsHtml(field(F.summarise(rows)), { privacy: true, note: 'Columns saved.' }), /Columns saved\./);
+});
+
+test('with privacy on, how to check the columns comes first, before the list', async () => {
+  const { fieldColumnsHtml } = await view();
+  const html = fieldColumnsHtml(field(F.summarise(rows)), { privacy: true });
+  assert.ok(html.indexOf('Turn off') < html.indexOf('<ol'), 'the turn-off line is under the first hint');
+});
+
+test('a scale not chosen yet offers "Choose…", like the role', async () => {
+  const { fieldColumnsHtml, draftWith } = await view();
+  const html = fieldColumnsHtml(field(F.summarise(rows)), { privacy: false, draft: draftWith({}, GUESSED, 'role', 'score') });
+  const row = html.split('<li').find((x) => x.includes('How satisfied'));
+  assert.equal((row.match(/<option value="" selected>Choose…<\/option>/g) ?? []).length, 2);
+});
+
+test('a checked comment column whose answers now look like emails is tagged in the step and named in the sheet', async () => {
+  const { fieldColumnsHtml, fieldSheetHtml } = await view();
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role: 'comment' }]);
+  const s = F.summarise([['Timestamp', 'Anything else?'], ['2026-11-10 09:00', 'a@example.org'], ['2026-11-11 09:00', 'b@example.org'], ['2026-11-12 09:00', 'Fine']], { roles });
+  for (const privacy of [true, false]) {
+    assert.match(fieldColumnsHtml(field(s), { privacy }), /Answers look like emails or phone numbers/);
+    const sheet = fieldSheetHtml(field(s), { privacy });
+    assert.match(sheet, /1 column checked as comments or choices now looks like emails or phone numbers/);
+    assert.doesNotMatch(sheet, /example\.org/);
+  }
+});
+
+test('a column whose answers the cache does not keep is not said to have no answers', async () => {
+  const { fieldColumnsHtml } = await view();
+  const sheet = [['Timestamp', 'Who filled this in?'], ['2026-11-10 09:00', 'Ann Lee'], ['2026-11-11 09:00', 'Bo Chan'], ['2026-11-12 09:00', 'Cy Wu']];
+  const cache = F.afterFetch(null, { rows: sheet, tab: { id: 0, title: 'T' }, timeZone: 'UTC' }, { now: 1, started: 1, link: { spreadsheetId: 'C'.repeat(30), gid: 0 } });
+  const html = fieldColumnsHtml(field(F.summariseCache(cache, [])), { privacy: false });
+  assert.match(html, /Needs a choice/);
+  assert.doesNotMatch(html, /No answers yet/);
+});

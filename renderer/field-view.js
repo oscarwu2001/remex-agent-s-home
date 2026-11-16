@@ -154,6 +154,8 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   }
   const unread = (s.unreadable?.scores ?? 0) + (s.unreadable?.numbers ?? 0) + (s.unreadable?.timestamps ?? 0);
   if (unread) left.push(`${plural(unread, 'answer')} could not be read and ${unread === 1 ? 'is' : 'are'} left out (see Needs attention).`);
+  const doubt = s.doubtful?.length ?? 0;
+  if (doubt) left.push(`${plural(doubt, 'column')} checked as comments or choices now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; kept off the board until the columns are checked again.`);
 
   return `${head}${hint}${checkNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
@@ -204,10 +206,11 @@ function rowTags(r) {
     c.isNew ? 'New column, not checked' : '',
     c.repeated ? 'Repeated title' : '',
     c.hidden && r.role && r.role !== 'identifying' ? 'Answers show after the next update' : '',
+    c.doubt ? 'Answers look like emails or phone numbers' : '',
   ].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
 }
 
-const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>–</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
+const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>Choose…</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
 
 // "Check the columns": one row per column. With privacy off each row has
 // its role to choose (and a score its scale); Save is refused until every
@@ -215,8 +218,10 @@ const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" sele
 // survey's own columns, so they are made with the wording in view.
 // draft: { [index]: { role, low, high } } while the user changes them.
 export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', error = '' } = {}) {
+  // The reply to the last Save, whatever is drawn with it.
+  const reply = `${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ''}${note ? `<p class="hint" role="status">${esc(note)}</p>` : ''}`;
   const s = f?.summary;
-  if (!s?.columns?.length) return '';
+  if (!s?.columns?.length) return reply;
   const qNo = questionNumbers(s);
   const rows = stepRows(f, draft);
   const missing = rows.filter((r) => r.missing).length;
@@ -234,8 +239,8 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
     }).join('');
     return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
     <p class="hint">The app guessed what each column is.${left ? ` ${left}` : ''}</p>
-    <ol class="field-cols">${items}</ol>
     <p class="hint">Turn off ${PRIVACY_SWITCH} (Settings → On screen) to check the columns.</p>
+    <ol class="field-cols">${items}</ol>${reply}
   </section>`;
   }
 
@@ -251,14 +256,14 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
       <p class="field-col-name"><span>${esc(name)}</span>${rowTags(r)}</p>
       <div class="field-col-role"><label class="visually-hidden" for="fc-role-${c.index}">What ${esc(name)} is</label>
         <select id="fc-role-${c.index}" data-col="${c.index}" data-part="role">${opts}</select>${scale}</div>
-      ${guess(r)}${c.answers === 0 ? '<p class="muted">No answers yet.</p>' : ''}</li>`;
+      ${guess(r)}${c.answers === 0 && !c.hidden ? '<p class="muted">No answers yet.</p>' : ''}</li>`;
   }).join('');
   return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
     <p class="hint">The app guessed what each column is. Change any that are wrong, then press Save the columns. A column added to the form later is flagged.</p>
     <form id="field-check-form"><ol class="field-cols">${items}</ol>
       <div class="form-actions"><button class="button" type="submit" id="field-check-save"${missing ? ' disabled aria-describedby="field-check-left"' : ''}>Save the columns</button>
         <p class="hint" id="field-check-left" role="status">${esc(left)}</p></div></form>
-    ${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ''}${note ? `<p class="hint" role="status">${esc(note)}</p>` : ''}
+    ${reply}
   </section>`;
 }
 

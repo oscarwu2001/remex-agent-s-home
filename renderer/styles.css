@@ -765,6 +765,8 @@ body.no-select, body.no-select * { user-select: none; }
 .field-settings { display: grid; gap: var(--s-2); }
 .field-settings .form-error, .field-settings .hint { margin: 0; }
 .field-set { margin: 0; font-size: 13px; color: var(--ink); display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); }
+/* Its link button lines up with the text when it wraps to a line of its own. */
+.field-set > .link-btn { margin-left: calc(-1 * var(--s-2)); }
 .field-path { min-width: 0; overflow-wrap: anywhere; color: var(--ink-muted); }
 .field-robot { color: var(--ink); overflow-wrap: anywhere; }
 .field-check-step { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }

@@ -2643,6 +2643,11 @@ function setFieldSheet(open) {
 function openFieldCheck() {
   setFieldSheet(false);
   setSettings(true);
+  // With privacy mode on the step only reads: go to the switch that opens it.
+  if (prefs.private) {
+    $('opt-private')?.focus();
+    return;
+  }
   $('field-check-h')?.scrollIntoView({ block: 'start' });
   // The first row that needs a choice, else the first one not checked.
   const rows = stepRows(snapshot.field, fieldUi.draft);
@@ -2731,7 +2736,10 @@ $('field-settings').addEventListener('submit', async (e) => {
   if (!bridge.fieldSet) return;
   const res = await bridge.fieldSet({ sheetUrl: $('field-link').value }).catch((err) => ({ ok: false, error: err.message }));
   fieldUi.error = res.ok ? '' : res.error;
-  if (res.ok) fieldUi.editing = false;
+  if (res.ok) {
+    fieldUi.editing = false;
+    fieldUi.note = res.note ?? ''; // "Same sheet: kept the tab you had."
+  }
   renderFieldSettings();
   setTimeout(renderFieldSettings, 600);
 });
