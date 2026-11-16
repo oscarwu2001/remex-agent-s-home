@@ -864,9 +864,15 @@ body.no-select, body.no-select * { user-select: none; }
   white-space: pre-wrap; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden;
 }
-.line-actions { display: flex; flex-wrap: wrap; gap: 0 var(--s-1); margin: var(--s-1) 0 0 calc(-1 * var(--s-2)); }
-.line-act { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; }
-.line-add { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-raised); }
+.line-text.open { display: block; overflow: visible; }
+.line-more { display: inline-block; margin-top: 2px; font-size: 12px; }
+/* Add and Send in the accent; Dismiss quieter, pushed away to the far end. */
+.line-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2); margin: var(--s-1) 0 0 calc(-1 * var(--s-2)); }
+.line-act { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; color: var(--accent); }
+.line-act.line-dismiss { margin-left: auto; color: var(--ink-muted); font-weight: 400; }
+.line-status { margin: 0; min-height: 1.4em; font-size: 13px; color: var(--ink-muted); }
+.line-status:empty { display: none; }
+.line-add { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel-raised); }
 .line-add .field input, .line-add .field select { width: 100%; min-width: 0; }
 .line-add .line-source { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .line-section .form-actions > .link-btn:first-child { margin-left: calc(-1 * var(--s-2)); }
@@ -893,5 +899,18 @@ body.no-select, body.no-select * { user-select: none; }
 .line-folder-row .field { flex: 1 1 240px; min-width: 0; }
 .line-folder-row select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 .line-run { gap: var(--s-2); }
+.line-run legend { margin-bottom: var(--s-1); }
+.line-run .check { font-size: 14px; }
+.line-run .check input { flex: none; }
+.line-run .check .ico { color: var(--ink-muted); }
+.line-run input:disabled + .ico, .line-run label:has(input:disabled) { color: var(--ink-muted); }
+.line-run .hint { margin: 0 0 0 calc(18px + var(--s-2)); }
+.line-session { margin-left: calc(18px + var(--s-2)); }
 .line-run .field select { width: 100%; }
+.line-send .field-error { margin: calc(-1 * var(--s-2)) 0 0; }
+/* The folder's error sits right under its list, before Browse. */
+.line-folder-row .field-error { flex-basis: 100%; margin: calc(-1 * var(--s-1)) 0 0; }
+.line-send-status { margin: var(--s-3) 0 0; font-size: 13px; color: var(--ink-muted); }
+.line-send-status:empty { display: none; }
+.line-send-status.is-error { color: var(--warn); font-weight: 500; }
 .line-where { display: inline-flex; align-items: center; gap: var(--s-2); margin: 0; font-size: 14px; color: var(--ink); }

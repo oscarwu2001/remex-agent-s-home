@@ -15,7 +15,7 @@ import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, problemLabel, age as fieldAge } from './field-view.js';
-import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices } from './line-view.js';
+import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus } from './line-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -2799,23 +2799,31 @@ setInterval(() => {
 //
 // What in the user's LINE chats concerns them (snapshot.line, or the demo's
 // sample). The main process reads the exports and starts Claude; this
-// shows the items and passes on the user's choices.
+// shows the items and passes on the user's choices. Items are named by
+// their key (chat + message).
 
 // adding: the item whose add form is open, with what is typed in it;
-// all: every item shown; error/errorHash: the last button's failure.
-const lineUi = { adding: null, todo: null, project: null, all: false, error: '', errorHash: null, note: '' };
+// expanded: items whose whole message shows; all: every item shown;
+// error/errorKey: the last button's failure, at its item.
+const lineUi = { adding: null, todo: null, project: null, expanded: new Set(), all: false, error: '', errorKey: null };
+let lineStatus = null; // the section's one status line: { text, undo }
 // names/keywords: what is typed in Settings, kept across redraws until saved.
 const lineSettingsUi = { error: '', note: '', names: null, keywords: null };
 const lineDemoMarks = new Set(); // the demo's added and dismissed items, until it is turned off
+const lineDrafts = new Map(); // item key -> its sheet as last left (prompt, folder, where)
 let lineSwitchedAt = 0;
-let lineSend = null; // the open sheet: { item, prompt, cwd, session, status, busy, browsed }
+let lineSend = null; // the open sheet's draft
 let lineTargets = null; // { sessions, why } once asked
 let lineOpener;
 const lineState = () => {
   const l = snapshot.line;
-  return l?.demo ? { ...l, items: l.items.filter((it) => !lineDemoMarks.has(it.hash)) } : l;
+  return l?.demo ? { ...l, items: l.items.filter((it) => !lineDemoMarks.has(it.key)) } : l;
 };
 const lineProjects = () => (prefs.demo ? demoProj.snapshot() : snapshot.projects)?.list ?? [];
+function setLineStatus(status) {
+  lineStatus = status;
+  paint($('line-status'), statusHtml(status));
+}
 function renderLine() {
   const l = lineState();
   $('line').hidden = !l?.enabled;
@@ -2824,10 +2832,10 @@ function renderLine() {
     lineUi.adding = null;
     if (!$('line-sheet').hidden) setLineSheet(false);
   }
-  if (lineUi.adding && !l.items.some((it) => it.hash === lineUi.adding)) lineUi.adding = null;
   if (!l?.enabled) return;
+  if (lineUi.adding && !l.items.some((it) => it.key === lineUi.adding)) lineUi.adding = null;
   // The add form shows what the user typed, not the draft, once they type.
-  const item = l.items?.find((it) => it.hash === lineUi.adding);
+  const item = l.items?.find((it) => it.key === lineUi.adding);
   const shown = item && lineUi.todo != null ? { ...l, items: l.items.map((it) => (it === item ? { ...it, draft: { ...it.draft, text: lineUi.todo } } : it)) } : l;
   paint($('line-body'), lineHtml(shown, { privacy: prefs.private, ui: lineUi, projects: lineProjects() }));
   const sel = lineUi.adding && $(`line-project-${lineUi.adding}`);
@@ -2845,8 +2853,42 @@ function renderLineSettings() {
   } : l;
   paint($('line-settings'), lineSettingsHtml(shown, { privacy: prefs.private, online, state: lineSettingsUi }));
 }
-// The sheet is modal like the field feedback one: the board and the map
-// behind it are inert until it closes.
+// After Add or Dismiss the item goes: focus moves to the same action on the
+// item that took its place, else the one before it, else the section.
+function focusLineAction(act, index) {
+  const buttons = [...$('line-body').querySelectorAll(`[data-line="${act}"]`)];
+  (buttons[Math.min(index, buttons.length - 1)] ?? $('line-body').querySelector('button') ?? $('line-h'))?.focus({ preventScroll: true });
+}
+const lineIndex = (key) => (lineState()?.items ?? []).findIndex((it) => it.key === key);
+
+// ---- the Send to agent sheet: modal like the field feedback one (the board
+// and the map behind it are inert until it closes), one draft per item.
+function lineForm() {
+  const form = $('line-send-form');
+  if (!form) return null;
+  return {
+    key: form.dataset.key,
+    prompt: $('line-prompt').value,
+    cwd: $('line-cwd').value,
+    session: $('line-session')?.value,
+    target: document.querySelector('input[name="line-target"]:checked')?.value,
+  };
+}
+function paintLineStatus() {
+  const s = sendStatus(lineSend);
+  $('line-send-status').textContent = s.text;
+  $('line-send-status').classList.toggle('is-error', !s.ok);
+}
+// The sheet is drawn only when something in it changes (never on a timer),
+// after taking what the user typed or chose, so nothing they edit is lost.
+function paintLineSheet() {
+  if (!lineSend) return;
+  lineSend = takeEdits(lineSend, lineForm());
+  const at = document.activeElement?.id;
+  $('line-sheet-body').innerHTML = lineSheetHtml(lineSend, { folders: folderChoices(lineProjects(), lineSend.browsed), targets: lineTargets });
+  paintLineStatus();
+  if (at && $(at) && $('line-sheet').contains($(at))) $(at).focus({ preventScroll: true });
+}
 function setLineSheet(open) {
   if (open === !$('line-sheet').hidden) return;
   $('line-sheet').hidden = !open;
@@ -2857,7 +2899,12 @@ function setLineSheet(open) {
     $('line-prompt')?.focus();
     $('line-prompt')?.setSelectionRange(0, 0);
   } else {
+    // The item's draft is kept, and the sheet emptied, so the next item's
+    // sheet starts from its own.
+    if (lineSend) lineDrafts.set(lineSend.key, { ...takeEdits(lineSend, lineForm()), status: null, errors: null, busy: false });
     lineSend = null;
+    $('line-sheet-body').innerHTML = '';
+    $('line-send-status').textContent = '';
     // The board may have been redrawn meanwhile: find the opener by its key.
     const key = lineOpener?.dataset?.key;
     const back = lineOpener?.isConnected ? lineOpener : key && $('line-body').querySelector(`[data-key="${CSS.escape(key)}"]`);
@@ -2865,41 +2912,30 @@ function setLineSheet(open) {
     lineOpener = undefined;
   }
 }
-// The sheet is drawn only when something in it changes (never on a timer),
-// after taking what the user typed or chose, so nothing they edit is lost.
-function paintLineSheet() {
-  if (!lineSend) return;
-  if ($('line-prompt')) {
-    lineSend.prompt = $('line-prompt').value;
-    lineSend.cwd = $('line-cwd').value;
-    if ($('line-session')) lineSend.session = $('line-session').value;
-  }
-  const at = document.activeElement?.id;
-  $('line-sheet-body').innerHTML = lineSheetHtml(lineSend, { folders: folderChoices(lineProjects(), lineSend.browsed), targets: lineTargets });
-  if (at && $(at) && $('line-sheet').contains($(at))) $(at).focus({ preventScroll: true });
-}
-async function openLineSend(hash) {
-  const item = lineState()?.items?.find((it) => it.hash === hash);
+async function openLineSend(key) {
+  const item = lineState()?.items?.find((it) => it.key === key);
   if (!item || prefs.private) return;
-  lineSend = { item, prompt: item.prompt, cwd: '', session: '', status: null, busy: false, browsed: [] };
+  if (!$('line-sheet').hidden) setLineSheet(false);
+  lineSend = sendDraft(lineDrafts, item);
   lineTargets = null;
   setLineSheet(true);
-  lineTargets = snapshot.demo || !bridge.lineTargets ? { sessions: ['work', 'notes'], why: null }
-    : await bridge.lineTargets().catch((err) => ({ sessions: [], why: `WSL could not be asked for its tmux sessions: ${err.message}` }));
-  lineSend && (lineSend.session = lineSend.session || lineTargets.sessions[0] || '');
+  const targets = snapshot.demo || !bridge.lineTargets ? { sessions: ['work', 'notes'], why: null }
+    : await bridge.lineTargets().catch((err) => ({ sessions: [], why: `WSL could not be asked for its tmux sessions (${err.message}). Choose New Windows Terminal tab, or open this sheet again.` }));
+  if (!lineSend || lineSend.key !== key) return; // closed, or another item's sheet, meanwhile
+  lineTargets = targets;
+  if (!lineSend.session || !targets.sessions.includes(lineSend.session)) lineSend.session = targets.sessions[0] ?? '';
   paintLineSheet();
 }
-async function lineMark(hash, what) {
+async function lineMark(key, what) {
   if (snapshot.demo) {
-    lineDemoMarks.add(hash);
+    lineDemoMarks.add(key);
     return { ok: true };
   }
   if (!bridge.lineSet) return { ok: false, error: 'The browser preview cannot save this; it works in the app.' };
-  return bridge.lineSet({ mark: { hash, what } }).catch((err) => ({ ok: false, error: err.message }));
+  return bridge.lineSet({ mark: { key, what } }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
 }
-async function lineAction(act, hash) {
+async function lineAction(act, key) {
   lineUi.error = '';
-  lineUi.note = '';
   if (act === 'settings') showInSettings('line-settings-h');
   else if (act === 'choose-folder' && (snapshot.demo || !bridge.lineChooseFolder)) {
     lineSettingsUi.note = snapshot.demo ? 'The demo chooses no folder.' : 'The preview cannot choose a folder; this works in the app.';
@@ -2909,26 +2945,44 @@ async function lineAction(act, hash) {
     showInSettings('screen-h');
     $('opt-private').focus();
   } else if (act === 'more' || act === 'fewer') lineUi.all = act === 'more';
-  else if (act === 'add') {
-    const open = lineUi.adding === hash;
-    Object.assign(lineUi, { adding: open ? null : hash, todo: null, project: null });
+  else if (act === 'expand') {
+    if (lineUi.expanded.has(key)) lineUi.expanded.delete(key);
+    else lineUi.expanded.add(key);
+  } else if (act === 'add') {
+    const open = lineUi.adding === key;
+    Object.assign(lineUi, { adding: open ? null : key, todo: null, project: null });
     renderLine();
-    if (!open) $(`line-todo-${hash}`)?.focus();
+    if (!open) $(`line-todo-${key}`)?.focus();
     return;
   } else if (act === 'cancel-add') {
     lineUi.adding = null;
     renderLine();
-    document.querySelector(`[data-key="line-add-${CSS.escape(hash)}"]`)?.focus();
+    document.querySelector(`[data-key="line-add-${CSS.escape(key)}"]`)?.focus();
     return;
   } else if (act === 'dismiss') {
-    const res = await lineMark(hash, 'dismissed');
-    if (!res.ok) Object.assign(lineUi, { error: `Not dismissed: ${res.error}`, errorHash: hash });
-    else lineUi.note = 'Dismissed. It will not be listed again.';
+    const at = lineIndex(key);
+    const res = await lineMark(key, 'dismissed');
+    if (!res.ok) Object.assign(lineUi, { error: `Not dismissed. ${res.error}`, errorKey: key });
+    else setLineStatus({ text: 'Dismissed.', undo: key });
+    renderLine();
+    setTimeout(renderLine, 600);
+    if (res.ok) focusLineAction('dismiss', at);
+    return;
+  } else if (act === 'undo') {
+    let res = { ok: true };
+    if (snapshot.demo) lineDemoMarks.delete(key);
+    else if (!bridge.lineSet) res = { ok: false, error: 'The browser preview cannot save this; it works in the app.' };
+    else res = await bridge.lineSet({ unmark: { key } }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
+    setLineStatus({ text: res.ok ? 'Listed again.' : `Not undone. ${res.error}` });
+    renderLine();
+    setTimeout(renderLine, 600);
+    if (res.ok) setTimeout(() => document.querySelector(`[data-key="line-dismiss-${CSS.escape(key)}"]`)?.focus({ preventScroll: true }), 650);
+    return;
   } else if (act === 'send') {
-    openLineSend(hash);
+    openLineSend(key);
     return;
   } else if (act === 'choose-folder') {
-    const res = await bridge.lineChooseFolder().catch((err) => ({ ok: false, error: err.message }));
+    const res = await bridge.lineChooseFolder().catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
     lineSettingsUi.error = res.ok || res.canceled ? '' : res.error;
     renderLineSettings();
     setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -2936,12 +2990,11 @@ async function lineAction(act, hash) {
   }
   renderLine();
   setTimeout(renderLine, 600);
-  if (act === 'dismiss') $('line-body').querySelector('.line-act, [data-line]')?.focus({ preventScroll: true });
 }
-for (const id of ['line-body', 'line-settings']) {
+for (const id of ['line-body', 'line-settings', 'line-status']) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('[data-line]');
-    if (b && !b.disabled) lineAction(b.dataset.line, b.dataset.hash);
+    if (b && !b.disabled) lineAction(b.dataset.line, b.dataset.item);
   });
 }
 // What is typed in the add form survives the board's redraws.
@@ -2955,28 +3008,34 @@ $('line-body').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target.closest('form.line-add');
   if (!form) return;
-  const hash = form.dataset.hash;
-  const text = $(`line-todo-${hash}`).value.trim();
-  const project = $(`line-project-${hash}`).value;
+  const key = form.dataset.item;
+  const text = $(`line-todo-${key}`).value.trim();
+  const project = $(`line-project-${key}`).value;
   if (!text) {
-    Object.assign(lineUi, { error: 'Type the to-do first.', errorHash: hash });
+    Object.assign(lineUi, { error: 'Type the to-do first.', errorKey: key });
     renderLine();
+    $(`line-todo-${key}`)?.focus();
     return;
   }
+  const at = lineIndex(key);
   let res;
   if (snapshot.demo) {
     res = await demoProj.change({ op: 'add-todo', project, text });
-    if (res.ok) lineDemoMarks.add(hash);
+    if (res.ok) lineDemoMarks.add(key);
   } else if (!bridge.lineAdd) res = { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
-  else res = await bridge.lineAdd({ hash, project, text }).catch((err) => ({ ok: false, error: err.message }));
+  else res = await bridge.lineAdd({ key, project, text }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
   if (res.ok) {
     const name = lineProjects().find((p) => p.id === project)?.name ?? 'the project';
-    Object.assign(lineUi, { adding: null, todo: null, project: null, note: res.note ?? `Added to ${name}.` });
+    Object.assign(lineUi, { adding: null, todo: null, project: null });
+    setLineStatus({ text: res.note ?? `Added to ${name}.` });
     renderProjects();
-  } else Object.assign(lineUi, { error: `Not added: ${res.error}`, errorHash: hash });
+  } else {
+    Object.assign(lineUi, { error: res.error, errorKey: key });
+  }
   renderLine();
   setTimeout(() => { renderLine(); renderProjects(); }, 600);
-  if (res.ok) $('line-body').querySelector('[data-line]')?.focus({ preventScroll: true });
+  if (res.ok) focusLineAction('add', at);
+  else $(`line-todo-${key}`)?.focus();
 });
 $('line-settings').addEventListener('input', (e) => {
   if (e.target.id === 'line-names') lineSettingsUi.names = e.target.value;
@@ -2991,8 +3050,8 @@ $('line-settings').addEventListener('change', async (e) => {
     renderLineSettings();
     return;
   }
-  const res = await bridge.lineSet({ tick: { chat: tick.dataset.chat, on: tick.checked } }).catch((err) => ({ ok: false, error: err.message }));
-  lineSettingsUi.error = res.ok ? '' : `Not saved: ${res.error}`;
+  const res = await bridge.lineSet({ tick: { chat: tick.dataset.chat, on: tick.checked } }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
+  lineSettingsUi.error = res.ok ? '' : `Not saved. ${res.error}`;
   if (!res.ok) tick.checked = !tick.checked;
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3005,65 +3064,71 @@ $('line-settings').addEventListener('submit', async (e) => {
     renderLineSettings();
     return;
   }
-  const res = await bridge.lineSet({ names: $('line-names').value, keywords: $('line-keywords').value }).catch((err) => ({ ok: false, error: err.message }));
-  lineSettingsUi.error = res.ok ? '' : `Not saved: ${res.error}`;
-  if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: 'Names and keywords saved.' });
+  const res = await bridge.lineSet({ names: $('line-names').value, keywords: $('line-keywords').value }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
+  lineSettingsUi.error = res.ok ? '' : `Not saved. ${res.error}`;
+  // "Saved 10 names; the rest were left out." when there were more.
+  if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: res.note ?? 'Names and keywords saved.' });
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
 });
 $('opt-line').addEventListener('change', async (e) => {
   if (!bridge.lineSet) return;
   lineSwitchedAt = Date.now();
-  const res = await bridge.lineSet({ enabled: e.target.checked }).catch((err) => ({ ok: false, error: err.message }));
+  const res = await bridge.lineSet({ enabled: e.target.checked }).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
   lineSettingsUi.error = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
   Object.assign(lineSettingsUi, { names: null, keywords: null, note: '' });
-  Object.assign(lineUi, { adding: null, todo: null, project: null, note: '', error: '' });
+  Object.assign(lineUi, { adding: null, todo: null, project: null, error: '' });
+  lineDrafts.clear();
+  setLineStatus(null);
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+});
+$('line-sheet-body').addEventListener('change', (e) => {
+  // Choosing where it runs shows or hides the session list.
+  if (e.target.name === 'line-target' && lineSend) paintLineSheet();
 });
 $('line-sheet-body').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-line="browse"]');
   if (!b || !lineSend) return;
-  const res = snapshot.demo || !bridge.lineBrowse ? { ok: false, error: snapshot.demo ? 'The demo browses no folders.' : 'The browser preview cannot browse; this works in the app.' }
-    : await bridge.lineBrowse().catch((err) => ({ ok: false, error: err.message }));
+  const res = snapshot.demo || !bridge.lineBrowse ? { ok: false, error: snapshot.demo ? 'The demo browses no folders. Choose one of the listed folders.' : 'The browser preview cannot browse; this works in the app.' }
+    : await bridge.lineBrowse().catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
   if (res.canceled || !lineSend) return;
-  paintLineSheet(); // take what is typed first
+  lineSend = takeEdits(lineSend, lineForm()); // take what is typed first
   if (res.ok) {
-    lineSend.browsed = [...new Set([...lineSend.browsed, res.path])];
-    lineSend.cwd = res.path;
-    lineSend.status = null;
+    lineSend = { ...lineSend, browsed: [...new Set([...(lineSend.browsed ?? []), res.path])], cwd: res.path, status: null, errors: null };
   } else lineSend.status = { ok: false, text: res.error };
   $('line-sheet-body').innerHTML = lineSheetHtml(lineSend, { folders: folderChoices(lineProjects(), lineSend.browsed), targets: lineTargets });
+  paintLineStatus();
   $('line-browse')?.focus();
 });
 $('line-sheet-body').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!lineSend || lineSend.busy) return;
-  paintLineSheet();
-  const target = lineTargets?.sessions?.length ? 'tmux' : 'wt';
-  const req = { hash: lineSend.item.hash, prompt: lineSend.prompt, cwd: lineSend.cwd, target, session: lineSend.session };
-  if (!req.cwd) {
-    lineSend.status = { ok: false, text: 'Choose a folder first.' };
+  lineSend = takeEdits(lineSend, lineForm());
+  const target = lineSend.target === 'wt' || !lineTargets?.sessions?.length ? 'wt' : 'tmux';
+  const req = { key: lineSend.key, prompt: lineSend.prompt, cwd: lineSend.cwd, target, session: lineSend.session };
+  // Each missing piece is said at its own field, and focus goes there.
+  const errors = {
+    ...(req.prompt.trim() ? {} : { prompt: 'Write a prompt for Claude first.' }),
+    ...(req.cwd ? {} : { cwd: 'Choose a folder first.' }),
+  };
+  lineSend.errors = Object.keys(errors).length ? errors : null;
+  lineSend.status = null;
+  if (lineSend.errors) {
     paintLineSheet();
-    $('line-cwd')?.focus();
-    return;
-  }
-  if (!req.prompt.trim()) {
-    lineSend.status = { ok: false, text: 'The prompt is empty.' };
-    paintLineSheet();
+    $(errors.prompt ? 'line-prompt' : 'line-cwd')?.focus();
     return;
   }
   if (snapshot.demo || !bridge.lineStart) {
-    lineSend.status = { ok: Boolean(snapshot.demo), text: snapshot.demo ? `The demo starts nothing. In the app this opens ${target === 'tmux' ? `a new tmux window in “${req.session}”` : 'a new Windows Terminal tab'} and starts Claude there.` : 'The browser preview cannot start Claude; this works in the app.' };
+    lineSend.status = { ok: true, text: snapshot.demo ? `The demo starts nothing. In the app this opens ${target === 'tmux' ? `a new tmux window in “${req.session}”` : 'a new Windows Terminal tab'} and starts Claude there.` : 'The browser preview cannot start Claude; this works in the app.' };
     paintLineSheet();
     return;
   }
   lineSend.busy = true;
-  lineSend.status = null;
   paintLineSheet();
-  const res = await bridge.lineStart(req).catch((err) => ({ ok: false, error: err.message }));
-  if (!lineSend) return;
+  const res = await bridge.lineStart(req).catch((err) => ({ ok: false, error: `The app did not answer (${err.message}). Try again.` }));
+  if (!lineSend || lineSend.key !== req.key) return;
   lineSend.busy = false;
   lineSend.status = res.ok ? { ok: true, text: `Started in ${res.label}.` } : { ok: false, text: res.error };
   paintLineSheet();
@@ -3086,7 +3151,8 @@ $('line-sheet').addEventListener('keydown', (e) => {
     setLineSheet(false);
   } else if (e.key === 'Tab') {
     // Tab and Shift+Tab go round inside the sheet.
-    const stops = [...$('line-sheet').querySelectorAll('button, select, input, textarea, [tabindex="0"]')].filter((el) => !el.disabled && el.offsetParent);
+    const stops = [...$('line-sheet').querySelectorAll('button, select, input, textarea, [tabindex="0"]')]
+      .filter((el) => !el.disabled && el.offsetParent && !(el.type === 'radio' && !el.checked));
     if (!stops.length) return;
     const [first, last] = [stops[0], stops[stops.length - 1]];
     const at = document.activeElement;

@@ -1156,19 +1156,24 @@ app.whenReady().then(() => {
   // online. The decisions (parsing, what concerns the user, the command
   // that starts Claude) are in src/core/linechat.js; this keeps the
   // settings file, the scan timer and the IPC, and runs Send to agent's one
-  // command when the user presses Start Claude.
+  // command when the user presses Start Claude. Error words name the next
+  // step; raw error codes go only to the system log or a problem's detail.
   const lineFile = path.join(app.getPath('userData'), 'line-chats.json');
   const linePromptDir = path.join(app.getPath('userData'), 'line-prompts');
   const LINE_SCAN_MS = 10_000;
+  const LINE_PRUNE_MS = 60 * 60_000;
   let line = lineChat.changeSettings(undefined, {}).settings;
   let lineScan = null; // { error, files } from the last look at the folder
   let lineFiles = new Map(); // file -> its entry, reused while it is unchanged
   let lineChats = []; // the ticked chats, re-exports merged
   let lineItems = []; // what concerns the user, newest first
-  let lineScannedAt = null;
+  let lineScannedAt = null; // the last scan that worked
   let lineScanError = null;
   let lineTmux = { sessions: [], why: null }; // as last asked, when the sheet opened
   let lineLogged = '';
+  const lineCode = (err) => err?.code ?? (err?.killed ? 'timeout' : 'error');
+  const lineLog = (what, err) => syslog?.write('errors', 'line-chats', { error: `${what}: ${lineCode(err)}` });
+  const LINE_SAVE_ERROR = 'The setting could not be saved. Try again; if it keeps failing, the system log has the reason.';
   try {
     line = lineChat.changeSettings(JSON.parse(fs.readFileSync(lineFile, 'utf8')), {}).settings;
   } catch (err) {
@@ -1176,7 +1181,7 @@ app.whenReady().then(() => {
   }
   function scanLine() {
     if (!line.enabled || !line.folder) {
-      [lineScan, lineFiles, lineChats, lineItems, lineScanError] = [null, new Map(), [], [], null];
+      [lineScan, lineFiles, lineChats, lineItems, lineScanError, lineScannedAt] = [null, new Map(), [], [], null, null];
       return;
     }
     try {
@@ -1186,43 +1191,57 @@ app.whenReady().then(() => {
       const since = Date.now() - lineChat.WINDOW_DAYS * 86_400_000;
       lineItems = lineChats
         .flatMap((c) => lineChat.relatedToYou(c.messages, { names: line.names, keywords: line.keywords, since }))
-        .filter((h) => !line.marks[h.hash])
+        .filter((h) => !line.marks[h.key])
         .sort((a, b) => b.ms - a.ms)
         .map((h) => ({ ...h, draft: lineChat.draftTodo(h), prompt: lineChat.promptDraft(h) }));
       lineScanError = null;
+      lineScannedAt = Date.now();
     } catch (err) {
-      // Not a file problem the scan words itself: a bug. Shown, and the
-      // stack (no chat text: the parser keeps none in its errors) logged.
-      lineScanError = 'LINE chats: the exports could not be read; see the system log';
+      // Not a file problem the scan words itself: a bug. Nothing old stays
+      // on the board as if just read; the stack (no chat text: the parser
+      // keeps none in its errors) goes to the system log.
+      [lineChats, lineItems] = [[], []];
+      lineScanError = 'LINE chats: the exports could not be read. The app tries again in 10 seconds; the system log has the reason';
       syslog?.write('errors', 'line-chats', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
     }
-    lineScannedAt = Date.now();
   }
   setInterval(scanLine, LINE_SCAN_MS);
   scanLine();
+  // Prompt files hold a chat's words: each goes a day after it was written
+  // (looked at as the app starts and every hour), all of them as the
+  // feature is turned off. One that stays is said under Needs attention.
+  function pruneLinePrompts(maxAgeMs) {
+    const gone = lineChat.prunePrompts(linePromptDir, maxAgeMs == null ? {} : { maxAgeMs });
+    const n = gone.failed.length;
+    if (n) {
+      problem(`LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and the app tries again within the hour`,
+        `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})`);
+    }
+  }
+  pruneLinePrompts();
+  setInterval(() => pruneLinePrompts(), LINE_PRUNE_MS);
   function saveLine(next) {
     writeJsonFile(lineFile, next);
     const turnedOff = line.enabled && !next.enabled;
     line = next;
     if (turnedOff) {
-      // Off keeps nothing: the prompt files hold chat text too.
       lineTmux = { sessions: [], why: null };
-      const gone = lineChat.prunePrompts(linePromptDir, { maxAgeMs: 0 });
-      if (gone.failed.length) problem(`LINE chats: ${gone.failed.length} prompt ${gone.failed.length === 1 ? 'file' : 'files'} could not be removed (${[...new Set(gone.failed)].join(', ')})`, linePromptDir);
+      pruneLinePrompts(0);
     }
     scanLine();
   }
   ipcMain.handle('home:line-set', (_event, change = {}) => {
     // The folder is set only through the folder dialog below.
-    const allowed = Object.fromEntries(Object.entries(change ?? {}).filter(([k]) => ['enabled', 'names', 'keywords', 'tick', 'mark'].includes(k)));
+    const allowed = Object.fromEntries(Object.entries(change ?? {}).filter(([k]) => ['enabled', 'names', 'keywords', 'tick', 'mark', 'unmark'].includes(k)));
     const res = lineChat.changeSettings(line, allowed);
     if (res.error) return { ok: false, error: res.error };
     try {
       saveLine(res.settings);
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      lineLog('settings not saved', err);
+      return { ok: false, error: LINE_SAVE_ERROR };
     }
-    return { ok: true };
+    return { ok: true, ...(res.note ? { note: res.note } : {}) };
   });
   ipcMain.handle('home:line-choose-folder', async () => {
     const res = await dialog.showOpenDialog(win, {
@@ -1233,27 +1252,34 @@ app.whenReady().then(() => {
     try {
       saveLine(lineChat.changeSettings(line, { folder: res.filePaths[0] }).settings);
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      lineLog('settings not saved', err);
+      return { ok: false, error: LINE_SAVE_ERROR };
     }
     return { ok: true };
   });
-  const lineItem = (hash) => lineItems.find((h) => h.hash === hash);
+  const lineItem = (key) => lineItems.find((h) => h.key === key);
   // Add to project: the to-do goes through projects.js (read afresh, written
   // whole, unknown fields kept); then the item is remembered as added.
-  ipcMain.handle('home:line-add', (_event, { hash, project, text } = {}) => {
+  ipcMain.handle('home:line-add', (_event, { key, project, text } = {}) => {
     if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
-    if (!lineItem(hash)) return { ok: false, error: 'That item is no longer listed.' };
+    if (!lineItem(key)) return { ok: false, error: 'That item is no longer listed; it may have been added or dismissed already.' };
     try {
       lineChat.addTodo(projectsPath, { project, text });
     } catch (err) {
-      return { ok: false, error: err.code ? `The project list could not be saved (${err.code})` : err.message };
+      if (!err.code) return { ok: false, error: err.message }; // projects.js's own words, which say what to do
+      lineLog('project list not saved', err);
+      return {
+        ok: false,
+        error: ['EBUSY', 'EPERM', 'EACCES'].includes(err.code) ? 'The project list is in use. Close other apps using it and try again.'
+          : 'The project list could not be saved. Try again; if it keeps failing, the system log has the reason.',
+      };
     }
     readProjects(true);
-    const res = lineChat.changeSettings(line, { mark: { hash, what: 'added' } });
     try {
-      saveLine(res.settings);
+      saveLine(lineChat.changeSettings(line, { mark: { key, what: 'added' } }).settings);
     } catch (err) {
-      return { ok: true, note: `Added. The app could not note that it was (${err.code || err.message}), so the item stays listed.` };
+      lineLog('added item not noted', err);
+      return { ok: true, note: 'Added. The app could not note that it was, so the item stays listed: dismiss it when you are done.' };
     }
     return { ok: true };
   });
@@ -1268,47 +1294,70 @@ app.whenReady().then(() => {
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, path: res.filePaths[0] };
   });
-  // Start Claude: only on the user's press, with the prompt they edited.
-  // The prompt goes to a file; the one command is built by launchPlan.
+  // Start Claude: only on the user's press, with the prompt they edited,
+  // where they chose. The prompt goes to a file; launchPlan builds the one
+  // command. For tmux, WSL is first asked which distro it runs (tmux is
+  // there) and whether the folder is there.
   ipcMain.handle('home:line-start', async (_event, req = {}) => {
     if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
-    if (req.target === 'tmux' && !lineTmux.sessions.includes(req.session)) return { ok: false, error: 'That tmux session is not listed any more; close the sheet and open it again.' };
-    if (typeof req.cwd === 'string' && /^[A-Za-z]:[\\/]|^\\\\/.test(req.cwd)) {
+    if (req.target !== 'tmux' && req.target !== 'wt') return { ok: false, error: 'Choose where Claude runs.' };
+    let distro = null;
+    if (req.target === 'tmux') {
+      if (!lineTmux.sessions.includes(req.session)) return { ok: false, error: 'That tmux session is not listed any more. Close this sheet and open it again to see the sessions running now.' };
+      let target;
+      try {
+        target = lineChat.wslTarget(req.cwd);
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+      const probe = await lineChat.wslProbe(target.path);
+      if (probe.error) {
+        lineLog('WSL not asked', { code: probe.code });
+        return { ok: false, error: probe.error };
+      }
+      if (!probe.exists) return { ok: false, error: 'That folder is not there in WSL. Choose another folder.' };
+      distro = probe.distro;
+    } else if (typeof req.cwd === 'string' && /^[A-Za-z]:[\\/]|^\\\\/.test(req.cwd)) {
       let isDir = false;
       try {
         isDir = fs.statSync(req.cwd).isDirectory();
       } catch {
         isDir = false; // missing or unreadable: said below
       }
-      if (!isDir) return { ok: false, error: 'That folder is not there any more; choose another.' };
+      if (!isDir) return { ok: false, error: 'That folder is not there any more. Choose another folder.' };
     }
     const promptFile = path.join(linePromptDir, `${Date.now()}-${require('crypto').randomBytes(3).toString('hex')}.txt`);
     let plan;
     try {
-      plan = lineChat.launchPlan({ target: req.target, session: req.session, cwd: req.cwd, prompt: req.prompt, promptFile, name: lineChat.windowName() });
+      plan = lineChat.launchPlan({ target: req.target, session: req.session, cwd: req.cwd, prompt: req.prompt, promptFile, name: lineChat.windowName(), distro });
     } catch (err) {
       return { ok: false, error: err.message };
     }
-    const old = lineChat.prunePrompts(linePromptDir);
-    if (old.failed.length) syslog?.write('errors', 'line-chats', { error: `old prompt files not removed: ${[...new Set(old.failed)].join(', ')}` });
+    pruneLinePrompts();
     try {
       fs.mkdirSync(linePromptDir, { recursive: true });
       fs.writeFileSync(plan.write.file, plan.write.text, { mode: 0o600 });
     } catch (err) {
-      return { ok: false, error: `The prompt could not be saved (${err.code || err.message})` };
+      lineLog('prompt not saved', err);
+      return { ok: false, error: 'The prompt could not be saved in the app’s data folder. Try again; if it keeps failing, the system log has the reason.' };
     }
     return new Promise((resolve) => {
       // wsl.exe is a console program: hidden. wt.exe opens the terminal
       // itself, which hiding could hide too.
-      execFile(plan.file, plan.args, { timeout: 15_000, windowsHide: req.target === 'tmux' }, (err, _stdout, stderr) => {
+      execFile(plan.file, plan.args, { timeout: 15_000, windowsHide: req.target === 'tmux' }, (err) => {
         if (!err) return resolve({ ok: true, label: plan.label });
+        // Nothing started: the prompt (a chat's words) does not stay behind.
         fs.rm(plan.write.file, { force: true }, (rmErr) => {
-          if (rmErr) syslog?.write('errors', 'line-chats', { error: `prompt file not removed: ${rmErr.code || rmErr.message}` });
+          if (rmErr) problem('LINE chats: a saved prompt could not be removed after Claude did not start; the app tries again within the hour', `${plan.write.file} (${lineCode(rmErr)})`);
         });
-        const said = String(stderr || '').replace(/\0/g, '').split('\n').map((s) => s.trim()).find(Boolean);
-        const why = err.code === 'ENOENT' ? `${plan.file} was not found` : err.killed ? 'it did not answer in time' : said || err.message;
-        syslog?.write('errors', 'line-chats', { error: `start failed: ${err.code ?? ''} ${err.killed ? 'timeout' : ''}`.trim() });
-        return resolve({ ok: false, error: `Claude could not be started: ${why}` });
+        lineLog(`start failed (${req.target})`, err);
+        const tmux = req.target === 'tmux';
+        const why = err.code === 'ENOENT'
+          ? (tmux ? 'WSL is not installed. Choose New Windows Terminal tab instead.' : 'Windows Terminal is not installed. Install it, or start a tmux session in WSL and open this sheet again.')
+          : err.killed ? 'Starting Claude took too long. Try again; if it keeps happening, the system log has the reason.'
+            : tmux ? 'tmux could not open the window. Check that the session is still running, then open this sheet again.'
+              : 'Windows Terminal could not open the tab. Try again; if it keeps failing, the system log has the reason.';
+        return resolve({ ok: false, error: why });
       });
     });
   });
@@ -1322,24 +1371,28 @@ app.whenReady().then(() => {
       byChat.set(f.chat, c);
     }
     for (const c of lineChats) if (byChat.has(c.chat)) byChat.get(c.chat).messages = c.messages.length;
+    const chats = [...byChat.values()].sort((a, b) => a.chat.localeCompare(b.chat));
     return {
       enabled: true,
       // A path and the user's own words: the board shows them only with privacy off.
       folder: line.folder,
       names: line.names,
       keywords: line.keywords,
-      chats: [...byChat.values()].sort((a, b) => a.chat.localeCompare(b.chat)),
+      chats,
       readCount: lineChats.length,
+      // Ticked chats in the folder none of whose exports could be read.
+      tickedFailed: chats.filter((c) => c.read && c.messages == null).length,
+      scanFailed: Boolean(lineScanError),
       folderError: lineScan?.error ? lineScan.error.code : null,
       scannedAt: lineScannedAt,
       windowDays: lineChat.WINDOW_DAYS,
       // Chat names, senders and words: shown only with privacy off.
-      items: lineItems.map(({ hash, chat, at, ms, sender, text, reason, matched, draft, prompt }) => ({ hash, chat, at, ms, sender, text, reason, matched, draft, prompt })),
+      items: lineItems.map(({ key, hash, chat, at, ms, sender, text, reason, matched, draft, prompt }) => ({ key, hash, chat, at, ms, sender, text, reason, matched, draft, prompt })),
     };
   }
   function lineProblemsNow() {
     const out = [
-      ...lineChat.lineProblems({ enabled: line.enabled, folder: line.folder, scan: lineScan }),
+      ...lineChat.lineProblems({ enabled: line.enabled, folder: line.folder, scan: lineScan, read: line.read }),
       ...(lineScanError ? [{ label: lineScanError, detail: '' }] : []),
     ].map((p) => ({ ...p, count: 1 }));
     // Each new set of problems goes to the system log once (labels only).

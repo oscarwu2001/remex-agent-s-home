@@ -88,8 +88,9 @@
     </section>
 
     <section class="board-section line-section" id="line" hidden aria-labelledby="line-h">
-      <h2 id="line-h">LINE</h2>
+      <h2 id="line-h" tabindex="-1">LINE</h2>
       <div id="line-body"></div>
+      <p class="line-status" id="line-status" role="status"></p>
     </section>
 
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
@@ -234,7 +235,7 @@
 
           <section class="settings-group" aria-labelledby="line-settings-h">
             <h4 id="line-settings-h" tabindex="-1">LINE chats</h4>
-            <p class="hint">Requests for you in your LINE group chats, on the board: messages that mention your names or your keywords, and what you said you would do. LINE cannot be read directly, so you save a chat from the LINE desktop app into a folder and the app reads it there. Only the chats you tick are read; the files are never changed, and nothing goes online. Chat names, senders and messages are hidden while privacy mode is on.</p>
+            <p class="hint">Requests for you in your LINE group chats: mentions of your names, your keywords, and what you said you would do. Save a chat from the LINE desktop app into a folder; the app reads only the chats you tick, never changes the files, and goes nowhere online.</p>
             <label class="switch"><input type="checkbox" id="opt-line"> <span>Read the LINE chats I save (stays on this computer)</span></label>
             <div class="field-settings line-settings" id="line-settings"></div>
           </section>
@@ -326,6 +327,7 @@
       </button>
     </header>
     <div id="line-sheet-body"></div>
+    <p class="line-send-status" id="line-send-status" role="status"></p>
   </section>
 
   <script type="module" src="app.js"></script>
