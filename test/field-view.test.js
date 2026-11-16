@@ -256,3 +256,12 @@ test('the read-only step links to the privacy switch that opens it', async () =>
   assert.match(fieldColumnsHtml(field(F.summarise(rows)), { privacy: true }), /<button type="button" class="link-btn" id="field-goto-switch" data-field="privacy-switch">Go to the switch<\/button>/);
   assert.deepEqual(Object.keys(FIXES), ['check', 'settings', 'refresh']);
 });
+
+test('before the first update the section says when flags will show, with any set-up problem', async () => {
+  const { fieldHtml } = await view();
+  const f = { enabled: true, sheetUrl: 'x', keyName: 'k.json', summary: null, flags: { why: 'unread', earlier: false, list: [{ kind: 'setup', what: 'share', fix: 'settings' }] } };
+  const html = fieldHtml(f);
+  assert.match(html, /Flags show after the first update/);
+  assert.match(html, /not shared/);
+  assert.doesNotMatch(html, /Nothing to flag/);
+});

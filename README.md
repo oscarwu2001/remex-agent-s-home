@@ -63,7 +63,7 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **Turn the hospital:** drag sideways with the mouse. The whole building swings round with the mouse, and when you let go it settles facing the nearest of the four directions. Q and E turn it a quarter at a time. Heights follow the view the way they do in Monument Valley: as it turns, the side coming toward you sinks, the side moving away rises, and the stairs between rooms change with them.
 - **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
 - **Zoom and move:** scroll to zoom. Right-drag (or Shift-drag) to move.
-- **Settings** (the gear at the top of the panel) has five groups, each closed to one line saying what is set: **Look & layout** (colourway, room style, time of day, weather, the hospital layout), **Privacy & alerts** (privacy, name tags, demo patients, usage warnings), **Connections** (field feedback, other computers), **Agents & reports** (the office team, the performance report) and **App** (updates, the system log). One opens at a time, and the one you used last opens next time. A link into Settings, such as **Check the columns**, opens the right group.
+- **Settings** (the gear at the top of the panel) has five groups, each closed to one line saying what is set: **Look & layout** (colourway, room style, time of day, weather, the hospital layout), **Privacy & alerts** (privacy, name tags, usage warnings), **Connections** (field feedback, other computers), **Agents & reports** (the office team, the performance report) and **App** (demo patients, updates, the system log). One opens at a time, and the one you used last opens next time. A link into Settings, such as **Check the columns**, opens the right group.
 - **Decorate:** visit a room and press **Decorate**. Every room is a 6 × 6 grid of tiles, and everything in it is an item you can move: the operating table, the beds, the MRI scanner, the counter, desks and shelves, plus decorations and some fun extras (sofa, rug, fish tank, vending machine, floor lamp and more). Pick an item from the pictures and point at the floor to see it there before you click. **Move** picks up an item so you can put it somewhere else. **Remove** takes it away. Long pieces can be turned. Any item fits in any room, and the ones that belong there are listed first. Doorways stay clear. **Back to how it was** restores the room's own furniture. The floor has six patterns, each shown as a swatch.
 - **Plant the gardens:** click a green island and press **Plant**. You can choose tulips, daisies, lavender, a rose bush, a shrub, a small tree, a young cherry, a lamp post, stepping stones or a bench. The big tree, blossom tree, cherry blossom and fountain take 2 × 2 tiles. As you move over the plot, a see-through preview shows where the piece will stand and which tiles it covers. With **Dig up** selected, the preview shows what would go. Click to plant.
 - **Wind:** every minute or two a gust blows through. The garden trees and flowers bend, and petals blow off the cherry and blossom trees and drift across the hospital (leaves, if nothing is in flower). It doesn't happen if Windows is set to reduce motion. Your choices are saved in `%APPDATA%\Agents Home\decor.json`.
@@ -290,25 +290,43 @@ dropped quietly. With **Hide file names, commands and survey answers** on,
 the section shows only counts, scores and dates; question wording, comments
 and chosen answers show when it is off.
 
-**Flags.** Under the three numbers, the section lists what needs a look,
-each with its own symbol and words (also at the top of the sheet), or says
-"Nothing to flag":
+**Flags.** Under the three numbers, the section lists what needs a look in
+the last 7 days, each with its own symbol and words (also at the top of the
+sheet). The flags compare the answers of the last 7 days, by their date,
+with the answers before them, so a low score stays flagged however many
+updates come in between ("New since" above still counts from the last
+update):
 
-- **Low scores**: new answers since the last update at or below a
-  question's low mark, the bottom quarter of its scale rounded up: 2 or
-  less on a 1–5, 1–7 or 0–10 scale, 3 or less on 1–10. For example "2 low
-  scores on Question 5 since Mon, 16 Nov".
-- **Average falling**: a question with at least three new answers whose
-  average is lower than its earlier answers' by a tenth of its scale or
-  more (0.4 on 1–5, 0.9 on 1–10).
-- **New comments**: how many came since the last update. The comments
-  themselves are in the sheet, with privacy off.
-- **Set-up problems**: columns that need a choice, a failed update, a sheet
-  not shared, an unreadable key. They are under **Needs attention** too, and
-  each links to its fix.
+- **Low scores**: answers in the last 7 days at or below a question's low
+  mark, the bottom quarter of its scale rounded up: 2 or less on a 1–5, 1–7
+  or 0–10 scale, 3 or less on 1–10. For example "2 low scores on Question 5
+  in the last 7 days (2 or less on 1–5)".
+- **Average down**: a question with at least three answers in the last 7
+  days whose average is lower than the earlier answers' by a tenth of its
+  scale or more (0.4 on 1–5, 0.9 on 1–10): "Question 5 average down to 2.3
+  of 5 in the last 7 days (was 4.2)". With no answers from before the 7
+  days, averages wait; low scores and comments still show.
+- **Comments**: how many came in the last 7 days. The comments themselves
+  are in the sheet, with privacy off.
+- **Set-up problems**: columns that need a choice (until then the numbers
+  are the app's guesses), answers with no readable date (they cannot be
+  placed in the 7 days), a failed update, a sheet not shared, an unreadable
+  key. They are under **Needs attention** too, and each links to its fix.
 
-Scores on a guessed scale raise no flags, as they are not in the average
-either. With privacy on, a flag names a question only as "Question N".
+**Higher is worse.** On a question such as "How difficult was setup?
+(1-5)", a high answer is the bad one. Check the columns has a **Higher is
+worse** tick on each score column, already ticked when the title speaks of
+difficulty, effort, pain or problems (also 困難, 難, 麻煩); untick it if it
+is wrong. For a ticked column the flags count the top quarter of the scale
+("3 high scores … (4 or more on 1–5, higher is worse)") and flag an average
+going up.
+
+"Nothing to flag" shows only when the 7 days were compared. Otherwise the
+section says why: "Flags show after the first update", "Flags show after
+the next update" (a timestamp column chosen after its dates were dropped),
+or "No dates to compare: choose the timestamp column". Scores on a guessed
+scale raise no flags, as they are not in the average either. With privacy
+on, a flag names a question only as "Question N".
 
 When something goes wrong, the section and **Needs attention** say what to
 try, for example "Share the sheet with the key's reader address as Viewer"

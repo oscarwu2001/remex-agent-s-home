@@ -77,8 +77,10 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   if (!s) {
     if (f.busy) return '<p class="empty" role="status">Updating…</p>';
     const why = f.summaryError ?? (f.error ? `The sheet could not be read. ${f.error}` : null);
-    if (why) return `<p class="form-error" role="status">${esc(why)}</p><div class="form-actions">${refreshBtn('field-try')}</div>`;
-    return `<p class="empty">Not updated yet.</p><div class="form-actions">${refreshBtn('field-try')}</div>`;
+    // The flags say when they will show, and list any set-up problem.
+    const flags = flagsBlock(f, privacy, 'field-flags-h');
+    if (why) return `<p class="form-error" role="status">${esc(why)}</p>${flags}<div class="form-actions">${refreshBtn('field-try')}</div>`;
+    return `<p class="empty">Not updated yet.</p>${flags}<div class="form-actions">${refreshBtn('field-try')}</div>`;
   }
   const updated = f.fetchedAt
     ? `<span title="Updated ${esc(boardTime(f.fetchedAt, now))}">Updated ${esc(age(f.fetchedAt, now))}</span>` : '';
