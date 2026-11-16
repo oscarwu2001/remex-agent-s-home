@@ -12,7 +12,15 @@ const L = require('../src/core/linechat');
 
 const exp = (...lines) => lines.join('\n');
 const pick = (m) => ({ at: m.at, sender: m.sender, kind: m.kind, text: m.text });
-const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ah-line-'));
+const made = [];
+const tmpDir = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-line-'));
+  made.push(d);
+  return d;
+};
+test.after(() => {
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+});
 
 // ---- the export format --------------------------------------------------------
 
@@ -214,7 +222,102 @@ test('one message gives one hash in every export of it', () => {
   assert.notEqual(a.messages[0].hash, b.messages[0].hash);
 });
 
+test('a message with a sender is a system line only when it starts with the sender’s own name', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with P', '2026/11/16（一）',
+    '10:00\tKen\t@Mei please check Bob joined the group',
+    '10:01\t小明\t@梅 請幫我收回訊息',
+    '10:02\t小華\t請梅邀請客戶加入群組',
+    '10:03\tKen\tKen unsent a message.',
+    '10:04\t小明\t小明已收回訊息',
+    '10:05\tAna joined the group.',
+    '10:06\t\t小華已退出群組',
+    '10:07\tAna\tAna left the group.'));
+  assert.equal(r.unread, 0);
+  assert.deepEqual(r.messages.map((m) => [m.kind, m.text]), [
+    ['text', '@Mei please check Bob joined the group'], ['text', '@梅 請幫我收回訊息'], ['text', '請梅邀請客戶加入群組'],
+    ['unsent', ''], ['unsent', ''], ['joined', ''], ['left', ''], ['left', ''],
+  ]);
+  const chat = L.mergeChats([{ ...r, file: 'p.txt', mtimeMs: 1 }])[0].messages;
+  assert.deepEqual(L.relatedToYou(chat, { names: ['Mei', '梅'], keywords: [], since: 0 }).map((h) => h.reason), ['mention', 'mention', 'mention']);
+});
+
+test('a date line whose weekday is not the date’s is counted, and the messages under it wait for the next good date', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with W',
+    '2026/11/16（一）', '09:00\tKen\tmonday ok',
+    'Mon, 02/11/2026', '09:00\tKen\tunder a wrong date', '09:05\tKen\tthis too',
+    '2026/11/16（五）', '09:10\tKen\tagain wrong',
+    '2026/11/17（二）', '09:00\tKen\ttuesday ok'));
+  assert.equal(r.unread, 5);
+  assert.deepEqual(r.messages.map((m) => `${m.at} ${m.text}`), ['2026-11-16 09:00 monday ok', '2026-11-17 09:00 tuesday ok']);
+});
+
+test('after a date line the app cannot read, messages wait for the next good date; a quote that never closes gives no day', () => {
+  const r = L.parseExport(exp('[LINE] Chat history with B',
+    '2026/11/16（一）', '09:00\tKen\tok',
+    '2026/13/40（一）', '09:01\tKen\tlost 1',
+    '2026/11/17（二）', '09:02\tKen\t"never closed', '2026/11/18（三）', '09:03\tKen\tlost 2',
+    '2026/11/19（四）', '09:04\tKen\t"closed with spaces"   ', '09:05\tAna\tok 2'));
+  assert.equal(r.unread, 5);
+  assert.deepEqual(r.messages.map((m) => `${m.at} ${m.text}`), ['2026-11-16 09:00 ok', '2026-11-19 09:04 closed with spaces', '2026-11-19 09:05 ok 2']);
+});
+
+test('the newest export wins over the time it covers: a request unsent later is not listed', () => {
+  const parse = (file, ...lines) => ({ ...L.parseExport(exp('[LINE] Chat history with U', ...lines)), file, mtimeMs: 1 });
+  const older = parse('old.txt', 'Saved on: 11/16/2026, 10:30', '2026/11/16（一）', '09:00\tAna\tearly', '10:00\tKen\t@Mei please do X', '10:10\tAna\tafter');
+  const newer = parse('new.txt', 'Saved on: 11/16/2026, 12:00', '2026/11/16（一）', '10:00\tKen\tKen unsent a message.', '10:10\tAna\tafter', '11:00\tAna\tlater');
+  const [chat] = L.mergeChats([older, newer]);
+  assert.deepEqual(chat.messages.map((m) => `${m.at} ${m.kind} ${m.text}`), [
+    '2026-11-16 09:00 text early', '2026-11-16 10:00 unsent ', '2026-11-16 10:10 text after', '2026-11-16 11:00 text later',
+  ]);
+  assert.deepEqual(L.relatedToYou(chat.messages, { names: ['Mei'], keywords: [], since: 0 }), []);
+});
+
+test('two exports pasted into one file give each message the hash it has on its own', () => {
+  const one = exp('[LINE] Chat history with C', '2026/11/16（一）', '09:00\tKen\tok');
+  const alone = L.parseExport(one).messages[0].hash;
+  for (const text of [`${one}\n${one}`, `${one}\n﻿${one}`]) {
+    const r = L.parseExport(text);
+    assert.equal(r.unread, 0);
+    assert.deepEqual(r.messages.map((m) => m.hash), [alone, alone]);
+  }
+  // Another chat's export pasted in: its lines are not filed under this chat.
+  const r = L.parseExport(`${one}\n${exp('[LINE] Chat history with Other', '2026/11/16（一）', '09:01\tAna\tnot ours')}`);
+  assert.deepEqual(r.messages.map((m) => m.text), ['ok']);
+  assert.equal(r.unread, 3);
+});
+
+test('readHeader cuts a partial read at the last line end, \\r included', () => {
+  const head = Buffer.concat([Buffer.from('[LINE] Chat history with CR\rSaved on: 11/16/2026, 12:00\r2026/11/16（一）\r09:00\tKen\t好'), Buffer.from('好').subarray(0, 2)]);
+  assert.deepEqual(L.readHeader(head, { fileName: 'x.txt', complete: false }), { chat: 'CR', chatFrom: 'header', savedAt: '2026-11-16 12:00' });
+});
+
 // ---- what concerns the user ----------------------------------------------------------
+
+test('the same message in two chats is two items with their own keys', () => {
+  const chats = ['A', 'B'].map((c) => L.mergeChats([{ ...L.parseExport(exp(`[LINE] Chat history with ${c}`, '2026/11/16（一）', '09:00\tKen\t@Mei hi')), file: `${c}.txt`, mtimeMs: 1 }])[0]);
+  const [a, b] = chats.map((c) => L.relatedToYou(c.messages, { names: ['Mei'], keywords: [], since: 0 })[0]);
+  assert.equal(a.hash, b.hash);
+  assert.notEqual(a.key, b.key);
+  assert.match(a.key, /^[0-9a-f]{16}$/);
+});
+
+test('a Latin name is found only as a whole word, not inside an address or a longer name', () => {
+  const hits = (text) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
+  for (const text of ['write to mei@example.com', 'ask Mei-Ling', 'see x.mei.y', 'Meiling']) assert.equal(hits(text), 0, text);
+  for (const text of ['@Mei, please', 'thanks Mei.', '(Mei) check', 'Mei: done?', 'Mei’s turn']) assert.equal(hits(text), 1, text);
+});
+
+for (const [text, hit] of [
+  ['這個我來', true], ['这个我来', true], ['我處理', true], ['我处理', true], ['我會處理', true], ['我会处理', true],
+  ['我負責', true], ['我负责', true], ["I'll do it", true], ['I’ll do it', true], ['Ｉ’ｌｌ do it', true], ['I will do it', true],
+  ['抱歉我來不及', false], ['我來了', false], ['I willingly agree', false],
+]) {
+  test(`commitment: “${text}” ${hit ? 'is' : 'is not'} one`, () => {
+    const hits = L.relatedToYou(chatOf(`09:00\tMei\t${text}`), { names: ['Mei'], keywords: [], since: 0 });
+    assert.equal(hits.length, hit ? 1 : 0);
+    if (hit) assert.equal(hits[0].reason, 'commitment');
+  });
+}
 
 const chatOf = (...lines) => L.mergeChats([{ ...L.parseExport(exp('[LINE] Chat history with Team', '2026/11/16（一）', ...lines)), file: 't.txt', mtimeMs: 1 }])[0].messages;
 
@@ -310,45 +413,81 @@ test('a missing folder, an unreadable export, an empty one, a bad encoding and u
   fs.writeFileSync(path.join(dir, '[LINE] Odd Lines.txt'), exp('[LINE] Chat history with Odd Lines', '2026/11/16（一）', 'Kenji says hello', 'Kenji says bye', '10:00\tKen\tfine'));
   const fsys = { ...fs, openSync: (f, ...a) => { if (f.includes('Locked')) { const e = new Error('locked'); e.code = 'EBUSY'; throw e; } return fs.openSync(f, ...a); } };
   const scan = L.scanFolder(dir, { read: new Set(['Odd Lines', 'Locked Chat', 'Empty Chat', 'Odd Bytes']), fsys });
-  const labels = L.lineProblems({ enabled: true, folder: dir, scan }).map((p) => p.label);
+  const found = L.lineProblems({ enabled: true, folder: dir, scan });
+  const labels = found.map((p) => p.label);
   assert.deepEqual(labels, [
-    'LINE chats: 1 export could not be read (EBUSY)',
+    'LINE chats: 1 export could not be read; close any app that has it open, and the app tries again within a minute',
     'LINE chats: 1 export is in an encoding the app cannot read; save it again from LINE',
-    'LINE chats: 1 export is empty',
+    'LINE chats: 1 export is empty; save the chat again from LINE',
     'LINE chats: 2 lines in the chats you read are not in a format the app knows, so they were left out',
   ]);
+  // The raw code stays in the detail, which shows only with privacy off.
+  assert.equal(found[0].detail, '[LINE] Locked Chat.txt (EBUSY)');
+  for (const l of labels) assert.doesNotMatch(l, /\b(EBUSY|EACCES|ENOENT)\b/);
   // Labels are safe on a shared screen: no chat names, no words from a chat.
   for (const l of labels) assert.doesNotMatch(l, /Locked|Empty Chat|Odd|Kenji/);
   assert.deepEqual(L.lineProblems({ enabled: false, folder: dir, scan }), []);
 });
 
-test('an export that could not be read is tried again at the next scan, even when its time and size are the same', () => {
+test('a folder that cannot be read says how to recover, with its code only in the detail', () => {
+  const p = L.lineProblems({ enabled: true, folder: 'D:\\x', scan: { error: { code: 'EACCES' }, files: [] } });
+  assert.equal(p[0].label, 'LINE chats: the exports folder can’t be read. Check that it still exists and that you can open it in Explorer');
+  assert.equal(p[0].detail, 'D:\\x (EACCES)');
+});
+
+test('ticked chats with no export in the folder are counted under Needs attention', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'a.txt'), exp('[LINE] Chat history with Team Alpha', '2026/11/16（一）', '10:00\tKen\thi'));
+  const scan = L.scanFolder(dir, { read: new Set(['Team Alpha', 'Gone One', 'Gone Two']) });
+  const labels = L.lineProblems({ enabled: true, folder: dir, scan, read: ['Team Alpha', 'Gone One', 'Gone Two'] }).map((x) => x.label);
+  assert.deepEqual(labels, ['LINE chats: 2 ticked chats have no export in the folder; save them from LINE again, or untick them in Settings']);
+});
+
+test('an export that could not be read is tried again after a minute, even when its time and size are the same, and not before', () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, '[LINE] Busy.txt'), exp('[LINE] Chat history with Busy', '2026/11/16（一）', '10:00\tKen\thi'));
   let locked = true;
-  const fsys = { ...fs, openSync: (f, ...a) => { if (locked) { const e = new Error('locked'); e.code = 'EBUSY'; throw e; } return fs.openSync(f, ...a); } };
-  const first = L.scanFolder(dir, { read: new Set(['Busy']), fsys });
+  let opens = 0;
+  const fsys = { ...fs, openSync: (f, ...a) => { opens += 1; if (locked) { const e = new Error('locked'); e.code = 'EBUSY'; throw e; } return fs.openSync(f, ...a); } };
+  const now = Date.now();
+  const first = L.scanFolder(dir, { read: new Set(['Busy']), fsys, now });
   assert.equal(first.files[0].problem, 'unreadable');
   locked = false;
-  const prev = new Map(first.files.map((f) => [f.file, f]));
-  const second = L.scanFolder(dir, { read: new Set(['Busy']), fsys, prev });
-  assert.equal(second.files[0].problem, undefined);
-  assert.equal(second.files[0].messages[0].text, 'hi');
+  const soon = L.scanFolder(dir, { read: new Set(['Busy']), fsys, now: now + 10_000, prev: new Map(first.files.map((f) => [f.file, f])) });
+  assert.equal(soon.files[0].problem, 'unreadable');
+  assert.equal(opens, 1, 'not opened again within the minute');
+  const later = L.scanFolder(dir, { read: new Set(['Busy']), fsys, now: now + 61_000, prev: new Map(soon.files.map((f) => [f.file, f])) });
+  assert.equal(later.files[0].problem, undefined);
+  assert.equal(later.files[0].messages[0].text, 'hi');
 });
 
 // ---- settings -------------------------------------------------------------------
 
-test('settings: names and keywords split on either comma, ticks by chat, marks by hash', () => {
+test('settings: names and keywords split on either comma, ticks by chat, marks by item key', () => {
   let s = L.changeSettings(undefined, { enabled: true }).settings;
   s = L.changeSettings(s, { folder: 'D:\\exports' }).settings;
   s = L.changeSettings(s, { names: 'Mei, 梅，  , Mei', keywords: 'calibration、budget' }).settings;
   s = L.changeSettings(s, { tick: { chat: 'Team', on: true } }).settings;
-  s = L.changeSettings(s, { mark: { hash: 'abc123', what: 'dismissed' } }, { now: 5 }).settings;
+  s = L.changeSettings(s, { mark: { key: 'abc123', what: 'dismissed' } }, { now: 5 }).settings;
   assert.deepEqual(s, {
     enabled: true, folder: 'D:\\exports', names: ['Mei', '梅'], keywords: ['calibration', 'budget'], read: ['Team'],
     marks: { abc123: { what: 'dismissed', at: 5 } },
   });
-  assert.match(L.changeSettings(s, { mark: { hash: 'abc123', what: 'eaten' } }).error, /added or dismissed/);
+  assert.match(L.changeSettings(s, { mark: { key: 'abc123', what: 'eaten' } }).error, /added or dismissed/);
+  // Undo: the mark goes, and the item is listed again.
+  assert.deepEqual(L.changeSettings(s, { unmark: { key: 'abc123' } }).settings.marks, {});
+  assert.match(L.changeSettings(s, { unmark: { key: 'zz' } }).error, /not known/);
+});
+
+test('names past 10 and keywords past 30 are left out, and the reply says so', () => {
+  const many = (n, p) => Array.from({ length: n }, (_, i) => `${p}${i}`).join(', ');
+  const a = L.changeSettings(undefined, { names: many(12, 'N') });
+  assert.equal(a.settings.names.length, 10);
+  assert.equal(a.note, 'Saved 10 names; the rest were left out.');
+  const b = L.changeSettings(undefined, { keywords: many(31, 'k') });
+  assert.equal(b.settings.keywords.length, 30);
+  assert.equal(b.note, 'Saved 30 keywords; the rest were left out.');
+  assert.equal(L.changeSettings(undefined, { names: 'Mei' }).note, undefined);
 });
 
 test('turning LINE chats off forgets the chats, the ticks and the added and dismissed items', () => {
@@ -407,32 +546,76 @@ test('toWslPath turns Windows and WSL share paths into Linux ones, and refuses w
   assert.equal(L.toWslPath('C:\\Users\\Test User\\專案 A'), '/mnt/c/Users/Test User/專案 A');
   assert.equal(L.toWslPath('d:/work/repo/'), '/mnt/d/work/repo');
   assert.equal(L.toWslPath('C:\\'), '/mnt/c');
-  assert.equal(L.toWslPath('\\\\wsl.localhost\\Ubuntu\\home\\me\\repo'), '/home/me/repo');
-  assert.equal(L.toWslPath('\\\\wsl$\\Ubuntu\\home\\me'), '/home/me');
+  // A WSL share path is the default distro's only: tmux runs there.
+  assert.equal(L.toWslPath('\\\\wsl.localhost\\Ubuntu\\home\\me\\repo', { distro: 'Ubuntu' }), '/home/me/repo');
+  assert.equal(L.toWslPath('\\\\wsl$\\ubuntu\\home\\me', { distro: 'Ubuntu' }), '/home/me');
+  assert.throws(() => L.toWslPath('\\\\wsl.localhost\\Debian\\home\\me', { distro: 'Ubuntu' }), /in the WSL distro Debian, but tmux runs in Ubuntu/);
+  assert.throws(() => L.toWslPath('\\\\wsl.localhost\\Debian\\home\\me'), /could not tell which WSL distro/);
   assert.equal(L.toWslPath('/home/me/repo'), '/home/me/repo');
   assert.throws(() => L.toWslPath('\\\\server\\share\\x'), /WSL cannot reach/);
   assert.throws(() => L.toWslPath('repo'), /WSL cannot reach/);
 });
 
+test('wslTarget gives the Linux path and the distro a WSL share path names', () => {
+  assert.deepEqual(L.wslTarget('C:\\work\\x'), { path: '/mnt/c/work/x', distro: null });
+  assert.deepEqual(L.wslTarget('\\\\wsl.localhost\\Debian\\home\\me'), { path: '/home/me', distro: 'Debian' });
+  assert.deepEqual(L.wslTarget('/home/me'), { path: '/home/me', distro: null });
+});
+
 const PROMPT_FILE = 'C:\\Users\\Test User\\AppData\\Roaming\\Agents Home\\line-prompts\\p1.txt';
 const CWD = 'C:\\Users\\Test User\\專案 A';
 
-test('the tmux command: a new window in the chosen session, the folder as /mnt/c, the prompt only in its file', () => {
+const PROMPT_WSL = '/mnt/c/Users/Test User/AppData/Roaming/Agents Home/line-prompts/p1.txt';
+const tmuxArgs = (cwd) => ['-e', 'tmux', 'new-window', '-t', '=work:', '-n', 'line-0905', 'sh', '-c', L.TMUX_SCRIPT, 'agents-home', PROMPT_WSL, cwd];
+
+test('the tmux command: a new window in the chosen session, the folder and prompt file as the script’s $2 and $1, the prompt only in its file', () => {
   const plan = L.launchPlan({ target: 'tmux', session: 'work', cwd: CWD, prompt: DANGER, promptFile: PROMPT_FILE, name: 'line-0905' });
   assert.deepEqual(plan.write, { file: PROMPT_FILE, text: DANGER });
   assert.equal(plan.file, 'wsl.exe');
-  assert.deepEqual(plan.args, [
-    '-e', 'tmux', 'new-window', '-t', '=work:', '-n', 'line-0905', '-c', '/mnt/c/Users/Test User/專案 A',
-    'sh', '-c', L.TMUX_SCRIPT, 'agents-home', '/mnt/c/Users/Test User/AppData/Roaming/Agents Home/line-prompts/p1.txt',
-  ]);
+  // No -c: tmux reads its -c folder as a format, so the folder goes to the script instead.
+  assert.deepEqual(plan.args, tmuxArgs('/mnt/c/Users/Test User/專案 A'));
   assert.equal(plan.label, 'tmux window line-0905');
   const line = plan.args.join(' ');
   for (const bit of ['rm -rf', '$(touch', '`whoami`', "'quoted'", 'del C:']) assert.ok(!line.includes(bit), bit);
-  // The script is fixed: it reads the file named by $1 into one variable
-  // (never re-read as shell code) and starts claude ask-first with it as one argument.
-  assert.match(L.TMUX_SCRIPT, /^p=\$\(cat -- "\$1"\) \|\| /);
-  assert.match(L.TMUX_SCRIPT, /claude --permission-mode default "\$p"/);
+  // The script is fixed: it goes to the folder in $2, reads the file named
+  // by $1 into one variable (never re-read as shell code) and starts claude
+  // ask-first with it as one argument after --.
+  assert.match(L.TMUX_SCRIPT, /^cd -- "\$2" \|\| \{ printf 'The folder could not be opened\. Press Enter to close this window\.\\n'; read _; exit 1; \}; /);
+  assert.match(L.TMUX_SCRIPT, /p=\$\(cat -- "\$1"\) \|\| /);
+  assert.match(L.TMUX_SCRIPT, /claude --permission-mode default -- "\$p"/);
   assert.doesNotMatch(L.TMUX_SCRIPT, /eval|\$\{?p\}?[^"]/);
+});
+
+test('a folder name tmux would read as a format reaches the script as it is', () => {
+  for (const name of ['#(touch x)', '#{session_name}', '#S', '##', 'a #(id) b']) {
+    const plan = L.launchPlan({ target: 'tmux', session: 'work', cwd: `C:\\work\\${name}`, prompt: 'x', promptFile: PROMPT_FILE, name: 'line-0905' });
+    assert.deepEqual(plan.args, tmuxArgs(`/mnt/c/work/${name}`), name);
+    assert.ok(!plan.args.includes('-c') || plan.args.indexOf('-c') === 8, name);
+  }
+});
+
+test('launchPlan refuses a WSL share folder in a distro other than the one tmux runs in', () => {
+  const base = { target: 'tmux', session: 'work', prompt: 'x', promptFile: PROMPT_FILE, name: 'line-1' };
+  assert.throws(() => L.launchPlan({ ...base, cwd: '\\\\wsl.localhost\\Debian\\home\\me', distro: 'Ubuntu' }), /in the WSL distro Debian, but tmux runs in Ubuntu/);
+  assert.deepEqual(L.launchPlan({ ...base, cwd: '\\\\wsl.localhost\\Ubuntu\\home\\me', distro: 'Ubuntu' }).args.slice(-1), ['/home/me']);
+});
+
+test('wslProbe asks WSL which distro tmux runs in and whether the folder is there, launching nothing else', async () => {
+  const calls = [];
+  const exec = (o) => (file, args, opts, cb) => {
+    calls.push([file, ...args]);
+    cb(o.err ?? null, Buffer.from(o.out ?? ''), Buffer.from(''));
+  };
+  let r = await L.wslProbe('/home/me/#(x)', { execFile: exec({ out: 'Ubuntu\n' }) });
+  assert.deepEqual(r, { distro: 'Ubuntu', exists: true, error: null });
+  assert.deepEqual(calls[0], ['wsl.exe', '-e', 'sh', '-c', 'printf "%s\\n" "$WSL_DISTRO_NAME"; [ -d "$1" ]', 'agents-home', '/home/me/#(x)']);
+  r = await L.wslProbe('/home/me/gone', { execFile: exec({ out: 'Ubuntu\n', err: Object.assign(new Error('x'), { code: 1 }) }) });
+  assert.deepEqual(r, { distro: 'Ubuntu', exists: false, error: null });
+  r = await L.wslProbe('/x', { execFile: exec({ err: Object.assign(new Error('x'), { code: 'ENOENT' }) }) });
+  assert.equal(r.exists, false);
+  assert.match(r.error, /WSL is not installed/);
+  r = await L.wslProbe('/x', { execFile: exec({ err: Object.assign(new Error('x'), { killed: true, code: null }) }) });
+  assert.match(r.error, /did not answer in time/);
 });
 
 test('the Windows Terminal command: a new tab running PowerShell with an encoded script that points claude at the prompt file', () => {
@@ -442,8 +625,8 @@ test('the Windows Terminal command: a new tab running PowerShell with an encoded
   assert.equal(plan.args.length, 10);
   assert.match(plan.args[9], /^[A-Za-z0-9+/=]+$/);
   const script = Buffer.from(plan.args[9], 'base64').toString('utf16le');
-  assert.ok(script.includes("Set-Location -LiteralPath 'C:\\Users\\Test User\\專案 A'"), script);
-  assert.ok(script.includes('& claude --permission-mode default '), script);
+  assert.ok(script.includes("Set-Location -LiteralPath 'C:\\Users\\Test User\\專案 A' -ErrorAction Stop"), script);
+  assert.ok(script.includes('& claude --permission-mode default -- '), script);
   assert.ok(script.includes(PROMPT_FILE), script);
   for (const bit of ['rm -rf', '$(touch', '`whoami`', "'quoted'", 'del C:']) assert.ok(!script.includes(bit) && !plan.args.join(' ').includes(bit), bit);
   assert.equal(plan.label, 'a new Windows Terminal tab');
