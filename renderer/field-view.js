@@ -10,7 +10,7 @@
 // case numbers) are hidden whatever the setting: only how many there are
 // is shown.
 
-import { boardTime, boardDay } from './projects-view.js';
+import { boardTime, boardDay } from './dates.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const DASH = '<span class="none"><span aria-hidden="true">–</span><span class="visually-hidden">none</span></span>';
@@ -163,42 +163,101 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
     ${left.length ? `<h3 class="field-h">Not shown</h3>${left.map((t) => `<p class="hint">${t}</p>`).join('')}` : ''}`;
 }
 
-// "Check the columns": one row per column, its suggested role preselected
-// (or the one the user saved), editable. draft: { [index]: { role, low,
-// high } } while the user changes them.
+// Each row of "Check the columns" as it stands: the role and scale shown
+// (the user's draft over what the app has) and whether the user still has
+// to choose. A low-confidence guess (c.needsChoice) is never preselected,
+// and a scale is preselected only when the user confirmed it or the
+// question states it; anything else waits for the user, and Save with it.
+export function stepRows(f, draft = {}) {
+  return (f?.summary?.columns ?? []).map((c) => {
+    const d = draft[c.index] ?? {};
+    const role = d.role || (c.needsChoice ? '' : c.role);
+    const sure = c.role === 'score' && (c.scaleFrom === 'confirmed' || c.scaleFrom === 'header');
+    const low = role === 'score' ? (d.low ?? (sure ? c.low : null)) : null;
+    const high = role === 'score' ? (d.high ?? (sure ? c.high : null)) : null;
+    const missing = !role || (role === 'score' && (low == null || high == null));
+    return { c, role, low, high, missing, touched: Object.keys(d).length > 0 };
+  });
+}
+
+// The draft after one select changed. Going back to an empty choice drops
+// that part, so it is missing again rather than saved as 0.
+export function draftWith(draft, col, part, value) {
+  const row = { ...draft[col] };
+  if (value === '' || value == null) delete row[part];
+  else row[part] = part === 'role' ? value : Number(value);
+  return { ...draft, [col]: row };
+}
+
+// The app's guess for a row the user has to choose, in words.
+function guessWords(c) {
+  const g = c.suggested ?? {};
+  const words = ROLE_WORDS[g.role] ?? g.role ?? '';
+  return g.role === 'score' && g.low != null ? `${words}, ${g.low}–${g.high}` : words;
+}
+
+function rowTags(r) {
+  const { c } = r;
+  return [
+    r.missing ? 'Needs a choice' : r.touched ? 'Changed' : '',
+    r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.scaleFrom === 'answers' ? 'Scale guessed' : '',
+    c.isNew ? 'New column, not checked' : '',
+    c.repeated ? 'Repeated title' : '',
+    c.hidden && r.role && r.role !== 'identifying' ? 'Answers show after the next update' : '',
+  ].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
+}
+
+const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>–</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
+
+// "Check the columns": one row per column. With privacy off each row has
+// its role to choose (and a score its scale); Save is refused until every
+// row has one. With privacy on the step only reads: the choices name the
+// survey's own columns, so they are made with the wording in view.
+// draft: { [index]: { role, low, high } } while the user changes them.
 export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', error = '' } = {}) {
   const s = f?.summary;
   if (!s?.columns?.length) return '';
   const qNo = questionNumbers(s);
-  const todo = s.columns.filter((c) => !c.confirmed).length;
-  const rows = s.columns.map((c) => {
-    const d = draft[c.index] ?? {};
-    const role = d.role ?? c.role;
-    const low = d.low ?? c.low ?? c.suggested?.low ?? 1;
-    const high = d.high ?? c.high ?? c.suggested?.high ?? 5;
-    const name = privacy ? (c.role === 'timestamp' ? 'Timestamp' : `Question ${qNo.get(c.index)}`) : c.header;
-    const tags = [
-      c.isNew ? '<span class="tag">new column, not checked</span>' : '',
-      draft[c.index] ? '<span class="tag">changed, not saved</span>' : !c.confirmed && !c.isNew ? '<span class="tag">suggested</span>' : '',
-      role === 'score' && (d.role ? false : c.scaleFrom === 'answers') ? '<span class="tag">scale guessed</span>' : '',
-      c.hidden && role !== 'identifying' ? '<span class="tag">answers show after the next update</span>' : '',
-    ].join('');
-    const opts = Object.entries(ROLE_WORDS).map(([v, w]) => `<option value="${v}"${v === role ? ' selected' : ''}>${w}</option>`).join('');
-    const scale = role === 'score' ? `<span class="field-scale">
-        <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low">${[0, 1].map((v) => `<option${v === low ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high">${[2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => `<option${v === high ? ' selected' : ''}>${v}</option>`).join('')}</select></label></span>` : '';
-    return `<li class="field-col${c.isNew ? ' is-new' : ''}">
-      <p class="field-col-name"><span>${esc(name)}</span>${tags}</p>
+  const rows = stepRows(f, draft);
+  const missing = rows.filter((r) => r.missing).length;
+  const nameOf = (c) => (privacy ? (c.role === 'timestamp' ? 'Timestamp' : `Question ${qNo.get(c.index)}`) : c.header);
+  const guess = (r) => (r.missing && r.c.needsChoice && r.c.suggested ? `<p class="muted">The app’s guess: ${esc(guessWords(r.c))}.</p>` : '');
+  const left = missing ? `${plural(missing, 'column')} still ${missing === 1 ? 'needs' : 'need'} a choice.` : '';
+  const head = '<h4 id="field-check-h">Check the columns</h4>';
+
+  if (privacy) {
+    const items = rows.map((r) => {
+      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}` : 'Not chosen';
+      return `<li class="field-col">
+        <p class="field-col-name"><span>${esc(nameOf(r.c))}</span>${rowTags(r)}</p>
+        <p class="field-col-what">${esc(what)}</p>${guess(r)}</li>`;
+    }).join('');
+    return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
+    <p class="hint">The app guessed what each column is.${left ? ` ${left}` : ''}</p>
+    <ol class="field-cols">${items}</ol>
+    <p class="hint">Turn off ${PRIVACY_SWITCH} (Settings → On screen) to check the columns.</p>
+  </section>`;
+  }
+
+  const items = rows.map((r) => {
+    const { c } = r;
+    const name = nameOf(c);
+    const opts = (r.role ? '' : '<option value="" selected>Choose…</option>')
+      + Object.entries(ROLE_WORDS).map(([v, w]) => `<option value="${v}"${v === r.role ? ' selected' : ''}>${w}</option>`).join('');
+    const scale = r.role === 'score' ? `<span class="field-scale">
+        <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low" aria-label="${esc(name)}: scale from">${scaleOpts([0, 1], r.low)}</select></label>
+        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts([2, 3, 4, 5, 6, 7, 8, 9, 10], r.high)}</select></label></span>` : '';
+    return `<li class="field-col${r.missing ? ' needs-choice' : ''}">
+      <p class="field-col-name"><span>${esc(name)}</span>${rowTags(r)}</p>
       <div class="field-col-role"><label class="visually-hidden" for="fc-role-${c.index}">What ${esc(name)} is</label>
         <select id="fc-role-${c.index}" data-col="${c.index}" data-part="role">${opts}</select>${scale}</div>
-      ${!privacy && c.answers === 0 ? '<p class="muted">No answers yet.</p>' : ''}</li>`;
+      ${guess(r)}${c.answers === 0 ? '<p class="muted">No answers yet.</p>' : ''}</li>`;
   }).join('');
-  return `<section class="field-check-step" aria-labelledby="field-check-h">
-    <h4 id="field-check-h">Check the columns</h4>
-    <p class="hint">${todo ? `${plural(todo, 'column')} not checked. ` : 'All columns checked. '}The app suggested what each column is; check each once. Your choice is kept, and a column added to the form later is flagged. Only scores with a checked scale, or one written in the question, count in the average.</p>
-    ${privacy ? `<p class="hint">Question wording is hidden while ${PRIVACY_SWITCH} is on; turn it off to see it.</p>` : ''}
-    <form id="field-check-form"><ol class="field-cols">${rows}</ol>
-      <div class="form-actions"><button class="button" type="submit" id="field-check-save">Save the columns</button></div></form>
+  return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
+    <p class="hint">The app guessed what each column is. Change any that are wrong, then press Save the columns. A column added to the form later is flagged.</p>
+    <form id="field-check-form"><ol class="field-cols">${items}</ol>
+      <div class="form-actions"><button class="button" type="submit" id="field-check-save"${missing ? ' disabled aria-describedby="field-check-left"' : ''}>Save the columns</button>
+        <p class="hint" id="field-check-left" role="status">${esc(left)}</p></div></form>
     ${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ''}${note ? `<p class="hint" role="status">${esc(note)}</p>` : ''}
   </section>`;
 }
@@ -218,15 +277,15 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
         <input id="field-link" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…" value="${privacy ? '' : esc(f.sheetUrl)}">
         <button class="button" type="submit">Save</button></form>
         ${f.sheetUrl ? '<p class="hint">Leave it empty to keep the saved link.</p>' : ''}`
-    : `<p class="field-set">${privacy ? 'A sheet link is saved.' : `Sheet: <span class="field-path">${esc(f.sheetUrl)}</span>`}
+    : `<p class="field-set"><span>${privacy ? 'A sheet link is saved.' : `Sheet: <span class="field-path">${esc(f.sheetUrl)}</span>`}</span>
         <button type="button" class="link-btn" id="field-change" data-field="change-link">Change link</button></p>`;
   // One filled button at a time: Save until a link is saved, then the key.
   const key = f.keyName
-    ? `<p class="field-set">${privacy ? 'A key file is chosen.' : `Key file: <span class="field-path">${esc(f.keyName)}</span>`}
+    ? `<p class="field-set"><span>${privacy ? 'A key file is chosen.' : `Key file: <span class="field-path">${esc(f.keyName)}</span>`}</span>
         <button type="button" class="link-btn" id="field-key" data-field="choose-key">Choose another…</button></p>`
     : `<div class="form-actions"><button type="button" class="${f.sheetUrl ? 'button' : 'link-btn'}" id="field-key" data-field="choose-key">Choose key file…</button></div>`;
   const robot = f.clientEmail
-    ? `<p class="field-set">${privacy ? 'Share the sheet with the key’s reader address as Viewer.' : `Share the sheet with <span class="field-robot">${esc(f.clientEmail)}</span> as Viewer.`}
+    ? `<p class="field-set"><span>${privacy ? 'Share the sheet with the key’s reader address as Viewer.' : `Share the sheet with <span class="field-robot">${esc(f.clientEmail)}</span> as Viewer.`}</span>
         <button type="button" class="link-btn" id="field-copy" data-field="copy-reader">Copy reader address</button></p>` : '';
   const keyError = f.keyError ? `<p class="form-error" role="status">${esc(f.keyError)}</p>` : '';
   const ready = f.sheetUrl && f.keyName;
@@ -240,18 +299,14 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
     ${fieldColumnsHtml(f, { privacy, draft: state.draft, note: state.checkNote, error: state.checkError })}`;
 }
 
-// The roles to save from the step: every column, the draft over what shows.
+// The roles to save from the step: every row the user has a choice for,
+// and how many still have none (the app refuses to save while any do).
 export function rolesFrom(f, draft = {}) {
-  return (f?.summary?.columns ?? []).map((c) => {
-    const d = draft[c.index] ?? {};
-    const role = d.role ?? c.role;
-    const out = { header: c.header, index: c.index, role };
-    if (role === 'score') {
-      out.low = Number(d.low ?? c.low ?? c.suggested?.low ?? 1);
-      out.high = Number(d.high ?? c.high ?? c.suggested?.high ?? 5);
-    }
-    return out;
-  });
+  const rows = stepRows(f, draft);
+  const roles = rows.filter((r) => !r.missing).map(({ c, role, low, high }) => ({
+    header: c.header, index: c.index, role, ...(role === 'score' ? { low, high } : {}),
+  }));
+  return { roles, missing: rows.length - roles.length };
 }
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';

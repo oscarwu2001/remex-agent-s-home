@@ -4,6 +4,7 @@
 // The list itself lives in ~/.agents-home/projects.json (src/core/projects.js).
 
 import { icon, badge, runningBadge, todoPips, isRunning } from './overview.js';
+import { boardTime } from './dates.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ORDER = { active: 0, paused: 1, done: 2 };
@@ -54,18 +55,6 @@ function addForm({ op, project, id, label, placeholder, max, error }) {
       <button type="submit" class="icon-act" data-op="${op}"${project ? ` data-project="${esc(project)}"` : ''} title="${esc(label)}">${icon('plus')}<span class="visually-hidden">${esc(label)}</span></button></form>${err}`;
 }
 
-// The board's one way to write a moment: "08:01" today, else the day in the
-// computer's own language and the time ("Mon, 16 Nov, 08:01").
-export function boardDay(value) {
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-}
-export function boardTime(value, now = Date.now()) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  return d.toDateString() === new Date(now).toDateString() ? t : `${boardDay(d)}, ${t}`;
-}
 const hhmm = (iso) => boardTime(iso);
 
 // The personal assistant's question queue and its last scan

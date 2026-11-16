@@ -210,7 +210,12 @@ function demoField(nowMs) {
   const h = 3_600_000;
   const day = 24 * h;
   const at = (ms) => new Date(nowMs - ms).toISOString();
-  const col = (index, header, role, extra = {}) => ({ index, header, role, confirmed: false, isNew: false, answers: 24, suggested: { role, ...extra }, ...extra });
+  // A low-confidence suggestion (a scale guessed from the answers) waits
+  // for the user's choice in the step, as it does with a real sheet.
+  const col = (index, header, role, extra = {}, confidence = 'high') => ({
+    index, header, role, confirmed: false, isNew: false, answers: 24, needsChoice: confidence === 'low',
+    suggested: { role, confidence, ...extra }, ...extra,
+  });
   return {
     enabled: true, demo: true, sheetUrl: '', keyName: 'sample-key.json', clientEmail: 'sample-reader@sample-project.iam.gserviceaccount.com',
     busy: false, fetchedAt: nowMs - 2 * h, lastAttemptAt: nowMs - 2 * h, error: null, errorKind: null, errorAt: null,
@@ -220,13 +225,13 @@ function demoField(nowMs) {
       newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,
       // Not checked yet, as a new sheet is: the board says so and links to
       // Settings → Check the columns.
-      checked: false, newColumns: [],
+      checked: false, needsChoice: 1, newColumns: [],
       columns: [
         col(0, 'Timestamp', 'timestamp'),
         col(1, 'Email address', 'identifying', { reason: 'header' }),
         col(2, 'Your name', 'identifying', { reason: 'header' }),
         col(3, 'Sample: how easy was the setup? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
-        col(4, 'Sample: how clear was the screen in theatre?', 'score', { low: 1, high: 5, scaleFrom: 'answers' }),
+        col(4, 'Sample: how clear was the screen in theatre?', 'score', { low: 1, high: 5, scaleFrom: 'answers' }, 'low'),
         col(5, 'Sample: how well did the tracking keep up? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
         col(6, 'Sample: how many times did you restart it?', 'number', { reason: 'count' }),
         col(7, 'Sample: your role', 'choice'),

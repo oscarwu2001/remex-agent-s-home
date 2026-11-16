@@ -14,7 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom } from './field-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith } from './field-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -2644,7 +2644,10 @@ function openFieldCheck() {
   setFieldSheet(false);
   setSettings(true);
   $('field-check-h')?.scrollIntoView({ block: 'start' });
-  $(`fc-role-${snapshot.field?.summary?.columns?.find((c) => !c.confirmed)?.index ?? 0}`)?.focus({ preventScroll: true });
+  // The first row that needs a choice, else the first one not checked.
+  const rows = stepRows(snapshot.field, fieldUi.draft);
+  const row = rows.find((r) => r.missing) ?? rows.find((r) => !r.c.confirmed);
+  if (row) $(`fc-role-${row.c.index}`)?.focus({ preventScroll: true });
 }
 async function fieldAction(act) {
   if (act === 'open') setFieldSheet(true);
@@ -2695,7 +2698,7 @@ $('field-settings').addEventListener('change', (e) => {
   const el = e.target.closest('select[data-col]');
   if (!el) return;
   const col = Number(el.dataset.col);
-  fieldUi.draft[col] = { ...fieldUi.draft[col], [el.dataset.part]: el.dataset.part === 'role' ? el.value : Number(el.value) };
+  fieldUi.draft = draftWith(fieldUi.draft, col, el.dataset.part, el.value);
   fieldUi.checkNote = '';
   renderFieldSettings();
 });
@@ -2703,12 +2706,20 @@ $('field-settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (e.target.id === 'field-check-form') {
     fieldUi.checkError = '';
-    if (snapshot.demo || !bridge.fieldSet) {
-      fieldUi.checkNote = snapshot.demo ? 'The demo keeps its sample columns; your own sheet’s choices are saved.' : 'The preview cannot save; this works in the app.';
+    fieldUi.checkNote = '';
+    // Save is disabled while a row has no choice; this holds if it is sent anyway.
+    const { roles, missing } = rolesFrom(snapshot.field, fieldUi.draft);
+    if (missing) {
+      fieldUi.checkError = `Not saved: ${missing} ${missing === 1 ? 'column still needs' : 'columns still need'} a choice.`;
       renderFieldSettings();
       return;
     }
-    const res = await bridge.fieldSet({ columns: rolesFrom(snapshot.field, fieldUi.draft) }).catch((err) => ({ ok: false, error: err.message }));
+    if (snapshot.demo || !bridge.fieldSet) {
+      fieldUi.checkNote = snapshot.demo ? 'The demo does not save columns. With your own sheet, this saves your choices.' : 'The preview cannot save; this works in the app.';
+      renderFieldSettings();
+      return;
+    }
+    const res = await bridge.fieldSet({ columns: roles }).catch((err) => ({ ok: false, error: err.message }));
     if (res.ok) {
       fieldUi.draft = {};
       fieldUi.checkNote = 'Columns saved.';
@@ -2734,6 +2745,10 @@ $('opt-field').addEventListener('change', async (e) => {
   setTimeout(() => { renderField(); renderFieldSettings(); }, 600);
 });
 $('field-sheet-close').addEventListener('click', () => setFieldSheet(false));
+// A press outside the open sheet (on the inert board or map) closes it.
+document.addEventListener('pointerdown', (e) => {
+  if (!$('field-sheet').hidden && !$('field-sheet').contains(e.target)) setFieldSheet(false);
+});
 $('field-sheet').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.stopPropagation();
