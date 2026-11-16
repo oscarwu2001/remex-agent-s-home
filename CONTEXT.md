@@ -44,6 +44,8 @@
 | **Clash** | Two sessions active in the last 15 minutes in the same checkout (same folder, or one inside the other, not across a Claude app worktree). |
 | **Pips** | A to-do list drawn as one mark per item: ring (to do), half-filled ring (doing), ticked square (done). |
 | **Snapshot** | What the main process sends the renderer every 500 ms: sessions, their helpers, stats, roster, problems. |
+| **Flag** (field feedback) | Something in the field survey that needs a look since the last update, worked out by `fieldFlags` (`src/core/fieldsurvey.js`): **low scores** (new answers at or below the scale's *low mark*, its bottom quarter rounded up), an **average falling** by a tenth of the scale or more over three or more new answers, **new comments**, or a **set-up problem** with a link to its fix. Each has its own glyph and words; none is ever shown by colour alone. |
+| **Settings group** | One of the five closed-by-default parts of Settings (Look & layout, Privacy & alerts, Connections, Agents & reports, App), each showing a one-line summary of what is set; one opens at a time. |
 | **Privacy mode** | Hides `detail` (file names, commands, patterns, hosts), Task descriptions, and the field survey's question wording, comments and chosen answers. On by default. |
 
 ## Statuses

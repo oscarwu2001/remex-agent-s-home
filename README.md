@@ -44,7 +44,7 @@ access. Instead, download the setup exe yourself and pass it on (a shared
 drive, Teams, a USB stick). The installed app never signs in to GitHub and
 never asks to: it reads only the computer's own Claude sessions. GitHub comes
 in only if that person chooses to link their computer to the others
-(Settings → Other computers → Use a git status folder, or posting their own
+(Settings → Connections → Other computers → Use a git status folder, or posting their own
 status with the `agents-status` branch's scripts); only then do they need a
 GitHub account with access to this repository.
 
@@ -63,14 +63,14 @@ npm run dist:win     # or build dist\AgentsHome-Setup-0.1.0.exe
 - **Turn the hospital:** drag sideways with the mouse. The whole building swings round with the mouse, and when you let go it settles facing the nearest of the four directions. Q and E turn it a quarter at a time. Heights follow the view the way they do in Monument Valley: as it turns, the side coming toward you sinks, the side moving away rises, and the stairs between rooms change with them.
 - **Visit a room:** click its sign or its floor. **Whole hospital** (or Esc) flies back out.
 - **Zoom and move:** scroll to zoom. Right-drag (or Shift-drag) to move.
-- **Settings** (the gear at the top of the panel): colourway, time of day, privacy, name tags, demo patients and the hospital layout.
+- **Settings** (the gear at the top of the panel) has five groups, each closed to one line saying what is set: **Look & layout** (colourway, room style, time of day, weather, the hospital layout), **Privacy & alerts** (privacy, name tags, demo patients, usage warnings), **Connections** (field feedback, other computers), **Agents & reports** (the office team, the performance report) and **App** (updates, the system log). One opens at a time, and the one you used last opens next time. A link into Settings, such as **Check the columns**, opens the right group.
 - **Decorate:** visit a room and press **Decorate**. Every room is a 6 × 6 grid of tiles, and everything in it is an item you can move: the operating table, the beds, the MRI scanner, the counter, desks and shelves, plus decorations and some fun extras (sofa, rug, fish tank, vending machine, floor lamp and more). Pick an item from the pictures and point at the floor to see it there before you click. **Move** picks up an item so you can put it somewhere else. **Remove** takes it away. Long pieces can be turned. Any item fits in any room, and the ones that belong there are listed first. Doorways stay clear. **Back to how it was** restores the room's own furniture. The floor has six patterns, each shown as a swatch.
 - **Plant the gardens:** click a green island and press **Plant**. You can choose tulips, daisies, lavender, a rose bush, a shrub, a small tree, a young cherry, a lamp post, stepping stones or a bench. The big tree, blossom tree, cherry blossom and fountain take 2 × 2 tiles. As you move over the plot, a see-through preview shows where the piece will stand and which tiles it covers. With **Dig up** selected, the preview shows what would go. Click to plant.
 - **Wind:** every minute or two a gust blows through. The garden trees and flowers bend, and petals blow off the cherry and blossom trees and drift across the hospital (leaves, if nothing is in flower). It doesn't happen if Windows is set to reduce motion. Your choices are saved in `%APPDATA%\Agents Home\decor.json`.
 - **Room style** (in Settings): **Simple** is the storybook furniture. **Detailed** furnishes every room with realistic hospital equipment, still in the same flat-colour style. That means a real operating table with padded sections and arm boards, twin surgical lights on ceiling arms, and an anaesthesia machine with gas cylinders. The ward gets hospital beds with rails, IV poles and privacy curtains. The lab gets a bench with a sink, a microscope and a fume hood. Radiology gets an MRI gantry with a patient cradle, and the Vision Clinic an exam chair with a phoropter and a slit lamp. The Nurses' Station gets a two-level counter with monitors and chairs, and departments get a navigation camera tower on wheels.
 - **Weather** (in Settings): clear, cloudy, rain, snow or fog, or **Changes through the day**, which picks new weather every three hours (snow in winter, rain otherwise). Rain and snow fall over the hospital and the sun hides behind the clouds. The time, the part of the day and the weather are shown at the bottom right of the map.
 - **Real weather** (in Settings, off by default): turn on **Use the real weather**, type your town and pick it from the list. The hospital then shows the weather outside, checked every 30 minutes, and the clock shows the temperature in °C or °F. This is one of the app's few trips online (see **Privacy** below). It asks the free Open-Meteo service and sends only the place you chose. If the service can't be reached, the weather you chose by hand stands in, and the clock says so.
-- **Update and restart** (Settings → Updates): if you run the app from a git clone (`npm start`), this pulls the newest code from GitHub and restarts the app. It won't pull if you have uncommitted changes in the clone. If an update changes the app's packages, it asks you to close the app and run `npm ci` instead of restarting. An installed copy is updated by running the newest setup file.
+- **Update and restart** (Settings → App → Updates): if you run the app from a git clone (`npm start`), this pulls the newest code from GitHub and restarts the app. It won't pull if you have uncommitted changes in the clone. If an update changes the app's packages, it asks you to close the app and run `npm ci` instead of restarting. An installed copy is updated by running the newest setup file.
 - **Time of day:** by default the hospital follows your computer's clock. Early morning (5–8) has a lavender-to-peach sky and a low rosy sun. Morning (8–11) and noon (11–14) are bright, with the sun climbing. Afternoon (14–18) turns golden, with the sun going down on the other side. Night (18–5) brings stars, a moon and lit windows. You can also pin one part of the day in Settings.
 - **The attending** (your session, in the white coat) goes where its work is. It reads and searches at the Research Office bookshelf, runs commands and tests at the Laboratory bench, and edits at its desk in the station. When it hands a task to a helper, it walks the helper to the door of that helper's room. When it's your turn, it waits at the front of the counter. It only moves once the same kind of work has gone on for a few seconds.
 - Helpers act out their work too: a book while reading, a pencil while writing, a bubbling flask while running commands, a magnifier while searching. They sway while thinking, hop impatiently while waiting for approval, and give a little hop of relief when they finish.
@@ -101,7 +101,7 @@ The app reads three kinds of session on this computer:
 Sessions in the cloud (claude.ai, cloud tasks) keep no files on your
 computer, so they can't be shown.
 
-**Other computers.** In **Settings → Other computers**, pick a folder your
+**Other computers.** In **Settings → Connections → Other computers**, pick a folder your
 computers all sync (OneDrive, Dropbox, a network drive) and do the same on
 each. Every copy of the app then writes a small status file there every few
 seconds and reads the others'. The file holds project names, statuses,
@@ -113,7 +113,7 @@ does. A computer not heard from for three minutes shows as offline.
 your other computers post a short status every hour from 9:00 to 19:00 to
 the `agents-status` branch of this repo (plain Node and git, no Claude
 tokens; see that branch's README for the two-line setup). On the main
-workstation, clone that branch and pick it in **Settings → Other computers
+workstation, clone that branch and pick it in **Settings → Connections → Other computers
 → Use a git status folder**: the app pulls it every 10 minutes and writes
 nothing. A computer counts as online until a quarter past its next post.
 
@@ -144,7 +144,7 @@ Click one to open its live map; the cross hides it until that session does
 something new. A session waiting on you stays listed for up to two hours,
 where others leave the board after ten quiet minutes.
 
-**Settings → Usage warnings** can also tell you, as a Windows notification:
+**Settings → Privacy & alerts → Usage warnings** can also tell you, as a Windows notification:
 - when a session has waited for you 2, 5 (the default), 10 or 15 minutes;
 - when training or other long work ends: finished, failed, stopped, or quiet
   for 30 minutes, here or on another computer.
@@ -253,7 +253,7 @@ which you share the sheet with, so the sheet stays private:
 5. Open the response sheet (in the form: **Responses → View in Sheets**),
    press **Share** and add the service account's email (it ends in
    `iam.gserviceaccount.com`) as **Viewer**.
-6. In Agent's Home, open **Settings → Field feedback (Google Sheet)**, turn on
+6. In Agent's Home, open **Settings → Connections → Field feedback (Google Sheet)**, turn on
    **Show field feedback**, paste the sheet's link from the browser's address
    bar and press **Save**, then press **Choose key file…** and pick the
    `.json` file. **Copy reader address** puts the service account's email on
@@ -290,6 +290,26 @@ dropped quietly. With **Hide file names, commands and survey answers** on,
 the section shows only counts, scores and dates; question wording, comments
 and chosen answers show when it is off.
 
+**Flags.** Under the three numbers, the section lists what needs a look,
+each with its own symbol and words (also at the top of the sheet), or says
+"Nothing to flag":
+
+- **Low scores**: new answers since the last update at or below a
+  question's low mark, the bottom quarter of its scale rounded up: 2 or
+  less on a 1–5, 1–7 or 0–10 scale, 3 or less on 1–10. For example "2 low
+  scores on Question 5 since Mon, 16 Nov".
+- **Average falling**: a question with at least three new answers whose
+  average is lower than its earlier answers' by a tenth of its scale or
+  more (0.4 on 1–5, 0.9 on 1–10).
+- **New comments**: how many came since the last update. The comments
+  themselves are in the sheet, with privacy off.
+- **Set-up problems**: columns that need a choice, a failed update, a sheet
+  not shared, an unreadable key. They are under **Needs attention** too, and
+  each links to its fix.
+
+Scores on a guessed scale raise no flags, as they are not in the average
+either. With privacy on, a flag names a question only as "Question N".
+
 When something goes wrong, the section and **Needs attention** say what to
 try, for example "Share the sheet with the key's reader address as Viewer"
 or "No sheet was found at this link". After a passing trouble (no network,
@@ -301,7 +321,7 @@ marked with how old they are.
 ## The Report button
 
 The **Report** button at the top of the map builds the performance report
-(the same one as Settings → Report) and opens it straight away.
+(the same one as Settings → Agents & reports → Performance report) and opens it straight away.
 
 ## The office team for Claude
 
@@ -319,13 +339,13 @@ with their own plan, and the team shows up in the hospital:
 How work flows through the team is drawn in
 [`office-pack/PIPELINE.md`](office-pack/PIPELINE.md).
 
-The app does not offer them on its own. To add any, open **Settings → Office
+The app does not offer them on its own. To add any, open **Settings → Agents & reports → Office
 team for Claude (optional)**, tick the ones you want (nothing is ticked to
 start with) and press **Add the ticked ones**. Anything already in
 `~/.claude` is never replaced. The files are in `office-pack/` if you'd rather
 copy them by hand.
 
-**Settings → Updates → Update agents** refreshes only the helpers you added,
+**Settings → App → Updates → Update agents** refreshes only the helpers you added,
 when a newer version came with the app. It adds nothing new and never turns
 the reminders on (or back on). It refreshes files that are exactly as some
 earlier version of the app shipped them. A file
@@ -360,7 +380,7 @@ For checking the team is working, and for debugging. The app keeps two plain-tex
 
 Each line reads `2026-09-30 14:03:12  helper-end     agent=reviewer session=spine-seg sid=3f2a9c1e call=Qx7rT2mW outcome=finished time=48s tokens=38211`. A log over 2 MB moves aside to `activity.1.log` and starts again; while another program holds it open, it grows until it can. A line that cannot be written waits and goes with the next one while the app runs, and the failure shows under **Needs attention**. It keeps names, rooms, statuses, times and token counts only: never prompts, task descriptions, file names or commands. errors.log can name a folder that could not be read.
 
-**Settings → System log** shows the newest lines of either log, opens the folder, and says whether the **team reminders** are running. The reminder hook keeps its own short log (`~/.claude/hooks/agents-home-router.log`: time and which reminders fired, never the prompt). From that the app shows, for example: "Team reminders are working: in the last 24 hours they ran on 42 prompts and reminded Claude on 17."
+**Settings → App → System log** shows the newest lines of either log, opens the folder, and says whether the **team reminders** are running. The reminder hook keeps its own short log (`~/.claude/hooks/agents-home-router.log`: time and which reminders fired, never the prompt). From that the app shows, for example: "Team reminders are working: in the last 24 hours they ran on 42 prompts and reminded Claude on 17."
 
 ## Performance report
 
@@ -422,7 +442,7 @@ figure is doing:
 
 **Claude Code use.** A card at the top of the board shows the tokens all your Claude Code sessions used in the last 5 hours, today and the last 7 days, with and without cache reads. Each session row also shows how full its context is.
 
-**Save-your-work warnings.** The app warns you, on the board and as a Windows notification (switch it off in **Settings → Usage warnings**), when:
+**Save-your-work warnings.** The app warns you, on the board and as a Windows notification (switch it off in **Settings → Privacy & alerts → Usage warnings**), when:
 - a session has used 85% of its context. The limit is where that model was seen to auto-compact, or otherwise the model's context window.
 - Claude Code itself says a usage limit is near or reached.
 - your own warning level is reached. Set how many tokens in 5 hours in Settings; you get a warning at 80% and again at 100%.
