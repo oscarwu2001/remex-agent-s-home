@@ -195,10 +195,43 @@ export function demoSnapshot(nowMs, epochMs) {
       { name: 'ui-reviewer', room: 'vision-clinic', summary: 'Independent interface reviewer.' },
     ],
     problems: [],
+    field: demoField(nowMs),
     usage: {
       last5h: { input: 41_000, output: 96_000, cacheRead: 2_310_000, cacheWrite: 180_000, total: 2_627_000, fresh: 317_000, replies: 214 },
       today: { input: 88_000, output: 210_000, cacheRead: 5_020_000, cacheWrite: 390_000, total: 5_708_000, fresh: 688_000, replies: 470 },
       week: { input: 402_000, output: 1_050_000, cacheRead: 26_400_000, cacheWrite: 1_900_000, total: 29_752_000, fresh: 3_352_000, replies: 2_380 },
+    },
+  };
+}
+
+// Sample field feedback, made up and labelled as a sample on the board, so
+// the section can be seen without a sheet or a key.
+function demoField(nowMs) {
+  const h = 3_600_000;
+  const day = 24 * h;
+  const at = (ms) => new Date(nowMs - ms).toISOString();
+  return {
+    enabled: true, demo: true, sheetUrl: '', keyName: 'sample-key.json', clientEmail: 'sample-reader@sample-project.iam.gserviceaccount.com',
+    busy: false, fetchedAt: nowMs - 2 * h, lastAttemptAt: nowMs - 2 * h, error: null, errorKind: null, errorAt: null,
+    sinceFetchedAt: nowMs - 2 * day - 2 * h, tab: 'Sample responses', nextAt: nowMs + 2 * day - 2 * h,
+    summary: {
+      responses: 24, blankRows: 0, timestampColumn: 'Timestamp', timeZone: 'local',
+      newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,
+      questions: [
+        { question: 'Sample: how easy was the setup?', n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'header', unreadable: 0 },
+        { question: 'Sample: how clear was the screen in theatre?', n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', unreadable: 0 },
+        { question: 'Sample: how well did the tracking keep up?', n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'answers', unreadable: 0 },
+      ],
+      overall: { mean: 4.03, high: 5, rescaled: false, n: 71 },
+      comments: [
+        { question: 'Sample: what should we improve?', text: 'Sample comment: a larger font for the distance readout.', at: at(5 * h) },
+        { question: 'Sample: what should we improve?', text: 'Sample comment: the start-up check took a while.', at: at(day + 3 * h) },
+        { question: 'Sample: anything else?', text: 'Sample comment: the new holder clips on easily.', at: at(4 * day) },
+      ],
+      commentCount: 9,
+      choices: [{ question: 'Sample: your role', n: 24, answers: [{ answer: 'Surgeon', count: 11 }, { answer: 'Nurse', count: 8 }, { answer: 'Engineer', count: 5 }] }],
+      identifying: ['Email address', 'Your name'], skipped: [], columns: [],
+      unreadable: { scores: 0, timestamps: 0 },
     },
   };
 }

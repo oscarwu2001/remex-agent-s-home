@@ -82,6 +82,11 @@
       <div id="projects-body"></div>
     </section>
 
+    <section class="board-section field-section" id="field" hidden aria-labelledby="field-h">
+      <h2 id="field-h">Field feedback</h2>
+      <div id="field-body"></div>
+    </section>
+
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
 
     <section class="board-section usage" id="usage" hidden aria-labelledby="usage-h">
@@ -174,6 +179,13 @@
         <p class="hint">Sessions in the cloud (claude.ai, or the Claude app's cloud tasks) keep no files on your computers, so they can't be shown here. Code-tab sessions and Cowork tasks that run on a computer are shown.</p>
       </section>
 
+      <section class="settings-group" aria-labelledby="field-settings-h">
+        <h3 id="field-settings-h">Field feedback (Google Sheet)</h3>
+        <p class="hint">Your field survey’s answers on the board: how many, the average scores and what is new. The app reads one Google Sheet that you have shared with your own Google Cloud service account, on Monday, Wednesday and Friday at 08:00, and when it starts after missing one. Only the sheet’s id and a signed sign-in request are sent, never anything from your sessions. The README says how to make the key.</p>
+        <label class="switch"><input type="checkbox" id="opt-field"> <span>Show field feedback (goes online)</span></label>
+        <div class="field-settings" id="field-settings"></div>
+      </section>
+
       <section class="settings-group" aria-labelledby="warn-h">
         <h3 id="warn-h">Usage warnings</h3>
         <p class="hint">A session whose context is nearly full is always flagged: save your work before Claude Code compacts it. Claude Code's own usage-limit messages are passed on too.</p>
@@ -243,6 +255,16 @@
       </section>
     </section>
   </aside>
+
+  <section class="field-sheet" id="field-sheet" hidden role="dialog" aria-labelledby="field-sheet-h">
+    <header class="settings-head">
+      <h2 id="field-sheet-h">Field feedback</h2>
+      <button type="button" class="icon-btn" id="field-sheet-close" aria-label="Close field feedback" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div id="field-sheet-body"></div>
+  </section>
 
   <script type="module" src="app.js"></script>
 </body>

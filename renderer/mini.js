@@ -11,6 +11,7 @@ import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup, personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
+import { fieldMiniText } from './field-view.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
@@ -108,7 +109,7 @@ function render() {
     // Same picture: only the elapsed times move on.
     for (const el of $('list').querySelectorAll('.since')) el.textContent = elapsed(Number(el.dataset.since), Date.now());
   }
-  $('foot').textContent = prefs.demo ? 'Demo' : '';
+  $('foot').textContent = [prefs.demo ? 'Demo' : '', fieldMiniText(snap.field)].filter(Boolean).join(' · ');
 }
 
 // ---- the projects tab ----------------------------------------------------------

@@ -14,6 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml } from './field-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1352,6 +1353,7 @@ function render(force = false) {
   $('sessions').innerHTML = renderSessions(snapshot);
   $('census').textContent = renderCensus(snapshot);
   renderProjects();
+  renderField();
   $('running-head').innerHTML = `<span class="badges">${running.badges}</span>`;
   renderUsage(snapshot);
   $('source').textContent = renderSource(snapshot);
@@ -2593,6 +2595,105 @@ $('projects-file').addEventListener('click', async () => {
 });
 setInterval(renderProjects, 1000);
 
+// ---- field feedback -------------------------------------------------------------
+//
+// The field survey's answers (snapshot.field, or the demo's sample). The
+// main process fetches; this only shows and passes on the user's changes.
+
+const fieldUi = { editing: false, error: '', note: '' };
+let fieldSwitchedAt = 0; // the switch was just pressed: wait for the snapshot before echoing it back
+let fieldOpener;
+function renderField() {
+  const f = snapshot.field;
+  $('field').hidden = !f?.enabled;
+  if (f?.enabled) paint($('field-body'), fieldHtml(f));
+  if (!$('field-sheet').hidden) {
+    if (!f?.enabled) setFieldSheet(false);
+    else paint($('field-sheet-body'), fieldSheetHtml(f, { privacy: prefs.private }));
+  }
+}
+function renderFieldSettings() {
+  const f = snapshot.field;
+  const online = Boolean(bridge.fieldSet);
+  if (Date.now() - fieldSwitchedAt > 1500) $('opt-field').checked = Boolean(f?.enabled);
+  $('opt-field').disabled = !online || Boolean(f?.demo);
+  paint($('field-settings'), fieldSettingsHtml(f, { privacy: prefs.private, online, state: fieldUi }));
+}
+function setFieldSheet(open) {
+  if (open === !$('field-sheet').hidden) return;
+  $('field-sheet').hidden = !open;
+  if (open) {
+    fieldOpener = document.activeElement;
+    paint($('field-sheet-body'), fieldSheetHtml(snapshot.field, { privacy: prefs.private }));
+    $('field-sheet-close').focus();
+  } else {
+    (fieldOpener?.isConnected ? fieldOpener : $('field-open'))?.focus();
+    fieldOpener = undefined;
+  }
+}
+async function fieldAction(act) {
+  if (act === 'open') setFieldSheet(true);
+  else if (act === 'settings') {
+    setSettings(true);
+    $('field-settings-h').scrollIntoView({ block: 'start' });
+  } else if (act === 'change-link') {
+    fieldUi.editing = true;
+    renderFieldSettings();
+    $('field-link')?.focus();
+  } else if (act === 'refresh') {
+    if (snapshot.demo || !bridge.fieldRefresh) {
+      fieldUi.note = snapshot.demo ? 'The demo reads no sheet.' : 'The preview cannot read the sheet.';
+    } else {
+      fieldUi.note = '';
+      // The outcome arrives with the snapshot (busy, then the rows or the error).
+      await bridge.fieldRefresh().catch((err) => ({ ok: false, error: err.message }));
+    }
+    renderFieldSettings();
+    renderField();
+  } else if (act === 'choose-key') {
+    if (!bridge.fieldChooseKey) return;
+    const res = await bridge.fieldChooseKey().catch((err) => ({ ok: false, error: err.message }));
+    fieldUi.error = res.ok || res.canceled ? '' : res.error;
+    renderFieldSettings();
+    setTimeout(renderFieldSettings, 600);
+  }
+}
+for (const id of ['field-body', 'field-settings']) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-field]');
+    if (b && !b.disabled) fieldAction(b.dataset.field);
+  });
+}
+$('field-settings').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!bridge.fieldSet) return;
+  const res = await bridge.fieldSet({ sheetUrl: $('field-link').value }).catch((err) => ({ ok: false, error: err.message }));
+  fieldUi.error = res.ok ? '' : res.error;
+  if (res.ok) fieldUi.editing = false;
+  renderFieldSettings();
+  setTimeout(renderFieldSettings, 600);
+});
+$('opt-field').addEventListener('change', async (e) => {
+  if (!bridge.fieldSet) return;
+  fieldSwitchedAt = Date.now();
+  const res = await bridge.fieldSet({ enabled: e.target.checked }).catch((err) => ({ ok: false, error: err.message }));
+  fieldUi.error = res.ok ? '' : res.error;
+  if (!res.ok) fieldSwitchedAt = 0;
+  renderFieldSettings();
+  setTimeout(() => { renderField(); renderFieldSettings(); }, 600);
+});
+$('field-sheet-close').addEventListener('click', () => setFieldSheet(false));
+$('field-sheet').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    setFieldSheet(false);
+  }
+});
+setInterval(() => {
+  renderField();
+  if (!$('settings').hidden) renderFieldSettings();
+}, 1000);
+
 // ---- the mini window and other computers --------------------------------------
 
 $('cam-mini').addEventListener('click', () => {
@@ -2645,6 +2746,7 @@ function setSettings(open) {
     showUpdateInfo();
     showLogStatus();
     showFleet();
+    renderFieldSettings();
     $('settings-close').focus();
   }
   else {
