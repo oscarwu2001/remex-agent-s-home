@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
-const { Tracker } = require('../src/core/tracker');
+const { Tracker, TIMING } = require('../src/core/tracker');
 const { TranscriptWatcher, defaultRoots } = require('../src/core/watcher');
 const { readRoster } = require('../src/core/roster');
 const { wslRoots, rootKey } = require('../src/core/wsl');
@@ -25,7 +25,7 @@ const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
-const { SystemLog, snapshotEvents, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
+const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -38,6 +38,8 @@ const HERE = os.hostname() || 'This computer';
 let win;
 let tracker;
 let syslog; // the system log, in the app's data folder (see src/core/syslog.js)
+// As the app goes: writes what the log still waits to write and lets go of it.
+let stopLog = () => {};
 let watcher;
 let wslWatcher;
 let wsl = { roots: [], problems: [] };
@@ -197,6 +199,9 @@ function createWindow() {
     },
   });
 
+  // Windows shutting down or logging off: no quit events follow (stopLog).
+  win.on('session-end', () => stopLog());
+
   // Local only: never navigate away, open external links in the browser.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -230,7 +235,17 @@ process.on('unhandledRejection', (err) => crashed('unhandled', err));
 
 app.whenReady().then(() => {
   syslog = new SystemLog(path.join(app.getPath('userData'), 'logs'));
+  // When the last run last wrote activity.log, taken before this run writes to it.
+  const lastRunWrote = syslog.writtenAt('activity');
   for (const p of startupProblems) syslog.write('errors', 'problem', { what: p.label, detail: p.detail });
+  // One copy of the app writes activity.log (SystemLog.claim): a second, such
+  // as a build run from source beside the installed app, would write
+  // everything again. It takes the log over once the first has stopped.
+  let heldElsewhere; // the problem shown while another copy writes it
+  if (!syslog.claim('activity')) {
+    heldElsewhere = `Another copy of Agents Home (process ${syslog.heldBy}) is writing the system log, so this one leaves activity.log alone until that copy stops`;
+    problem(heldElsewhere, syslog.dir);
+  }
   // The spell checker would fetch a dictionary from Google at start; the app
   // has no text worth checking, so it is off, with no languages to fetch.
   session.defaultSession.setSpellCheckerEnabled(false);
@@ -252,6 +267,7 @@ app.whenReady().then(() => {
     onEntry: (file, entry, now) => tracker.ingest(file, entry, now),
     onMalformed: (file, err) => tracker.noteMalformed(file, err),
     onProblem: problem,
+    holds: (file) => tracker.holds(file),
   };
   const roots = defaultRoots();
   watcher = new TranscriptWatcher({ roots, ...sink });
@@ -535,6 +551,7 @@ app.whenReady().then(() => {
         };
       }
       setTimeout(() => {
+        stopLog(); // app.exit skips the quit events that would
         app.relaunch();
         app.exit(0);
       }, 1200);
@@ -925,6 +942,7 @@ app.whenReady().then(() => {
       },
     });
     mini.setAlwaysOnTop(true, 'floating');
+    mini.on('session-end', () => stopLog()); // Windows shutting down or logging off
     mini.webContents.on('will-navigate', (e) => e.preventDefault());
     mini.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     mini.on('close', () => {
@@ -962,11 +980,94 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  let lastSnap;
+  // The system log runs on its own, whether or not a window is open, from
+  // everything the tracker holds (logEvents in src/core/syslog.js).
+  const LOG_MS = 2_000;
+  const SUMMARY_MS = 5 * 60_000;
+  // What activity.log has said, so it is never said twice: read back from the
+  // log itself, since a restart reads the recent transcripts again.
+  const readBack = () => {
+    try {
+      return loggedFromLog(syslog.lines('activity'));
+    } catch (err) {
+      problem(`activity.log could not be read back (${err.code || err.message}), so what the app read again may be written twice`, logDir);
+      return loggedSoFar();
+    }
+  };
+  let logged = readBack();
+  // Sessions the log last saw on the board (it never saw them go quiet).
+  // After a brief stop, seeing them again as the app starts is no news (WSL
+  // transcripts come within seconds), and those not back within a minute
+  // went quiet. After a longer one, they all went quiet while it was off.
+  // (closeOnBoard in src/core/syslog.js; `board`: the sessions on it now.)
+  const closeBoard = (board) => {
+    for (const { event, fields } of closeOnBoard(logged, board)) syslog.write('activity', event, fields);
+  };
+  if (Date.now() - lastRunWrote <= TIMING.staleSessionMs) setTimeout(() => closeBoard(lastBoard), 60_000);
+  else closeBoard();
+  // The tracker's counts shown under "Needs attention", by their name in errors.log.
+  const COUNTS = { malformedLines: 'malformed', unlinkedSidechains: 'unlinked', unmatchedRelays: 'relays', untimedEntries: 'untimed', strayNotifications: 'stray' };
+  let lastCounts = {};
+  let shownFailure;
+  let lastBoard = new Map();
+  let lastView = new Map();
   let lastSummary = 0;
   let lastSummaryText = '';
+  // `last`: the app is quitting, so what still waits (an end waits 5 s for
+  // its last token counts) is written now rather than left to the next start.
+  const writeActivity = (now, last = false) => {
+    // The lock is touched while this copy writes the log. A copy left out
+    // takes the log over once the one that wrote it has stopped, reading it
+    // back first, so it writes what that copy did not.
+    const wasMuted = syslog.muted.has('activity');
+    if (syslog.keep('activity') && wasMuted) {
+      logged = readBack();
+      closeBoard(lastBoard); // what the stopped copy left open and this one does not see
+      problems.delete(`${heldElsewhere}|${syslog.dir}`);
+    }
+    const snap = tracker.snapshot(now);
+    const board = new Map(snap.sessions.map((s) => [s.id, s]));
+    const view = tracker.logView();
+    for (const { event, fields } of logEvents({ prevBoard: lastBoard, board, prevView: lastView, view, logged, now: last ? Infinity : now })) {
+      syslog.write('activity', event, fields);
+    }
+    lastBoard = board;
+    lastView = view;
+    return snap;
+  };
+  stopLog = () => {
+    writeActivity(Date.now(), true);
+    syslog.flush('activity');
+    syslog.flush('errors');
+    syslog.release('activity');
+  };
+  app.on('before-quit', () => stopLog());
+  setInterval(() => {
+    const now = Date.now();
+    const snap = writeActivity(now);
+    // Who is working: every few minutes while anyone is, and once when
+    // everyone has stopped. The tracker's counts go to errors.log at the same
+    // pace, whenever one has grown.
+    if (now - lastSummary >= SUMMARY_MS) {
+      const u = utilisation(snap);
+      const text = JSON.stringify(u);
+      if (u.sessions || text !== lastSummaryText) syslog.write('activity', 'summary', { ...u, ...teamState() });
+      lastSummary = now;
+      lastSummaryText = text;
+      if (Object.keys(COUNTS).some((k) => (snap.stats[k] ?? 0) > (lastCounts[k] ?? 0))) {
+        syslog.write('errors', 'counts', Object.fromEntries(Object.entries(COUNTS).map(([k, name]) => [name, snap.stats[k] || undefined])));
+      }
+      lastCounts = snap.stats;
+    }
+    // A line that could not be written waits for the next write (SystemLog);
+    // each new kind of failure is shown once.
+    if (syslog.failed && syslog.failed !== shownFailure) {
+      shownFailure = syslog.failed;
+      problem(`The system log could not be written (${syslog.failed})`, logDir);
+    }
+  }, LOG_MS);
+
   const seenProblems = new Set();
-  const SUMMARY_MS = 5 * 60_000;
   setInterval(() => {
     const mainOpen = win && !win.isDestroyed();
     const miniOpen = mini && !mini.isDestroyed();
@@ -980,22 +1081,6 @@ app.whenReady().then(() => {
         s.projectId = hit.id;
         s.inCopy = hit.copy;
       }
-    }
-    // What changed since the last push, then who is working (every few
-    // minutes while anyone is, and once when everyone has stopped).
-    for (const { event, fields } of snapshotEvents(lastSnap, snap)) syslog.write('activity', event, fields);
-    lastSnap = snap;
-    const now = Date.now();
-    if (now - lastSummary >= SUMMARY_MS) {
-      const u = utilisation(snap);
-      const text = JSON.stringify(u);
-      if (u.sessions || text !== lastSummaryText) syslog.write('activity', 'summary', { ...u, ...teamState() });
-      lastSummary = now;
-      lastSummaryText = text;
-    }
-    if (syslog.failed && !seenProblems.has('log')) {
-      seenProblems.add('log');
-      problem(`The system log could not be written (${syslog.failed})`, logDir);
     }
     const payload = {
       ...snap,

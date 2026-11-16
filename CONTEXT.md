@@ -15,7 +15,7 @@
 | **Gust** | A burst of wind every minute or two: garden plants sway and petals (or leaves) blow across the stage. Off under reduced motion. |
 | **Stream** | The entries of one actor in one file: a file's own turns, or its sidechain entries grouped by `agentId`. |
 | **Linking** | Matching a sidechain stream to the `Task` call that started it, by exact prompt text, never by guessing. A stream that never links is counted as *unlinked*. |
-| **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper and is not a new prompt. |
+| **Task notification** | The user-role message Claude Code writes when a background helper ends (`origin.kind: task-notification`). It ends that helper, replacing any end the app had given it, and is not a new prompt. |
 | **Tokens** | A reply's `usage` (input + output + cache read + cache write), counted once per message id at its fullest, because Claude Code repeats it on every content block's line. A helper counts its own; a session's row adds every helper it called. |
 | **Office pack** | `office-pack/`: Claude Code agents (writer, summariser, planner, data-helper, checker; builder, code-reviewer, test-runner; project-manager, personal-assistant) and skills (four for everyday work, plus scan-projects). Offered by the app and copied into `~/.claude` only on a yes, never over existing files. |
 | **Context** | How much a session's model read in its latest reply (input + cache), against where that model was seen to auto-compact, or else its context window (`usage.js`). Flagged at 85%: save your work. |
@@ -25,7 +25,7 @@
 | **Team reminders** | The Office pack's hook (`office-pack/hooks/agents-home-router.sh`, a UserPromptSubmit hook): when a prompt fits an installed team agent, it adds a one-line reminder to hand the work over; otherwise it prints nothing. |
 | **Update agents** | Settings → Updates: refreshes only the pack items the user added, where the file is as a pack version shipped it (`office-pack/versions.json`). Adds nothing, never turns reminders on. |
 | **Move (an agent)** | An idle agent dragged to another room (or sent there from its chart): `moves` in `layout.json`, `{ agentName: roomId }`, beating a department's list; `rooms.json` still wins over both. |
-| **System log** | `activity.log` and `errors.log` in the app's data folder (`src/core/syslog.js`): agent use and errors, names and times only. With the reminder hook's own log, it shows whether the team framework is really running. |
+| **System log** | `activity.log` and `errors.log` in the app's data folder (`src/core/syslog.js`): agent use and errors, names and times only. With the reminder hook's own log, it shows whether the team framework is really running. activity.log is written from everything the tracker holds (`Tracker.logView()`), not from the board, each helper and skill once; a helper the app let go of without seeing it finish ends as *lost*, and an end that turns out wrong is *corrected* once. As the app starts it reads activity.log back, knowing helpers and skills by their `call`, so a restart writes nothing twice. |
 | **Caller** | For a helper run in the report: the skill running the parent's turn when it was launched (a typed /command, or a skill Claude loaded in that turn), else "direct". |
 | **Weighted tokens** | Token cost in fresh-input equivalents: input × 1, cache write × 1.25, cache read × 0.1, output × 5 (`COST_WEIGHTS` in `src/core/costs.js`). |
 | **Unattributed** | A helper transcript the report could not match to the call that started it (by agent id, then by prompt). Kept as its own row with its tokens, never dropped. |
@@ -59,8 +59,8 @@ Every status has its own glyph silhouette in the scene and its own words on the 
 | `your-turn` | speech bubble | Your turn | The session finished its answer. |
 | `idle` | crescent | Idle | Nothing seen yet but proof of life (attachments, meta lines). |
 | `standby` | small dot badge | Standby | A staff member at their post, not working on anything. |
-| `done` / finished | teal disc, tick | Finished | The helper's result came back, or its task notification said *completed*. |
-| `done` / went quiet | none: no bubble, no hop | Presumed finished (went quiet) | A background helper wrote nothing for 2 minutes. A guess, so it is only said in words. |
+| `done` / finished | teal disc, tick | Finished | The helper's result came back, or its task notification said *completed*. A notification with a status the app does not know also shows as Finished, but the system log writes it as *unknown*. |
+| `done` / went quiet | none: no bubble, no hop | Presumed finished (went quiet) | A background helper wrote nothing for 2 minutes. A guess, so it is only said in words, and the system log never records it as an end. The helper writing again makes it working again; its task notification replaces the guess with the real end. A helper counts as background when its call asked for it or its launch said it went there. |
 | `done` / error | red diamond, cross | Failed | The result was an error, or the notification said *failed*. |
 | `done` / interrupted | dark square | Stopped | A new prompt arrived while it ran, or it was killed. |
 

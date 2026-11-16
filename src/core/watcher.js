@@ -18,14 +18,22 @@ const DEFAULTS = {
   maxDepth: 4, // projects/<project>/<session>/subagents/<file>
 };
 
+// How many files no longer tailed keep their read position (see consider()).
+const PARKED_LIMIT = 5_000;
+
 class TranscriptWatcher {
-  constructor({ roots, onEntry, onMalformed, onProblem, options = {} }) {
+  // `holds(file)` says whether what was read from a file is still held (by
+  // the tracker). A file that comes back after going quiet is then read on
+  // from where it was left, instead of from its last few MB again.
+  constructor({ roots, onEntry, onMalformed, onProblem, holds = () => false, options = {} }) {
     this.roots = roots;
     this.onEntry = onEntry;
     this.onMalformed = onMalformed;
     this.onProblem = onProblem;
+    this.holds = holds;
     this.opt = { ...DEFAULTS, ...options };
     this.files = new Map(); // abs path -> { root, offset, remainder, mtimeMs }
+    this.parked = new Map(); // abs path -> the same, for a file gone quiet
     this.lastListAt = 0;
     this.timer = undefined;
     this.rootState = new Map(); // root -> 'ok' | 'missing' | error message
@@ -116,6 +124,19 @@ class TranscriptWatcher {
       return;
     }
     if (now - stat.mtimeMs > this.opt.activeWindowMs) return;
+    // A file that went quiet and is written again: if what was read from it
+    // is still held, carry on from where reading stopped. Reading its tail
+    // again would apply old lines a second time (an old prompt would stop a
+    // helper that is running now). If it is no longer held, its tail is read
+    // as for a new file, which brings its recent history back.
+    const parked = this.parked.get(file);
+    if (parked) {
+      this.parked.delete(file);
+      if (parked.root === root && this.holds(file)) {
+        this.files.set(file, parked);
+        return;
+      }
+    }
     const start = Math.max(0, stat.size - this.opt.maxInitialBytes);
     // Starting mid-file: drop the partial first line, unless we happen to
     // start exactly on a line boundary.
@@ -140,7 +161,12 @@ class TranscriptWatcher {
       state.skipFirst = false;
     }
     if (stat.size === state.offset) {
-      if (now - stat.mtimeMs > this.opt.forgetAfterMs) this.files.delete(file);
+      if (now - stat.mtimeMs > this.opt.forgetAfterMs) {
+        this.files.delete(file);
+        this.parked.set(file, state);
+        // The oldest go first; one of those coming back is read from its tail.
+        if (this.parked.size > PARKED_LIMIT) this.parked.delete(this.parked.keys().next().value);
+      }
       return;
     }
 

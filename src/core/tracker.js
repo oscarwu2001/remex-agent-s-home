@@ -21,8 +21,19 @@ const TIMING = {
   waitingStaleMs: 2 * 3_600_000, // ...unless it is waiting on the user: then this long
   doneLingerMs: 7_000, // finished sub-agent stays visible (walks home)
   backgroundQuietMs: 120_000, // background sub-agent presumed finished
+  helperEndMs: 24 * 3_600_000, // a session waiting on a background helper's end is kept this long
   unlinkedGraceMs: 15_000, // sidechain with no matching Task call -> counted
 };
+
+// The end a background helper gets when it has written nothing for a while: a
+// guess, not an end. The helper writing again, or its notification, replaces it.
+const WENT_QUIET = 'went quiet';
+
+// How a task notification's status ends a helper.
+const endReasonOf = (status) => (status === 'completed' ? 'finished'
+  : status === 'failed' ? 'error'
+    : status === 'killed' || status === 'stopped' ? 'interrupted'
+      : 'unknown');
 
 const HISTORY_LIMIT = 12;
 const BUFFER_LIMIT = 500; // events held for a sidechain not yet linked
@@ -155,6 +166,7 @@ class Tracker {
       unlinkedSidechains: 0,
       unmatchedRelays: 0,
       untimedEntries: 0,
+      strayNotifications: 0,
       lastProblem: undefined,
     };
     this.unmatchedRelayIds = new Set();
@@ -231,7 +243,7 @@ class Tracker {
       // Relayed from inside a sub-agent (progress entry).
       const sub = session.subagents.get(ev.via);
       if (sub) {
-        this.applyActor(sub.actor, ev);
+        this.applySub(sub, ev);
       } else if (!this.unmatchedRelayIds.has(ev.via)) {
         this.unmatchedRelayIds.add(ev.via);
         this.stats.unmatchedRelays += 1;
@@ -260,12 +272,25 @@ class Tracker {
 
     if (ev.kind === 'task-notification') {
       const sub = session.subagents.get(ev.toolUseId);
-      if (sub && sub.endedAt === undefined) {
+      // The notification is the real end, so it also replaces the guess.
+      if (sub && (sub.endedAt === undefined || sub.endReason === WENT_QUIET)) {
         sub.endedAt = ev.ts;
-        sub.endReason = ev.status === 'completed' ? 'finished'
-          : ev.status === 'failed' ? 'error'
-            : ev.status === 'killed' || ev.status === 'stopped' ? 'interrupted'
-              : 'finished';
+        sub.notified = true;
+        sub.endReason = endReasonOf(ev.status);
+      } else if (sub && !sub.notified) {
+        // For a helper the app already ended another way (its launch seen as
+        // a return, or a new prompt): that end was wrong, since only helpers
+        // in the background send one. The notification's end replaces it,
+        // the system log writes a correction (`correctedFrom`), and it is
+        // counted where it can be seen, because the app misread the launch.
+        // Notifications naming no helper are normal: background commands
+        // and other tasks send them too.
+        this.stats.strayNotifications += 1;
+        sub.correctedFrom = sub.endReason;
+        sub.endedAt = ev.ts;
+        sub.endReason = endReasonOf(ev.status);
+        sub.notified = true;
+        sub.background = true;
       }
       if (!ev.untimed) session.actor.lastAt = Math.max(session.actor.lastAt, ev.ts);
       return; // not a turn of the session's own
@@ -276,6 +301,10 @@ class Tracker {
 
     if (ev.kind === 'tool-end') {
       const sub = session.subagents.get(ev.id);
+      if (sub) sub.launched = true;
+      // Claude Code also sends helpers to the background on its own, with no
+      // run_in_background in the call; the launch's result then says so.
+      if (sub && ev.async) sub.background = true;
       // A background launch returns at once; its end is inferred later.
       if (sub && !sub.background && sub.endedAt === undefined) {
         sub.endedAt = ev.ts;
@@ -305,7 +334,7 @@ class Tracker {
       return;
     }
     const sub = session.subagents.get(stream.taskId);
-    if (sub) this.applyActor(sub.actor, ev);
+    if (sub) this.applySub(sub, ev);
   }
 
   tryLink(session, stream) {
@@ -325,7 +354,7 @@ class Tracker {
       this.stats.unlinkedSidechains -= 1;
       stream.counted = false;
     }
-    for (const ev of stream.buffer) this.applyActor(match.actor, ev);
+    for (const ev of stream.buffer) this.applySub(match, ev);
     stream.buffer = [];
     return true;
   }
@@ -333,6 +362,17 @@ class Tracker {
   retryLinks(session) {
     for (const stream of this.streams.values()) {
       if (stream.role === 'sidechain' && stream.sessionId === session.id) this.tryLink(session, stream);
+    }
+  }
+
+  // A helper's own activity. A helper presumed finished that writes again was
+  // only quiet (a long command, a long reply): it is working again.
+  applySub(sub, ev) {
+    const before = sub.actor.lastAt;
+    this.applyActor(sub.actor, ev);
+    if (sub.endReason === WENT_QUIET && sub.actor.lastAt > before) {
+      sub.endedAt = undefined;
+      sub.endReason = undefined;
     }
   }
 
@@ -449,7 +489,7 @@ class Tracker {
             now - sub.actor.lastAt > t.backgroundQuietMs) {
           // Ended when we noticed, so it still gets its walk home.
           sub.endedAt = now;
-          sub.endReason = 'went quiet';
+          sub.endReason = WENT_QUIET;
         }
         if (sub.endedAt !== undefined && now - sub.endedAt > t.doneLingerMs) continue;
         const st = sub.endedAt !== undefined
@@ -506,6 +546,39 @@ class Tracker {
     return { generatedAt: now, sessions, stats: { ...this.stats } };
   }
 
+  // What the system log is written from: every session the tracker holds, on
+  // the board or not, with every helper and skill it has seen. The log must
+  // not depend on what the board shows (its last 40 steps, a finished
+  // helper's 7 s walk home, whether a window is open).
+  logView() {
+    const skillsOf = (actor) => actor.skills.map((k) => ({ id: k.id, name: k.name, at: k.at }));
+    const view = new Map();
+    for (const s of this.sessions.values()) {
+      view.set(s.id, {
+        id: s.id,
+        project: s.project,
+        skills: skillsOf(s.actor),
+        helpers: [...s.subagents.values()].map((sub) => ({
+          id: sub.id, type: sub.type, room: sub.room, background: sub.background, launched: Boolean(sub.launched),
+          startedAt: sub.actor.startedAt, endedAt: sub.endedAt, endReason: sub.endReason, correctedFrom: sub.correctedFrom,
+          status: sub.endedAt !== undefined ? 'done' : 'running',
+          tokens: tokensOf(sub.actor).total, skills: skillsOf(sub.actor),
+        })),
+      });
+    }
+    return view;
+  }
+
+  // Whether anything read from a transcript file is still held: a session's
+  // own file, or a helper's (its streams go when prune lets the session go).
+  // The watcher then reads on from where it stopped, never the same lines twice.
+  holds(fileKey) {
+    if (this.streams.has(fileKey)) return true;
+    const prefix = `${fileKey}#`;
+    for (const key of this.streams.keys()) if (key.startsWith(prefix)) return true;
+    return false;
+  }
+
   // The live map of one session: everything it called, in order: the
   // skills it ran and every helper (finished ones too), each helper with the
   // skills it ran. Names, statuses and tool labels only.
@@ -525,12 +598,16 @@ class Tracker {
   }
 
   // Drop state for sessions that have been stale a long time. A session
-  // counts as active while any of its helpers is.
+  // counts as active while any of its helpers is, and is kept longer
+  // (helperEndMs) while a background helper's end is still to come: one long
+  // command can keep a helper silent for hours before its notification.
   prune(now = Date.now()) {
     const cutoff = Math.max(this.timing.staleSessionMs * 3, this.timing.waitingStaleMs + 10 * 60_000);
     for (const [id, s] of this.sessions) {
-      const lastAt = Math.max(s.actor.lastAt, ...[...s.subagents.values()].map((a) => a.actor.lastAt));
-      if (now - lastAt <= cutoff) continue;
+      const subs = [...s.subagents.values()];
+      const lastAt = Math.max(s.actor.lastAt, ...subs.map((a) => a.actor.lastAt));
+      const awaited = subs.some((a) => a.background && (a.endedAt === undefined || a.endReason === WENT_QUIET));
+      if (now - lastAt <= (awaited ? Math.max(cutoff, this.timing.helperEndMs) : cutoff)) continue;
       this.sessions.delete(id);
       for (const [key, stream] of this.streams) {
         if (stream.sessionId !== id) continue;
@@ -549,4 +626,4 @@ function samePrompt(a, b) {
   return n >= 40 && x.slice(0, n) === y.slice(0, n);
 }
 
-module.exports = { Tracker, TIMING, projectName };
+module.exports = { Tracker, TIMING, WENT_QUIET, projectName };

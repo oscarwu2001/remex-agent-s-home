@@ -162,3 +162,26 @@ test('an error while handling one line is reported and the rest still arrive', (
   assert.equal(problems.length, 1);
   assert.doesNotMatch(problems[0][0], /c\.jsonl|\//); // the label carries no path
 });
+
+test('a file that goes quiet and comes back is read on from where it stopped while its lines are held', () => {
+  for (const held of [true, false]) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, 'p'));
+    const file = path.join(root, 'p', 's.jsonl');
+    fs.writeFileSync(file, '{"n":1}\n{"n":2}\n');
+    const seen = [];
+    const w = new TranscriptWatcher({
+      roots: [root], onEntry: (f, e) => seen.push(e.n), onMalformed: () => {}, onProblem: () => {},
+      holds: () => held, options: { listEveryMs: 0 },
+    });
+    const t0 = Date.now();
+    w.tick(t0);
+    w.tick(t0 + 61 * 60_000); // quiet past forgetAfterMs: no longer tailed
+    assert.equal(w.status().filesTailed, 0);
+    fs.appendFileSync(file, '{"n":3}\n');
+    const back = new Date(t0 + 62 * 60_000);
+    fs.utimesSync(file, back, back); // written again, a minute later
+    w.tick(back.getTime());
+    assert.deepEqual(seen, held ? [1, 2, 3] : [1, 2, 1, 2, 3], held ? 'nothing read twice' : 'no longer held: its tail is read again');
+  }
+});

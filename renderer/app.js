@@ -1308,6 +1308,10 @@ function renderProblems(s) {
   if (st.untimedEntries) {
     list.push({ label: `${st.untimedEntries} transcript ${plural(st.untimedEntries, 'entry has', 'entries have')} no timestamp and did not count as activity` });
   }
+  if (st.strayNotifications) {
+    const n = st.strayNotifications;
+    list.push({ label: `${n} helper ${plural(n, 'notification', 'notifications')} came for ${plural(n, 'a helper', 'helpers')} the app had already ended another way: the app misread ${plural(n, 'its launch', 'their launches')}, and the system log corrects ${plural(n, 'its end', 'their ends')} (helper-end-corrected)` });
+  }
   return list;
 }
 

@@ -383,3 +383,150 @@ test('a Claude app Code session in a made-up worktree is named after its reposit
   feed(t, MAIN, [prompt(0, 'go', { cwd: '/work/endo/.claude/worktrees/brave-otter-1a2b3c' })]);
   assert.equal(t.snapshot(s(1)).sessions[0].project, 'endo');
 });
+
+// Claude Code can send a helper to the background on its own, with no
+// run_in_background in the call: the launch returns at once and says so.
+const notice = (sec, id, status) => ({
+  ...prompt(sec, `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>${status}</status>`),
+  origin: { kind: 'task-notification' },
+});
+const asyncLaunch = (sec, id) => toolResult(sec, id, 'Async agent launched successfully.\nagentId: a1b2c3d4',
+  { toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a1b2c3d4' } });
+
+test('a helper sent to the background on its own runs until its notification', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'as1', 'Agent', { subagent_type: 'builder', prompt: 'Build the export' }),
+    asyncLaunch(1.2, 'as1'),
+  ]);
+  const [running] = t.snapshot(s(10)).sessions[0].agents;
+  assert.notEqual(running.status, 'done', 'the launch returning is not the helper finishing');
+  assert.equal(running.background, true);
+  feed(t, MAIN, [notice(600, 'as1', 'completed')]);
+  const [done] = t.snapshot(s(601)).sessions[0].agents;
+  assert.equal(done.endReason, 'finished');
+  assert.equal(done.endedAt - done.startedAt, 599_000);
+});
+
+test('a new prompt does not stop a helper that went to the background on its own', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'as1', 'Agent', { subagent_type: 'reviewer', prompt: 'Review it' }),
+    asyncLaunch(1.2, 'as1'),
+    prompt(5, 'meanwhile, something else'),
+  ]);
+  const [helper] = t.snapshot(s(6)).sessions[0].agents;
+  assert.notEqual(helper.status, 'done');
+});
+
+test('the notification replaces the went-quiet guess with the real end', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'bg', 'Agent', { subagent_type: 'runner', prompt: 'long run', run_in_background: true }),
+    toolResult(1.5, 'bg', 'Launched in the background'),
+  ]);
+  assert.equal(t.snapshot(s(1) + TIMING.backgroundQuietMs + 1).sessions[0].agents[0].endReason, 'went quiet');
+  feed(t, MAIN, [notice(300, 'bg', 'completed')]);
+  const [done] = t.snapshot(s(301)).sessions[0].agents;
+  assert.equal(done.endReason, 'finished');
+  assert.equal(done.endedAt, s(300));
+});
+
+test('a helper presumed quiet that writes again is working again', () => {
+  const t = new Tracker();
+  const p = 'Run the whole slow suite and report the failures';
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'bg', 'Agent', { subagent_type: 'runner', prompt: p, run_in_background: true }),
+    toolResult(1.5, 'bg', 'Launched in the background'),
+  ]);
+  const SUB = '/p/sess-1/subagents/agent-slow.jsonl';
+  feed(t, SUB, [prompt(2, p, sidechain('slow')), toolUse(3, 'b1', 'Bash', { command: 'pytest -q' }, sidechain('slow'))]);
+  const late = 3 + TIMING.backgroundQuietMs / 1000 + 60;
+  assert.equal(t.snapshot(s(late)).sessions[0].agents[0].endReason, 'went quiet');
+  feed(t, SUB, [toolResult(late + 30, 'b1', '3 failed', sidechain('slow'))]);
+  const [back] = t.snapshot(s(late + 31)).sessions[0].agents;
+  assert.notEqual(back.status, 'done');
+  assert.equal(back.endReason, undefined);
+});
+
+test('the log view holds every session, helper and skill the tracker has, on the board or not', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'k1', 'Skill', { skill: 'tdd' }),
+    toolUse(2, 'as1', 'Agent', { subagent_type: 'builder', prompt: 'Build the export' }),
+    asyncLaunch(2.2, 'as1'),
+    notice(30, 'as1', 'completed'),
+  ]);
+  assert.equal(t.snapshot(s(30) + TIMING.staleSessionMs + 1).sessions.length, 0, 'off the board');
+  const [sess] = [...t.logView().values()];
+  assert.deepEqual(sess.skills.map((k) => k.name), ['tdd']);
+  assert.deepEqual(sess.helpers.map((h) => [h.type, h.status, h.endReason, h.background, h.launched]),
+    [['builder', 'done', 'finished', true, true]]);
+});
+
+test('a notification the app cannot use is counted, and a status it does not know is not called finished', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'fg', 'Agent', { subagent_type: 'reviewer', prompt: 'Review it' }),
+    toolResult(2, 'fg', 'PASS'), // a foreground helper, ended by its result...
+    notice(3, 'fg', 'completed'), // ...so its notification is stray
+    notice(4, 'shell1', 'completed'), // one for a background command names no helper: normal
+    toolUse(5, 'bg', 'Agent', { subagent_type: 'runner', prompt: 'run', run_in_background: true }),
+    toolResult(5.2, 'bg', 'launched'),
+    notice(9, 'bg', 'timed_out'),
+    notice(10, 'bg', 'completed'), // a repeat for a helper already notified is not stray
+  ]);
+  const snap = t.snapshot(s(11));
+  assert.equal(snap.stats.strayNotifications, 1);
+  assert.equal(snap.sessions[0].agents.find((a) => a.type === 'runner').endReason, 'unknown');
+});
+
+test('prune keeps a session while a background helper may still finish, but not forever', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'as1', 'Agent', { subagent_type: 'builder', prompt: 'Build the export' }),
+    asyncLaunch(1.2, 'as1'),
+  ]);
+  t.prune(s(3 * 3600));
+  assert.equal(t.logView().size, 1, 'three silent hours: its notification may yet come');
+  feed(t, MAIN, [notice(4 * 3600, 'as1', 'completed')]);
+  assert.equal([...t.logView().values()][0].helpers[0].endReason, 'finished');
+  t.prune(s(4 * 3600) + TIMING.waitingStaleMs + 11 * 60_000);
+  assert.equal(t.logView().size, 0, 'with its helper finished, the session goes after the usual wait');
+  const u = new Tracker();
+  feed(u, MAIN, [prompt(0, 'go'), toolUse(1, 'as2', 'Agent', { subagent_type: 'runner', prompt: 'run' }), asyncLaunch(1.2, 'as2')]);
+  u.prune(s(1.2) + TIMING.helperEndMs + 1);
+  assert.equal(u.logView().size, 0, 'a helper silent for a whole day is let go');
+});
+
+test('a notification for a helper the app had ended another way replaces that end, once', () => {
+  const t = new Tracker();
+  feed(t, MAIN, [
+    prompt(0, 'go'),
+    toolUse(1, 'fg', 'Agent', { subagent_type: 'reviewer', prompt: 'Review it' }),
+    toolResult(2, 'fg', 'launched'), // its launch read as its return
+    notice(300, 'fg', 'failed'),
+  ]);
+  const [h] = [...t.logView().values()][0].helpers;
+  assert.deepEqual([h.endReason, h.correctedFrom, h.background, h.endedAt - h.startedAt], ['error', 'finished', true, 299_000]);
+  feed(t, MAIN, [notice(301, 'fg', 'completed')]);
+  assert.equal(t.snapshot(s(302)).stats.strayNotifications, 1, 'a repeat changes nothing');
+  assert.equal([...t.logView().values()][0].helpers[0].endReason, 'error');
+});
+
+test('the tracker says which transcript files it still holds, until prune lets their session go', () => {
+  const t = new Tracker();
+  const SUB = '/p/sess-1/subagents/agent-x.jsonl';
+  feed(t, MAIN, [prompt(0, 'go')]);
+  feed(t, SUB, [prompt(1, 'Hunt for swallowed exceptions in the loader module', sidechain('x'))]);
+  assert.deepEqual([t.holds(MAIN), t.holds(SUB), t.holds('/p/other.jsonl')], [true, true, false]);
+  t.prune(s(1) + TIMING.helperEndMs);
+  assert.deepEqual([t.holds(MAIN), t.holds(SUB)], [false, false]);
+});
