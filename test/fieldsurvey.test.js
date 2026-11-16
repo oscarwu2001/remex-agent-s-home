@@ -504,7 +504,7 @@ test('a column that appears after the check is flagged under Needs attention', (
   const s = F.summarise(form(['Rating (1-5)', 'New question'], [[4, 'yes']]), { roles });
   assert.deepEqual(s.columns.map((c) => [c.header, c.confirmed, c.isNew]), [['Timestamp', true, false], ['Rating (1-5)', true, false], ['New question', false, true]]);
   assert.deepEqual(F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label),
-    ['Field feedback: a new column in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)']);
+    ['Field feedback: a new column in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off)']);
   // Never checked: nothing is "new", the board says the columns are not checked yet.
   assert.deepEqual(F.summarise(form(['Rating (1-5)'], [[4]])).newColumns, []);
 });
@@ -1239,4 +1239,13 @@ test('once the columns are saved, a score added later stays out of the headline 
   // Before the first save the sure guesses count, as the app's guesses (the
   // board says so); a guessed direction does not.
   assert.equal(F.summarise(rows, { now: NOW }).overall.n, 24);
+});
+
+test('the new-column line sends the user to Check the columns with privacy mode off, and drops that when it is off', () => {
+  const roles = [{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Rating (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: false }];
+  const s = F.summarise(form(['Rating (1-5)', 'New question', 'Another question'], [[4, 'yes', 'no']]), { roles });
+  const [p] = F.fieldProblems({ enabled: true, summary: s });
+  assert.deepEqual([p.label, p.labelPrivacyOff, p.fix], [
+    'Field feedback: 2 new columns in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off)',
+    'Field feedback: 2 new columns in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)', 'check']);
 });

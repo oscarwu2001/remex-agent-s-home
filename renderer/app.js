@@ -14,7 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, age as fieldAge } from './field-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1284,7 +1284,7 @@ function renderSource(s) {
 function renderProblems(s) {
   const plural = (n, one, many) => (n === 1 ? one : many);
   const list = (s.problems || []).map((p) => ({
-    label: p.count > 1 ? `${p.label} (×${p.count})` : p.label,
+    label: problemLabel(p, { privacy: prefs.private }),
     detail: p.detail,
     fix: FIXES[p.fix] ? p.fix : null,
   }));
@@ -1367,7 +1367,7 @@ function render(force = false) {
   $('problems').hidden = problems.length === 0;
   $('problem-list').innerHTML = problems
     // A fix button keeps its focus across redraws by its data-key.
-    .map((p, i) => `<li>${escapeXml(!prefs.private && p.labelPrivacyOff ? p.labelPrivacyOff : p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
+    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();

@@ -1119,7 +1119,10 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     if (unsure) {
       const words = `${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice${fresh ? ` and ${fresh} more ${fresh === 1 ? 'is' : 'are'} not checked yet` : ''}`;
       add(`${words} (${where}, with privacy mode off)`, '', 'check', `${words} (${where})`);
-    } else if (fresh) add(`${fresh === 1 ? 'a new column' : `${fresh} new columns`} in the sheet, not checked yet (${where})`, '', 'check');
+    } else if (fresh) {
+      const words = `${fresh === 1 ? 'a new column' : `${fresh} new columns`} in the sheet, not checked yet`;
+      add(`${words} (${where}, with privacy mode off)`, '', 'check', `${words} (${where})`);
+    }
     const doubt = summary.doubtful?.length ?? 0;
     if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);

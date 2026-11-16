@@ -29,6 +29,14 @@ export function age(ms, now = Date.now()) {
   return `${Math.round(m / 1440)} days ago`;
 }
 
+// A Needs attention line as the board draws it: the wording for the privacy
+// state (a line that asks to turn privacy mode off has one without it), and
+// how many times it came up.
+export function problemLabel(p, { privacy = true } = {}) {
+  const label = !privacy && p.labelPrivacyOff ? p.labelPrivacyOff : p.label;
+  return p.count > 1 ? `${label} (×${p.count})` : label;
+}
+
 const mean1 = (v) => (v == null || !Number.isFinite(v) ? null : v.toFixed(1));
 // Where an average sits on its scale, 0–100; 0 for a scale with one value.
 const along = (q) => (q.mean == null || !(q.high > q.low) ? 0 : Math.max(0, Math.min(100, Math.round(((q.mean - q.low) / (q.high - q.low)) * 100))));
@@ -104,7 +112,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   // Each label comes first for screen readers; the number shows above it.
   const stats = `<dl class="stats">
       <div class="stat"><dt class="stat-label">Responses</dt><dd class="stat-n">${s.responses}</dd></div>
-      <div class="stat"><dt class="stat-label"${dashWhy ? ` title="${dashWhy}"` : ''}>Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
+      <div class="stat"${dashWhy ? ` title="${dashWhy}"` : ''}><dt class="stat-label">Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
       <div class="stat"><dt class="stat-label">${newLabel}</dt><dd class="stat-n">${s.newSince != null ? s.newSince : DASH}</dd></div>
     </dl>`;
   const open = s.responses

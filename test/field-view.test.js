@@ -383,7 +383,7 @@ test('the average\'s dash says why when only a direction is guessed', async () =
   const { fieldHtml } = await view();
   const s = F.summarise([['Timestamp', 'Pain relief achieved (0-10)'], ['2026-11-10 09:00', 2], ['2026-11-11 09:00', 3]]);
   assert.deepEqual([s.overall, s.scalesGuessed, s.directionsGuessed], [null, 0, 1]);
-  assert.match(fieldHtml(field(s)), /<dt class="stat-label" title="[^"]+">Average score<\/dt>/);
+  assert.match(fieldHtml(field(s)), /<div class="stat" title="[^"]+"><dt class="stat-label">Average score<\/dt>/);
 });
 
 test('scores never checked raise no score flags; the note above the numbers says so, with its link', async () => {
@@ -494,5 +494,21 @@ test('the average\'s dash says new scores wait for their check when that is the 
   const head = [['Timestamp', 'Rate the screen (0-10)'], ['2026-11-12 09:00', 7], ['2026-11-13 09:00', 8]];
   const s = F.summarise(head, { roles: F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }]) });
   assert.deepEqual([s.overall, s.scoresUnchecked, s.scalesGuessed, s.directionsGuessed], [null, 1, 0, 0]);
-  assert.match(fieldHtml(field(s)), /<dt class="stat-label" title="New scores are not in the average until the columns are checked">Average score/);
+  assert.match(fieldHtml(field(s)), /<div class="stat" title="New scores are not in the average until the columns are checked"><dt class="stat-label">Average score/);
+});
+
+test('Needs attention draws the line for the privacy state, with its count', async () => {
+  const { problemLabel } = await view();
+  const ts = { header: 'Timestamp', index: 0, role: 'timestamp' };
+  const head = [['Timestamp', 'Ease (1-5)', 'How satisfied are you overall?', 'Rate the screen (0-10)'],
+    ['2026-11-12 09:00', 4, 6, 7], ['2026-11-13 09:00', 5, 7, 8], ['2026-11-14 09:00', 3, 5, 6]];
+  const s = F.summarise(head, { now: NOW, roles: F.checkRoles([ts, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: false }]) });
+  // As the main process sends them: the core's lines, each with its count.
+  const [p] = F.fieldProblems({ enabled: true, summary: s }).map((x) => ({ ...x, count: 1 }));
+  assert.equal(problemLabel(p, { privacy: true }), 'Field feedback: 1 column needs a choice and 1 more is not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off)');
+  assert.equal(problemLabel(p, { privacy: false }), 'Field feedback: 1 column needs a choice and 1 more is not checked yet (Settings → Connections → Field feedback → Check the columns)');
+  assert.equal(problemLabel({ ...p, count: 3 }, { privacy: false }), 'Field feedback: 1 column needs a choice and 1 more is not checked yet (Settings → Connections → Field feedback → Check the columns) (×3)');
+  assert.equal(problemLabel({ ...p, count: 3 }, { privacy: true }), 'Field feedback: 1 column needs a choice and 1 more is not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off) (×3)');
+  // A line with one wording keeps it either way.
+  assert.equal(problemLabel({ label: 'A transcripts folder is unreadable', count: 2 }, { privacy: false }), 'A transcripts folder is unreadable (×2)');
 });
