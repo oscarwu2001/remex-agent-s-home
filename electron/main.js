@@ -1300,7 +1300,7 @@ app.whenReady().then(() => {
       saveLine(lineChat.changeSettings(line, { mark: { key, what: 'added' } }).settings);
     } catch (err) {
       lineLog('added item not noted', err);
-      return { ok: true, note: 'Added. The app could not note that it was, so the item stays listed: dismiss it when you are done.' };
+      return { ok: true, stays: true, note: 'Added. The app could not note that it was, so the item stays listed: dismiss it when you are done.' };
     }
     return { ok: true };
   });

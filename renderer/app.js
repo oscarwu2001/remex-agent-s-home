@@ -2821,7 +2821,11 @@ let lineOpener;
 const lineState = () => {
   const s = snapshot.line;
   const l = s?.demo && s.items ? { ...s, items: s.items.filter((it) => !lineDemoMarks.has(it.key)) } : s;
-  if (!l?.items || !linePending.size) return l;
+  if (!l?.items) {
+    linePending.clear(); // off: turning it on again starts with no marks
+    return l;
+  }
+  if (!linePending.size) return l;
   for (const k of linePending) if (!l.items.some((it) => it.key === k)) linePending.delete(k);
   return { ...l, items: l.items.filter((it) => !linePending.has(it.key)) };
 };
@@ -3057,7 +3061,11 @@ $('line-body').addEventListener('submit', async (e) => {
     Object.assign(lineUi, { adding: null, todo: null, project: null });
     setLineStatus({ text: res.note ?? `Added to ${name}.` });
     renderProjects();
-    hideLineItem('add', key, order);
+    // Added but not noted (stays): the item stays listed, as the note says.
+    if (res.stays) {
+      renderLine();
+      document.querySelector(`[data-key="line-add-${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+    } else hideLineItem('add', key, order);
     setTimeout(renderProjects, 600);
   } else {
     Object.assign(lineUi, { error: res.error, errorKey: key });
