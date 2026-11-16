@@ -2870,11 +2870,14 @@ function renderLineSettings() {
 }
 // After Add or Dismiss the item hides at once (linePending) and focus moves
 // to the same action on the next item still listed, else the one before
-// it, else the section's heading.
-function hideLineItem(act, key) {
-  const next = nextFocus((lineState()?.items ?? []).map((it) => it.key), linePending, key);
+// it, else the section's heading. order: the items' keys when the button
+// was pressed (the demo, or a snapshot meanwhile, may have dropped the item).
+const lineKeys = () => (lineState()?.items ?? []).map((it) => it.key);
+function hideLineItem(act, key, order) {
   linePending.add(key);
   renderLine();
+  const listed = new Set(lineKeys());
+  const next = nextFocus(order, new Set(order.filter((k) => !listed.has(k))), key);
   const to = next && $('line-body').querySelector(`[data-key="line-${act}-${CSS.escape(next)}"]`);
   (to ?? $('line-h'))?.focus({ preventScroll: true });
 }
@@ -2982,10 +2985,11 @@ async function lineAction(act, key) {
     document.querySelector(`[data-key="line-add-${CSS.escape(key)}"]`)?.focus();
     return;
   } else if (act === 'dismiss') {
+    const order = lineKeys();
     const res = await lineMark(key, 'dismissed');
     if (res.ok) {
       setLineStatus({ text: 'Dismissed.', undo: key });
-      hideLineItem('dismiss', key);
+      hideLineItem('dismiss', key, order);
     } else {
       Object.assign(lineUi, { error: `Not dismissed. ${res.error}`, errorKey: key });
       renderLine();
@@ -3041,6 +3045,7 @@ $('line-body').addEventListener('submit', async (e) => {
     $(`line-todo-${key}`)?.focus();
     return;
   }
+  const order = lineKeys();
   let res;
   if (snapshot.demo) {
     res = await demoProj.change({ op: 'add-todo', project, text });
@@ -3052,7 +3057,7 @@ $('line-body').addEventListener('submit', async (e) => {
     Object.assign(lineUi, { adding: null, todo: null, project: null });
     setLineStatus({ text: res.note ?? `Added to ${name}.` });
     renderProjects();
-    hideLineItem('add', key);
+    hideLineItem('add', key, order);
     setTimeout(renderProjects, 600);
   } else {
     Object.assign(lineUi, { error: res.error, errorKey: key });
