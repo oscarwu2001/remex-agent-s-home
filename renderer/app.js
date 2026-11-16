@@ -2703,10 +2703,10 @@ for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-l
 // "Check the columns": each choice goes into the draft, and the row redraws
 // (a score shows its scale).
 $('field-settings').addEventListener('change', (e) => {
-  const el = e.target.closest('select[data-col], input[type="checkbox"][data-col]');
+  const el = e.target.closest('select[data-col]');
   if (!el) return;
   const col = Number(el.dataset.col);
-  fieldUi.draft = draftWith(fieldUi.draft, col, el.dataset.part, el.type === 'checkbox' ? el.checked : el.value);
+  fieldUi.draft = draftWith(fieldUi.draft, col, el.dataset.part, el.value);
   fieldUi.checkNote = '';
   renderFieldSettings();
 });

@@ -91,12 +91,12 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
     ? `<div class="field-failed"><p class="form-error" role="status">The last update failed: ${esc(f.error)}</p>${refreshBtn('field-try', 'link-btn')}</div>`
     : '';
   const avg = s.overall ? mean1(s.overall.mean) : null;
-  const guessedOnly = !s.overall && s.scalesGuessed > 0;
+  const guessedOnly = !s.overall && s.scalesGuessed + (s.directionsGuessed ?? 0) > 0;
   const newLabel = f.sinceFetchedAt ? `New since <span class="nowrap">${esc(boardDay(f.sinceFetchedAt))}</span>` : 'New since the last update';
   // Each label comes first for screen readers; the number shows above it.
   const stats = `<dl class="stats">
       <div class="stat"><dt class="stat-label">Responses</dt><dd class="stat-n">${s.responses}</dd></div>
-      <div class="stat"><dt class="stat-label"${guessedOnly ? ' title="Every scale is a guess until the columns are checked"' : ''}>Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
+      <div class="stat"><dt class="stat-label"${guessedOnly ? ' title="Every score’s scale or direction is a guess until the columns are checked"' : ''}>Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
       <div class="stat"><dt class="stat-label">${newLabel}</dt><dd class="stat-n">${s.newSince != null ? s.newSince : DASH}</dd></div>
     </dl>`;
   const open = s.responses
@@ -104,7 +104,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
     : '';
   // One problem, one place: while the error line shows, its flag is left out.
   const said = f.error ? ['share', 'failed'] : [];
-  return `<p class="field-line">${line}</p>${failed}${noteUnlessFlagged(f)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h', said)}${open}`;
+  return `<p class="field-line">${line}</p>${failed}${noteUnlessFlagged(f)}${waitNote(s)}${stats}${flagsBlock(f, privacy, 'field-flags-h', said, now)}${open}`;
 }
 
 // The detail sheet's body.
@@ -122,11 +122,13 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const questions = s.questions.length
     ? `<ol class="field-qs">${s.questions.map((q) => {
       const m = mean1(q.mean);
+      // Higher is worse: tagged, and its meter fills from the right, so a
+      // long bar does not read as a good one.
       return `<li class="field-q">
-        <p class="field-q-top"><span class="field-q-name">${label(q)}</span>
+        <p class="field-q-top"><span class="field-q-name">${label(q)}${q.worse ? ' <span class="tag">Higher is worse</span>' : ''}</span>
           <span class="field-q-n">${m != null ? `${m}<small> / ${q.high}</small>` : DASH}</span></p>
-        <div class="meter" role="img" aria-label="${m != null ? `${m} of ${q.high}` : 'no answers'}"><span style="width:${along(q)}%"></span></div>
-        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ' · higher is worse, counted inverted in the average' : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
+        <div class="meter${q.worse ? ' from-right' : ''}" role="img" aria-label="${m != null ? `${m} of ${q.high}${q.worse ? ', higher is worse' : ''}` : 'no answers'}"><span style="width:${along(q)}%"></span></div>
+        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${q.mean != null ? `: counts as ${mean1(q.low + q.high - q.mean)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
       </li>`;
     }).join('')}</ol>`
     : '<p class="empty">No question with scores was found yet.</p>';
@@ -166,7 +168,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const doubt = s.doubtful?.length ?? 0;
   if (doubt) left.push(`${plural(doubt, 'column')} you checked now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
-  return `${head}${hint}${flagsBlock(f, privacy, 'field-h')}${noteUnlessFlagged(f)}${waitNote(s)}
+  return `${head}${hint}${flagsBlock(f, privacy, 'field-h', [], now)}${noteUnlessFlagged(f)}${waitNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
     ${numbers}
     <h3 class="field-h">Newest comments</h3>${comments}
@@ -179,16 +181,19 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
 // to choose. A low-confidence guess (c.needsChoice) is never preselected,
 // and a scale is preselected only when the user confirmed it or the
 // question states it; anything else waits for the user, and Save with it.
+// The direction (worse) too: preselected "Higher is better" unless the
+// title speaks of pain or difficulty and nobody has said (c.askDirection).
 export function stepRows(f, draft = {}) {
   return (f?.summary?.columns ?? []).map((c) => {
     const d = draft[c.index] ?? {};
-    const role = d.role || (c.needsChoice ? '' : c.role);
+    // A saved role stays chosen while only its direction is asked.
+    const role = d.role || (c.needsChoice && !c.confirmed ? '' : c.role);
     const sure = c.role === 'score' && (c.scaleFrom === 'confirmed' || c.scaleFrom === 'header');
     const low = role === 'score' ? (d.low ?? (sure ? c.low : null)) : null;
     const high = role === 'score' ? (d.high ?? (sure ? c.high : null)) : null;
-    const missing = !role || (role === 'score' && (low == null || high == null));
-    // Higher is worse: the user's tick, else what the app suggests from the title.
-    const worse = role === 'score' && (d.worse ?? (c.role === 'score' ? c.worse === true : c.suggested?.worse === true));
+    // Higher is worse: the user's choice, else the saved one; null while asked.
+    const worse = role === 'score' ? (d.worse ?? (c.askDirection ? null : c.worse === true)) : null;
+    const missing = !role || (role === 'score' && (low == null || high == null || worse == null));
     return { c, role, low, high, worse, missing, touched: Object.keys(d).length > 0 };
   });
 }
@@ -198,7 +203,7 @@ export function stepRows(f, draft = {}) {
 export function draftWith(draft, col, part, value) {
   const row = { ...draft[col] };
   if (value === '' || value == null) delete row[part];
-  else row[part] = part === 'role' ? value : part === 'worse' ? value === true : Number(value);
+  else row[part] = part === 'role' ? value : part === 'worse' ? value === 'worse' || value === true : Number(value);
   return { ...draft, [col]: row };
 }
 
@@ -213,8 +218,8 @@ function rowTags(r) {
   const { c } = r;
   return [
     r.missing ? 'Needs a choice' : r.touched ? 'Changed' : '',
-    r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.scaleFrom === 'answers' ? 'Scale guessed' : '',
-    r.missing && c.needsChoice && c.suggested?.role === 'score' && c.suggested.worse ? 'Direction guessed' : '',
+    r.missing && c.needsChoice && !c.confirmed && c.suggested?.role === 'score' && c.suggested.scaleFrom === 'answers' ? 'Scale guessed' : '',
+    c.askDirection && (r.role === 'score' ? r.worse == null : r.missing && c.suggested?.role === 'score') ? 'Direction guessed' : '',
     c.isNew ? 'New column, not checked' : '',
     c.repeated ? 'Repeated title' : '',
     c.hidden && !c.doubt && r.role && r.role !== 'identifying' && r.role !== 'ignore' ? 'Answers show after the next update' : '',
@@ -222,13 +227,16 @@ function rowTags(r) {
   ].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
 }
 
+// "Higher is better" or "Higher is worse", with "Choose…" until one is.
+const directionOpts = (worse) => `${worse == null ? '<option value="" selected>Choose…</option>' : ''}<option value="better"${worse === false ? ' selected' : ''}>Higher is better</option><option value="worse"${worse === true ? ' selected' : ''}>Higher is worse</option>`;
+const directionWords = (r) => (r.role !== 'score' ? '' : r.worse == null ? ', direction not chosen' : r.worse ? ', higher is worse' : ', higher is better');
 const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>Choose…</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
 
 // "Check the columns": one row per column. With privacy off each row has
 // its role to choose (and a score its scale); Save is refused until every
 // row has one. With privacy on the step only reads: the choices name the
 // survey's own columns, so they are made with the wording in view.
-// draft: { [index]: { role, low, high } } while the user changes them.
+// draft: { [index]: { role, low, high, worse } } while the user changes them.
 export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', error = '' } = {}) {
   // The reply to the last Save, whatever is drawn with it.
   const reply = `${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ''}${note ? `<p class="hint" role="status">${esc(note)}</p>` : ''}`;
@@ -238,13 +246,14 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
   const rows = stepRows(f, draft);
   const missing = rows.filter((r) => r.missing).length;
   const nameOf = (c) => (privacy ? (c.role === 'timestamp' ? 'Timestamp' : `Question ${qNo.get(c.index)}`) : c.header);
-  const guess = (r) => (r.missing && r.c.needsChoice && r.c.suggested ? `<p class="muted">The app’s guess: ${esc(guessWords(r.c))}.</p>` : '');
+  // A saved score asked again only for its direction: the guess is that.
+  const guess = (r) => (r.missing && r.c.needsChoice && r.c.suggested ? `<p class="muted">The app’s guess: ${esc(r.c.confirmed ? 'higher is worse' : guessWords(r.c))}.</p>` : '');
   const left = missing ? `${plural(missing, 'column')} still ${missing === 1 ? 'needs' : 'need'} a choice.` : '';
   const head = '<h5 id="field-check-h" tabindex="-1">Check the columns</h5>';
 
   if (privacy) {
     const items = rows.map((r) => {
-      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}${r.worse ? ', higher is worse' : ''}` : 'Not chosen';
+      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}${directionWords(r)}` : 'Not chosen';
       return `<li class="field-col">
         <p class="field-col-name"><span>${esc(nameOf(r.c))}</span>${rowTags(r)}</p>
         <p class="field-col-what">${esc(what)}</p>${guess(r)}</li>`;
@@ -265,7 +274,7 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
     const scale = r.role === 'score' ? `<span class="field-scale">
         <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low" aria-label="${esc(name)}: scale from">${scaleOpts([0, 1], r.low)}</select></label>
         <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts([2, 3, 4, 5, 6, 7, 8, 9, 10], r.high)}</select></label></span>
-        <label class="field-worse"><input type="checkbox" id="fc-worse-${c.index}" data-col="${c.index}" data-part="worse" aria-label="${esc(name)}: higher is worse"${r.worse ? ' checked' : ''}> Higher is worse</label>` : '';
+        <select id="fc-worse-${c.index}" data-col="${c.index}" data-part="worse" aria-label="${esc(name)}: higher is better or worse">${directionOpts(r.worse)}</select>` : '';
     return `<li class="field-col${r.missing ? ' needs-choice' : ''}">
       <p class="field-col-name"><span>${esc(name)}</span>${rowTags(r)}</p>
       <div class="field-col-role"><label class="visually-hidden" for="fc-role-${c.index}">What ${esc(name)} is</label>
@@ -323,7 +332,7 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
 export function rolesFrom(f, draft = {}) {
   const rows = stepRows(f, draft);
   const roles = rows.filter((r) => !r.missing).map(({ c, role, low, high, worse }) => ({
-    header: c.header, index: c.index, role, ...(role === 'score' ? { low, high, ...(worse ? { worse: true } : {}) } : {}),
+    header: c.header, index: c.index, role, ...(role === 'score' ? { low, high, worse } : {}),
   }));
   return { roles, missing: rows.length - roles.length };
 }
@@ -385,7 +394,7 @@ const WHY_FIX = { 'no-dates': 'check' };
 // set-up flags below. Nothing at all when no flags were worked out (an
 // older snapshot).
 // said: set-up flags another line of the section already says.
-export function flagsHtml(f, { privacy = true, said = [] } = {}) {
+export function flagsHtml(f, { privacy = true, said = [], now = Date.now() } = {}) {
   const info = f?.flags;
   if (!info || !Array.isArray(info.list)) return '';
   const list = info.list.filter((x) => !said.includes(x.what));
@@ -394,7 +403,9 @@ export function flagsHtml(f, { privacy = true, said = [] } = {}) {
   const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)(info, days)}</p>${fixOf(info.why)}` : '';
   const scored = (f.summary?.questions ?? []).some((q) => !q.guessed && !q.directionGuessed);
   const noEarlier = !info.why && !info.earlier && scored ? `<p class="field-calm">No answers from before the last ${days} days, so averages are not compared yet.</p>` : '';
-  if (!list.length) return why || `<p class="field-calm">Nothing to flag</p>${noEarlier}`;
+  // After a failed update the answers are older than they look.
+  const calm = f.error && f.fetchedAt ? `Nothing to flag in the answers read ${age(f.fetchedAt, now)}` : 'Nothing to flag';
+  if (!list.length) return why || `<p class="field-calm">${esc(calm)}</p>${noEarlier}`;
   const items = list.map((x) => {
     const fix = x.fix && FIXES[x.fix] ? `<button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
     const glyph = x.kind === 'falling' && x.worse ? 'rising' : x.kind;
@@ -404,14 +415,14 @@ export function flagsHtml(f, { privacy = true, said = [] } = {}) {
 }
 // The block with its heading. While dates are waiting the note above says
 // so, so the block shows only for set-up flags.
-const flagsBlock = (f, privacy, cls, said = []) => {
+const flagsBlock = (f, privacy, cls, said = [], now = Date.now()) => {
   const info = f?.flags;
   if (!info || !Array.isArray(info.list)) return '';
   if (info.why === 'waiting') {
     const left = info.list.filter((x) => !said.includes(x.what));
-    return left.length ? `<h3 class="${cls}">Flags</h3>${flagsHtml({ ...f, flags: { ...info, why: null, earlier: true, list: left } }, { privacy })}` : '';
+    return left.length ? `<h3 class="${cls}">Flags</h3>${flagsHtml({ ...f, flags: { ...info, why: null, earlier: true, list: left } }, { privacy, now })}` : '';
   }
-  return `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy, said })}`;
+  return `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy, said, now })}`;
 };
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';

@@ -684,6 +684,8 @@ details > summary h2 { margin: 0; }
 .usage-row strong { font-variant-numeric: tabular-nums; }
 .meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin: var(--s-2) 0 var(--s-1); }
 .meter span { display: block; height: 100%; background: var(--accent); }
+/* Higher is worse: filled from the right, so a long bar does not read as good. */
+.meter.from-right span { margin-left: auto; }
 .row .ctx-warn { grid-column: 2 / -1; font-size: 12px; font-weight: 500; color: var(--warn); }
 
 /* ---- decorating: pictures of each piece ------------------------------------------- */
@@ -829,8 +831,6 @@ body.no-select, body.no-select * { user-select: none; }
 .field-flag-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* A fix sits on its own line under the words, lined up with them. */
 .field-flag .link-btn { flex-basis: 100%; text-align: left; min-height: 0; padding: 0; margin-left: calc(15px + var(--s-2)); }
-.field-worse { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 32px; }
-.field-worse input { width: 16px; height: 16px; accent-color: var(--accent); }
 .field-calm { margin: 0 0 var(--s-2); font-size: 13px; color: var(--ink-muted); }
 /* A reason's fix, on its own line under it. */
 .field-fix { margin: calc(-1 * var(--s-1)) 0 var(--s-2); }
