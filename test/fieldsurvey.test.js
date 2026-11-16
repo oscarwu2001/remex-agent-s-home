@@ -609,6 +609,10 @@ test('Settings changes: an empty link keeps the saved one; a bad link or roles a
   assert.deepEqual(F.changeSettings(now, { sheetUrl: other }), { settings: { ...now, sheetUrl: other }, sheetChanged: true });
   assert.deepEqual(F.changeSettings(now, { enabled: false }).settings.enabled, false);
   assert.match(F.changeSettings(now, { columns: [{ header: 'Q', index: 0, role: 'nope' }] }).error, /could not be read/);
+  // Another sheet is another form: its columns are checked afresh.
+  const checked = { ...now, columns: [{ header: 'Q', index: 1, role: 'comment' }] };
+  assert.deepEqual(F.changeSettings(checked, { sheetUrl: other }).settings.columns, []);
+  assert.deepEqual(F.changeSettings(checked, { enabled: false }).settings.columns, checked.columns);
 });
 
 test('an unknown time zone and day-or-month dates are said under Needs attention', () => {

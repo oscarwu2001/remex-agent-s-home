@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification, dialog, clipboard } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -503,20 +503,24 @@ app.whenReady().then(() => {
   // The answers to the user's field survey, from a Google Sheet they shared
   // with their own service account. Off until turned on in Settings; then
   // fetched from here only, on Monday, Wednesday and Friday at 08:00 (and on
-  // start when a slot was missed), and only from the hosts named in
-  // src/core/fieldsurvey.js. The key file stays where the user keeps it: only
-  // its path is saved, and the key is read for each fetch, never copied or
-  // logged. The last rows are kept in the app's data folder so the board has
-  // them after a restart.
+  // start when a slot was missed), after a passing failure, and on Refresh
+  // now, only from the hosts named in src/core/fieldsurvey.js. The key file
+  // stays where the user keeps it: only its path is saved, and the key is
+  // read for each fetch, never copied or logged. The rows are kept in the
+  // app's data folder without identifying answers, so the board has them
+  // after a restart, and deleted when the feature is turned off. The
+  // decisions (when to read, what to keep, what to report) are in
+  // fieldsurvey.js; this keeps the timers, the files, net.fetch and the IPC.
   const fieldFile = path.join(app.getPath('userData'), 'field-survey.json');
   const fieldCacheFile = path.join(app.getPath('userData'), 'field-survey-cache.json');
-  const FIELD_RETRY_MS = 30 * 60_000; // after a failed try, the schedule waits this long before trying again
   const FIELD_CHECK_MS = 10 * 60_000; // how often to look whether a slot has come (a timer can miss one across sleep)
   const FIELD_TIMEOUT_MS = 20_000;
-  let field = { enabled: false, sheetUrl: '', keyPath: '' };
-  // { rows, fetchedAt, tab, timeZone, since, sinceFetchedAt, lastAttemptAt, lastError: { at, kind, message } }
+  const FIELD_STALE = 'The link or key changed while reading; reading again.';
+  // { enabled, sheetUrl, keyPath, columns: the user's checked column roles }
+  let field = { enabled: false, sheetUrl: '', keyPath: '', columns: [] };
   let fieldCache = null;
   let fieldSummary = null;
+  let fieldSummaryError = null;
   let fieldKey = { clientEmail: null, error: null }; // read from the key file, for Settings
   let fieldRun = null; // the fetch under way
   let fieldGeneration = 0; // bumped when the link or key changes, so a fetch for the old ones is dropped
@@ -528,39 +532,67 @@ app.whenReady().then(() => {
     fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
     fs.renameSync(tmp, file);
   };
+  // The saved link, or null: no link yet, or one that no longer reads (a
+  // read then says why, from parseSheetLink itself).
+  const fieldLink = () => (field.sheetUrl ? (() => {
+    try {
+      return fieldSurvey.parseSheetLink(field.sheetUrl);
+    } catch {
+      return null; // refreshField parses it again and reports the reason
+    }
+  })() : null);
   try {
     const saved = JSON.parse(fs.readFileSync(fieldFile, 'utf8'));
     if (!saved || typeof saved !== 'object') throw new SyntaxError('not an object');
+    let columns = [];
+    try {
+      columns = fieldSurvey.checkRoles(saved.columns ?? []);
+    } catch {
+      problem('The checked field feedback columns could not be read; check them again in Settings → Field feedback', fieldFile);
+    }
     field = {
       enabled: saved.enabled === true,
       sheetUrl: typeof saved.sheetUrl === 'string' ? saved.sheetUrl : '',
       keyPath: typeof saved.keyPath === 'string' ? saved.keyPath : '',
+      columns,
     };
   } catch (err) {
     if (err.code !== 'ENOENT') problem('The field feedback settings could not be read; field feedback is off until it is set again in Settings', fieldFile);
   }
-  try {
-    const saved = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
-    const valid = saved && typeof saved === 'object'
-      && (saved.rows === null || Array.isArray(saved.rows))
-      && (saved.fetchedAt === null || Number.isFinite(saved.fetchedAt));
-    if (!valid) throw new SyntaxError('unexpected shape');
-    fieldCache = saved;
-  } catch (err) {
-    if (err.code !== 'ENOENT') problem('The saved field feedback could not be read; it is fetched again', fieldCacheFile);
+  function dropFieldCache() {
+    fieldCache = null;
+    fieldSummary = null;
+    try {
+      fs.rmSync(fieldCacheFile, { force: true });
+    } catch (err) {
+      problem(`The saved field feedback could not be removed (${err.code || err.message})`, fieldCacheFile);
+    }
   }
-  let fieldSummaryError = null; // the summary could not be made from the rows kept
+  {
+    let raw = null;
+    try {
+      raw = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        problem('The saved field feedback could not be read; the sheet is read again', fieldCacheFile);
+        dropFieldCache();
+      }
+    }
+    const checked = fieldSurvey.validCache(raw, fieldLink());
+    if (checked.problem) problem(checked.problem, fieldCacheFile);
+    if (checked.cache && field.enabled) fieldCache = checked.cache;
+    // Not this sheet's, not whole, an older format, or the feature is off:
+    // nothing of it is kept.
+    else if (raw != null) dropFieldCache();
+  }
   function summariseField() {
     try {
-      fieldSummary = fieldCache?.rows
-        ? fieldSurvey.summarise(fieldCache.rows, { since: fieldCache.since ?? null, timeZone: fieldCache.timeZone })
-        : null;
+      fieldSummary = fieldSurvey.summariseCache(fieldCache, field.columns);
       fieldSummaryError = null;
     } catch (err) {
-      // Never stops the app from starting: the section shows no numbers and
-      // Needs attention says why.
+      // Never stops the app: the section shows no numbers and says why.
       fieldSummary = null;
-      fieldSummaryError = 'The answers read could not be summarised; see the system log.';
+      fieldSummaryError = 'The answers kept could not be summarised; press Refresh now, and see the system log if it stays.';
       syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
     }
   }
@@ -609,8 +641,8 @@ app.whenReady().then(() => {
     const generation = fieldGeneration;
     const started = Date.now();
     fieldRun = (async () => {
+      let link = null;
       try {
-        let link;
         try {
           link = fieldSurvey.parseSheetLink(field.sheetUrl);
         } catch (err) {
@@ -618,32 +650,20 @@ app.whenReady().then(() => {
         }
         const key = readFieldKey();
         const got = await fieldSurvey.fetchRows({ link, key, fetch: askGoogle, now: started });
-        if (generation !== fieldGeneration) return { ok: false, error: 'The link or key changed while reading; reading again.' };
-        // "New since": answers after the newest one the last different
-        // fetch had, so pressing Refresh twice does not reset the count.
-        const before = fieldSummary?.newest ?? null;
-        const after = fieldSurvey.summarise(got.rows, { timeZone: got.timeZone }).newest;
-        const changed = Boolean(fieldCache?.rows) && after !== before;
-        fieldCache = {
-          rows: got.rows, tab: got.tab, timeZone: got.timeZone ?? null, fetchedAt: Date.now(), lastAttemptAt: started, lastError: null,
-          since: changed ? before : (fieldCache?.since ?? null),
-          sinceFetchedAt: changed ? fieldCache.fetchedAt : (fieldCache?.sinceFetchedAt ?? null),
-        };
+        if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
+        fieldCache = fieldSurvey.afterFetch(fieldCache, got, { now: Date.now(), started, link, roles: field.columns });
         fieldKey = { clientEmail: key.clientEmail, error: null };
-        saveFieldCache();
-        summariseField();
-        return { ok: true };
       } catch (err) {
-        if (generation !== fieldGeneration) return { ok: false, error: 'The link or key changed while reading; reading again.' };
-        const known = err instanceof fieldSurvey.FieldSurveyError;
-        const lastError = { at: Date.now(), kind: known ? err.kind : 'bug', message: known ? err.message : 'Something went wrong while reading the sheet; see the system log.' };
-        if (!known) syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
-        if (lastError.kind === 'key') fieldKey = { clientEmail: null, error: lastError.message };
-        // The last good rows stay; the error shows beside them.
-        fieldCache = { rows: null, fetchedAt: null, ...fieldCache, lastAttemptAt: started, lastError };
-        saveFieldCache();
-        return { ok: false, error: lastError.message };
+        if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
+        if (!(err instanceof fieldSurvey.FieldSurveyError)) {
+          syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
+        }
+        fieldCache = fieldSurvey.afterFailure(fieldCache, err, { now: Date.now(), started, link });
+        if (fieldCache.lastError.kind === 'key') fieldKey = { clientEmail: null, error: fieldCache.lastError.message };
       }
+      saveFieldCache();
+      summariseField();
+      return fieldCache.lastError ? { ok: false, error: fieldCache.lastError.message } : { ok: true };
     })().finally(() => {
       fieldRun = null;
       fieldTick();
@@ -652,56 +672,39 @@ app.whenReady().then(() => {
   }
   function fieldTick() {
     clearTimeout(fieldTimer);
-    if (!field.enabled || !field.sheetUrl || !field.keyPath || fieldRun) return;
-    const { due, next } = fieldSurvey.nextRun(new Date(), fieldCache?.fetchedAt ?? null);
-    const failedLately = fieldCache?.lastError && Date.now() - (fieldCache.lastAttemptAt ?? 0) < FIELD_RETRY_MS;
-    if (due && !failedLately) {
+    const plan = fieldSurvey.planFetch({ now: Date.now(), settings: field, cache: fieldCache, busy: Boolean(fieldRun) });
+    if (plan.fetch) {
       refreshField();
       return;
     }
-    // Just after the next slot (setTimeout cannot wait more than ~24 days).
-    fieldTimer = setTimeout(fieldTick, Math.min(Math.max(next.getTime() - Date.now() + 1_000, 1_000), 2 ** 31 - 1));
+    // setTimeout cannot wait more than ~24 days.
+    if (plan.wakeAt != null) fieldTimer = setTimeout(fieldTick, Math.min(Math.max(plan.wakeAt - Date.now() + 1_000, 1_000), 2 ** 31 - 1));
   }
   setInterval(fieldTick, FIELD_CHECK_MS);
   checkFieldKey();
   summariseField();
   fieldTick();
-  // A change of sheet starts afresh: the old sheet's rows are not kept.
-  function forgetFieldRows() {
-    fieldCache = null;
-    fieldSummary = null;
-    try {
-      fs.rmSync(fieldCacheFile, { force: true });
-    } catch (err) {
-      problem(`The old sheet's saved answers could not be removed (${err.code || err.message})`, fieldCacheFile);
-    }
-  }
   ipcMain.handle('home:field-set', (_event, change = {}) => {
-    const next = { ...field };
-    if (change && 'enabled' in change) next.enabled = change.enabled === true;
-    if (change && 'sheetUrl' in change) {
-      const url = String(change.sheetUrl ?? '').trim();
-      if (url) {
-        try {
-          fieldSurvey.parseSheetLink(url);
-        } catch (err) {
-          return { ok: false, error: err.message };
-        }
-      }
-      next.sheetUrl = url;
-    }
+    const res = fieldSurvey.changeSettings(field, change);
+    if (res.error) return { ok: false, error: res.error };
     try {
-      writeJsonFile(fieldFile, next);
+      writeJsonFile(fieldFile, res.settings);
     } catch (err) {
       return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
     }
-    const sheetChanged = next.sheetUrl !== field.sheetUrl;
-    field = next;
-    if (sheetChanged) {
+    const turnedOff = field.enabled && !res.settings.enabled;
+    field = res.settings;
+    if (res.sheetChanged || turnedOff) {
+      // Another sheet starts afresh; off keeps nothing.
       fieldGeneration += 1;
-      forgetFieldRows();
+      dropFieldCache();
+    } else if (change && 'columns' in change && fieldCache) {
+      // A column now marked identifying loses its answers from the cache too.
+      fieldCache = fieldSurvey.reroleCache(fieldCache, field.columns);
+      saveFieldCache();
     }
-    fieldTick(); // fetches now when on, set up and due
+    summariseField();
+    fieldTick(); // reads now when on, set up and due
     return { ok: true };
   });
   ipcMain.handle('home:field-choose-key', async () => {
@@ -727,14 +730,21 @@ app.whenReady().then(() => {
     field = next;
     fieldGeneration += 1;
     fieldKey = { clientEmail: key.clientEmail, error: null };
-    // A new key may be the fix for the last error: try again without waiting.
+    // A new key may be the fix for the last refusal: try again without waiting.
     if (fieldCache?.lastError) fieldCache = { ...fieldCache, lastAttemptAt: null };
     fieldTick();
-    return { ok: true, clientEmail: key.clientEmail };
+    return { ok: true };
   });
   ipcMain.handle('home:field-refresh', () => {
     if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
     return refreshField();
+  });
+  // The reader address goes to the clipboard from here, so it can be pasted
+  // into the sheet's Share box while privacy mode keeps it off the screen.
+  ipcMain.handle('home:field-copy-reader', () => {
+    if (!fieldKey.clientEmail) return { ok: false, error: 'Choose the key file first.' };
+    clipboard.writeText(fieldKey.clientEmail);
+    return { ok: true };
   });
   function fieldState() {
     const c = fieldCache ?? {};
@@ -749,24 +759,20 @@ app.whenReady().then(() => {
       fetchedAt: c.fetchedAt ?? null,
       lastAttemptAt: c.lastAttemptAt ?? null,
       error: c.lastError?.message ?? null,
+      errorDetail: c.lastError?.detail ?? null,
       errorKind: c.lastError?.kind ?? null,
       errorAt: c.lastError?.at ?? null,
       sinceFetchedAt: c.sinceFetchedAt ?? null,
       tab: c.tab?.title ?? null,
       nextAt: field.enabled ? fieldSurvey.nextRun(new Date(), c.fetchedAt ?? null).next.getTime() : null,
       summary: field.enabled ? fieldSummary : null,
+      summaryError: field.enabled ? fieldSummaryError : null,
     };
   }
   function fieldProblems() {
-    if (!field.enabled) return [];
-    const out = [];
-    const err = fieldCache?.lastError;
-    if (err) out.push({ label: `Field feedback: ${err.message}`, detail: '', count: 1 });
-    if (fieldKey.error && fieldKey.error !== err?.message) out.push({ label: `Field feedback: ${fieldKey.error}`, detail: '', count: 1 });
-    if (fieldSummaryError) out.push({ label: `Field feedback: ${fieldSummaryError}`, detail: '', count: 1 });
-    const unread = fieldSurvey.unreadableText(fieldSummary);
-    if (unread) out.push({ label: `Field feedback: ${unread}`, detail: '', count: 1 });
-    // Each new failure goes to the system log once.
+    const out = fieldSurvey.fieldProblems({ enabled: field.enabled, cache: fieldCache, summary: fieldSummary, summaryError: fieldSummaryError, keyError: fieldKey.error })
+      .map((p) => ({ ...p, count: 1 }));
+    // Each new set of problems goes to the system log once (labels only).
     const text = out.map((p) => p.label).join(' | ');
     if (text && text !== fieldLogged) for (const p of out) syslog?.write('errors', 'problem', { what: p.label });
     fieldLogged = text;

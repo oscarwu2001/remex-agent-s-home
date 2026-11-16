@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('agentsHome', {
   fieldSet: (change) => ipcRenderer.invoke('home:field-set', change),
   fieldChooseKey: () => ipcRenderer.invoke('home:field-choose-key'),
   fieldRefresh: () => ipcRenderer.invoke('home:field-refresh'),
+  fieldCopyReader: () => ipcRenderer.invoke('home:field-copy-reader'),
   updateInfo: () => ipcRenderer.invoke('home:update-info'),
   update: () => ipcRenderer.invoke('home:update'),
   notify: (n) => ipcRenderer.invoke('home:notify', n),

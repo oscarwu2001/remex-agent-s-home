@@ -834,7 +834,10 @@ function changeSettings(current, change) {
       return { error: err.message };
     }
   }
-  return { settings: next, sheetChanged: next.sheetUrl !== (current?.sheetUrl ?? '') };
+  const sheetChanged = next.sheetUrl !== (current?.sheetUrl ?? '');
+  // Another sheet is another form: its columns are checked afresh.
+  if (sheetChanged && !(change && 'columns' in change)) next.columns = [];
+  return { settings: next, sheetChanged };
 }
 
 // Everything that needs the user's attention, as { label, detail }: the
