@@ -258,9 +258,13 @@ which you share the sheet with, so the sheet stays private:
    bar and press **Save**, then press **Choose key file…** and pick the
    `.json` file. **Copy reader address** puts the service account's email on
    the clipboard for step 5 (with privacy off, Settings shows it too).
-7. After the first update, open **Check the columns** (the board links to
-   it): the app suggests what each column is, and you confirm or change each
-   one once. Until then the board says its numbers are the app's guesses.
+7. After the first update, turn **Hide file names, commands and survey
+   answers** off and open **Check the columns** (the board links to it): the
+   app guessed what each column is. Change any that are wrong, choose the
+   ones marked **Needs a choice** (guesses it is unsure of, such as a scale
+   read from the answers), and press **Save the columns**; Save waits until
+   every column has a choice. Until then the board says its numbers are the
+   app's guesses.
 
 Each column is one of: when answered; a score (whole numbers on a scale such
 as 1–5 or 1–10); a number that is not a score ("How many times…"), averaged
@@ -270,7 +274,8 @@ the columns** lets you confirm it. Only scores whose scale you confirmed, or
 that the question states (like "(1-5)"), count in the average; a guessed
 scale is marked "scale guessed". Columns with names, email addresses, phone
 numbers or patient and case numbers are hidden, and their answers are not
-kept on your computer. A column added to the form later is flagged under
+kept on your computer; a column the app only guesses is identifying stays
+off the board, and its answers are kept until you choose. A column added to the form later is flagged under
 **Needs attention** until you check it. Answers the app cannot read, such as
 a word in a score question, are counted under **Needs attention**, never
 dropped quietly. With **Hide file names, commands and survey answers** on,
