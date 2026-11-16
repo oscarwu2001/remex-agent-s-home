@@ -240,7 +240,7 @@ test('a set-up flag for unchosen columns replaces the note above the numbers, an
   assert.equal(s.needsChoice, 1);
   const f = { ...field(s), flags: F.fieldFlags({ summary: s }) };
   for (const html of [fieldHtml(f), fieldSheetHtml(f)]) assert.doesNotMatch(html, /Columns not checked yet/);
-  assert.equal(flagText(f.flags.list.find((x) => x.what === 'choose')), '1 column needs a choice; until then the numbers are the app’s guesses');
+  assert.equal(flagText(f.flags.list.find((x) => x.what === 'choose')), '1 column needs a choice; until then the numbers are the app’s guesses, and score flags wait until the columns are checked');
   // Without flags worked out, the note stays.
   assert.match(fieldHtml(field(s)), /Columns not checked yet/);
 });
@@ -355,7 +355,9 @@ test('the board says why the window could not be compared, each in its own words
 
 test('in the sheet a higher-is-worse question is tagged, says what it counts as, and its bar shows that; a guessed direction is left out', async () => {
   const { fieldSheetHtml } = await view();
-  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true }]);
+  // Pain relief saved before the direction was asked: its direction is a guess again.
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'How difficult was setup? (1-5)', index: 1, role: 'score', low: 1, high: 5, worse: true },
+    { header: 'Pain relief achieved (0-10)', index: 2, role: 'score', low: 0, high: 10 }]);
   const head = [['Timestamp', 'How difficult was setup? (1-5)', 'Pain relief achieved (0-10)'], ['2026-11-10 09:00', 2, 8], ['2026-11-11 09:00', 1, 9]];
   const html = fieldSheetHtml(field(F.summarise(head, { roles })), { privacy: true });
   const [hard, pain] = html.split('<li class="field-q">').slice(1);
@@ -384,17 +386,17 @@ test('the average\'s dash says why when only a direction is guessed', async () =
   assert.match(fieldHtml(field(s)), /<dt class="stat-label" title="[^"]+">Average score<\/dt>/);
 });
 
-test('scores never checked raise no score flags; the board says when they start, with a link', async () => {
-  const { flagsHtml } = await view();
+test('scores never checked raise no score flags; the note above the numbers says so, with its link', async () => {
+  const { fieldHtml, flagsHtml } = await view();
   const s = F.summarise(flagRows, { now: NOW });
-  const html = flagsHtml({ ...field(s), flags: F.fieldFlags({ summary: s }) });
-  assert.match(html, /<p class="field-calm">Score flags start once the columns are checked · <button type="button" class="link-btn inline" data-field="check">Check the columns<\/button><\/p>/);
-  assert.doesNotMatch(html, /low score|average down|Nothing to flag/);
+  const html = fieldHtml({ ...field(s), flags: F.fieldFlags({ summary: s }) });
+  assert.match(html, /<p class="field-note">Columns not checked yet: these numbers are the app’s guesses, and score flags wait until they are checked <span class="nowrap">· <button type="button" class="link-btn" id="field-check-link" data-field="check">Check the columns<\/button><\/span><\/p>/);
+  assert.doesNotMatch(html, /Score flags start|low score|average down|Nothing to flag/);
   assert.match(html, /3 comments in the last 7 days/);
   const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: flagRows[0][1], index: 1, role: 'score', low: 1, high: 5, worse: false }, { header: flagRows[0][2], index: 2, role: 'comment' }]);
   const c = F.summarise(flagRows, { now: NOW, roles });
   const checked = flagsHtml({ ...field(c), flags: F.fieldFlags({ summary: c }) });
-  assert.doesNotMatch(checked, /Score flags start/);
+  assert.doesNotMatch(checked, /Score flags start|not checked/);
   assert.match(checked, /2 low scores on Question 1/);
 });
 
@@ -412,4 +414,48 @@ test('a row turned into a score asks its direction, unless it was saved as a sco
     const saved = field(F.summarise(head, { roles: F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Ease (1-5)', index: 1, role: 'score', low: 1, high: 5, worse }]) }));
     assert.deepEqual([stepRows(saved, back)[1].worse, stepRows(saved, back)[1].missing], [worse, false]);
   }
+});
+
+test('"Check the columns" shows once in the section and once in the sheet, whatever is not checked', async () => {
+  const { fieldHtml, fieldSheetHtml } = await view();
+  const ts = { header: 'Timestamp', index: 0, role: 'timestamp' };
+  const once = (summary) => {
+    const f = { ...field(summary), flags: F.fieldFlags({ summary }) };
+    return [fieldHtml(f, { now: NOW }), fieldSheetHtml(f, { now: NOW })].map((h) => (h.match(/Check the columns/g) ?? []).length);
+  };
+  // First read, all sure: the note says it.
+  assert.deepEqual(once(F.summarise(flagRows, { now: NOW })), [1, 1]);
+  // First read with a column to choose: the flag says it, the note goes.
+  const first = F.summarise(rows, { now: NOW });
+  assert.deepEqual(once(first), [1, 1]);
+  assert.match(fieldHtml({ ...field(first), flags: F.fieldFlags({ summary: first }) }), /1 column needs a choice; until then the numbers are the app’s guesses, and score flags wait until the columns are checked/);
+  // After a save, a new comment column only: one line.
+  const newComment = F.summarise(flagRows, { now: NOW, roles: F.checkRoles([ts, { header: flagRows[0][1], index: 1, role: 'score', low: 1, high: 5, worse: false }]) });
+  assert.deepEqual(once(newComment), [1, 1]);
+  assert.match(fieldHtml({ ...field(newComment), flags: F.fieldFlags({ summary: newComment }) }),
+    /<p class="field-note">A new column is not checked yet: it is not in the average or the score flags <span class="nowrap">· <button[^>]*>Check the columns<\/button><\/span><\/p>/);
+  // After a save, a new column to choose: the flag, in its own words.
+  const newGuess = F.summarise(rows, { now: NOW, roles: F.checkRoles([ts, { header: rows[0][2], index: 2, role: 'score', low: 1, high: 5, worse: false }, { header: rows[0][3], index: 3, role: 'comment' }]) });
+  assert.deepEqual(once(newGuess), [1, 1]);
+  const html = fieldHtml({ ...field(newGuess), flags: F.fieldFlags({ summary: newGuess }) });
+  assert.match(html, /1 column needs a choice: not in the average or the score flags until then/);
+  assert.doesNotMatch(html, /app’s guesses/);
+  // And a new column that needs no choice besides it: the same flag counts it.
+  const mixed = F.summarise(rows, { now: NOW, roles: F.checkRoles([ts, { header: rows[0][3], index: 3, role: 'comment' }]) });
+  assert.deepEqual(once(mixed), [1, 1]);
+  assert.match(fieldHtml({ ...field(mixed), flags: F.fieldFlags({ summary: mixed }) }), /1 column needs a choice and 1 more is not checked yet: not in the average or the score flags until then/);
+});
+
+test('once the columns are saved, the sheet names a score added later as not checked, not in the average', async () => {
+  const { fieldSheetHtml } = await view();
+  const head = [['Timestamp', 'Rate the tracking (1-5)', 'Rate the screen (0-10)'], ['2026-11-10 09:00', 4, 2], ['2026-11-11 09:00', 5, 9]];
+  const ts = { header: 'Timestamp', index: 0, role: 'timestamp' };
+  const tracking = { header: head[0][1], index: 1, role: 'score', low: 1, high: 5, worse: false };
+  const s = F.summarise(head, { roles: F.checkRoles([ts, tracking]) });
+  assert.equal(s.overall.mean, 4.5);
+  const [track, screen] = fieldSheetHtml(field(s), { privacy: true }).split('<li class="field-q">').slice(1);
+  assert.match(screen, /not checked<\/span>, not in the average/);
+  assert.doesNotMatch(track, /not checked/);
+  const checked = F.summarise(head, { roles: F.checkRoles([ts, tracking, { header: head[0][2], index: 2, role: 'score', low: 0, high: 10, worse: false }]) });
+  assert.doesNotMatch(fieldSheetHtml(field(checked), { privacy: true }), /not checked/);
 });

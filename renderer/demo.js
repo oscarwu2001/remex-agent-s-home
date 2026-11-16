@@ -211,11 +211,12 @@ function demoField(nowMs) {
   const h = 3_600_000;
   const day = 24 * h;
   const at = (ms) => new Date(nowMs - ms).toISOString();
-  // A low-confidence suggestion (a scale guessed from the answers) waits
-  // for the user's choice in the step, as it does with a real sheet.
+  // The columns were checked once; one added to the form since, with a
+  // scale guessed from its answers, waits for the user's choice in the step
+  // and stays out of the average and the score flags, as with a real sheet.
   const col = (index, header, role, extra = {}, confidence = 'high') => ({
-    index, header, role, confirmed: false, isNew: false, answers: 24, needsChoice: confidence === 'low',
-    suggested: { role, confidence, ...extra }, ...extra,
+    index, header, role, confirmed: confidence !== 'low', isNew: confidence === 'low', answers: 24, needsChoice: confidence === 'low',
+    suggested: { role, confidence, ...extra }, ...extra, ...(role === 'score' && confidence !== 'low' ? { worse: false } : {}),
   });
   return {
     enabled: true, demo: true, sheetUrl: '', keyName: 'sample-key.json', clientEmail: 'sample-reader@sample-project.iam.gserviceaccount.com',
@@ -223,8 +224,9 @@ function demoField(nowMs) {
     sinceFetchedAt: nowMs - 2 * day - 2 * h, tab: 'Sample responses', nextAt: nowMs + 2 * day - 2 * h,
     // One flag of each kind, as fieldFlags (src/core/fieldsurvey.js) gives them:
     // question 5's three answers of the last 7 days are lower, two of them low.
+    // Question 4 is not checked, so it raises no score flag (unchecked).
     flags: {
-      why: null, earlier: true,
+      why: null, earlier: true, unchecked: 1,
       list: [
         { kind: 'low', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, worse: false, count: 2, mark: 2 },
         { kind: 'falling', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, worse: false, recentN: 3, recentMean: 2.3, earlierMean: 4.2 },
@@ -235,9 +237,9 @@ function demoField(nowMs) {
     summary: {
       responses: 24, blankRows: 0, timestampColumn: 'Timestamp', timeZone: 'local', timeZoneUnknown: null,
       newest: at(5 * h), oldest: at(26 * day), since: at(2 * day + 9 * h), newSince: 3,
-      // Not checked yet, as a new sheet is: the board says so and links to
-      // Settings → Check the columns.
-      checked: false, needsChoice: 1, newColumns: [],
+      // Checked once, with a column added since: the board's flag says so
+      // and links to Settings → Check the columns.
+      checked: false, needsChoice: 1, newColumns: ['Sample: how clear was the screen in theatre?'],
       columns: [
         col(0, 'Timestamp', 'timestamp'),
         col(1, 'Email address', 'identifying', { reason: 'header' }),
@@ -251,12 +253,12 @@ function demoField(nowMs) {
         col(9, 'Sample: anything else?', 'comment'),
       ],
       questions: [
-        { question: 'Sample: how easy was the setup? (1-5)', index: 3, n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'header', guessed: false, unreadable: 0 },
-        { question: 'Sample: how clear was the screen in theatre?', index: 4, n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', guessed: true, unreadable: 0 },
-        { question: 'Sample: how well did the tracking keep up? (1-5)', index: 5, n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'header', guessed: false, unreadable: 0 },
+        { question: 'Sample: how easy was the setup? (1-5)', index: 3, n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
+        { question: 'Sample: how clear was the screen in theatre?', index: 4, n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', guessed: true, confirmed: false, notChecked: true, unreadable: 0 },
+        { question: 'Sample: how well did the tracking keep up? (1-5)', index: 5, n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
       ],
       numbers: [{ question: 'Sample: how many times did you restart it?', index: 6, n: 24, mean: 0.6, unreadable: 0 }],
-      // The two stated scales only: (4.3 × 24 + 4.0 × 24) / 48.
+      // The two checked scores only: (4.3 × 24 + 4.0 × 24) / 48.
       overall: { mean: 4.15, high: 5, rescaled: false, n: 48 }, scalesGuessed: 1,
       comments: [
         { question: 'Sample: what should we improve?', text: 'Sample comment: a larger font for the distance readout.', at: at(5 * h) },

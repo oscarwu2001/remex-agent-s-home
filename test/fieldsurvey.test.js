@@ -1216,8 +1216,27 @@ test('scores never checked raise no score flags until the columns are saved; com
 
 test('symptom titles ask which end is better', () => {
   for (const h of ['Anxiety level (0-10)', 'Nausea (1-5)', 'Swelling (1-5)', 'Bleeding (1-5)', 'Stress level (1-5)', 'Errors seen (0-10)',
-    '焦慮程度 (1-5)', '焦虑程度 (1-5)', '噁心 (1-5)', '恶心 (1-5)', '腫脹 (1-5)', '肿胀 (1-5)', '出血量 (1-5)', '錯誤程度 (0-10)', '错误 (0-10)']) {
+    '焦慮程度 (1-5)', '焦虑程度 (1-5)', '噁心 (1-5)', '恶心 (1-5)', '腫脹 (1-5)', '肿胀 (1-5)', '出血量 (1-5)', '錯誤程度 (0-10)', '错误 (0-10)',
+    'Dizziness after use (0-10)', 'Itching (1-5)', 'Vomiting (1-5)', '頭暈 (1-5)', '头晕 (1-5)', '癢 (1-5)', '痒 (1-5)', '嘔吐 (1-5)', '呕吐 (1-5)']) {
     const c = F.summarise(dated([h], [[1, 2]]), { now: NOW }).columns[1];
     assert.deepEqual([c.suggested.worse, c.needsChoice, c.askDirection], [true, true, true], h);
   }
+});
+
+test('once the columns are saved, a score added later stays out of the headline average until it is checked', () => {
+  const head = ['Rate the tracking (1-5)', 'Dizziness after use (0-10)', 'Rate the screen (0-10)'];
+  // Tracking: six 4s and six 5s (4.5). Dizziness and the screen rose from 1 to 9.
+  const rows = dated(head, [...earlier([4, 1, 1], 5), ...Array.from({ length: 5 }, (_, k) => [10 + k, 5, 1, 1]), [3, 4, 9, 9], [2, 5, 9, 9]]);
+  const ts = { header: 'Timestamp', index: 0, role: 'timestamp' };
+  const tracking = { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: false };
+  const s = F.summarise(rows, { now: NOW, roles: F.checkRoles([ts, tracking]) });
+  assert.deepEqual([s.overall.mean, s.overall.high, s.overall.n], [4.5, 5, 12]);
+  assert.deepEqual(s.questions.map((q) => [q.index, q.notChecked]), [[1, false], [2, true], [3, true]]);
+  // Checked: both count, dizziness turned round.
+  const all = F.checkRoles([ts, tracking, { header: head[1], index: 2, role: 'score', low: 0, high: 10, worse: true }, { header: head[2], index: 3, role: 'score', low: 0, high: 10, worse: false }]);
+  const c = F.summarise(rows, { now: NOW, roles: all });
+  assert.deepEqual([c.overall.n, c.overall.rescaled, c.questions.map((q) => q.notChecked)], [36, true, [false, false, false]]);
+  // Before the first save the sure guesses count, as the app's guesses (the
+  // board says so); a guessed direction does not.
+  assert.equal(F.summarise(rows, { now: NOW }).overall.n, 24);
 });

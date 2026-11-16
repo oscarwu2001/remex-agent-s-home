@@ -303,7 +303,7 @@ const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
 // so it is low confidence: such a score's direction is asked in Check the
 // columns (askDirection), and the column stays out of the flags and the
 // average until the user chooses, even a score saved before it was asked.
-const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired|anxiety|nausea|swelling|bleeding|stress(?:ful)?|errors?)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适|焦慮|焦虑|噁心|恶心|腫|肿|出血|錯誤|错误/i;
+const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired|anxiety|nausea|swelling|bleeding|stress(?:ful)?|errors?|dizziness|dizzy|itching|itchy|vomiting)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适|焦慮|焦虑|噁心|恶心|腫|肿|出血|錯誤|错误|頭暈|头晕|癢|痒|嘔吐|呕吐/i;
 const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
@@ -612,7 +612,7 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
     timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
     checked: false, needsChoice: 0, newColumns: [], columns: [],
-    questions: [], numbers: [], overall: null, scalesGuessed: 0, directionsGuessed: 0, comments: [], commentCount: 0, choices: [],
+    questions: [], numbers: [], overall: null, scalesGuessed: 0, directionsGuessed: 0, scoresUnchecked: 0, comments: [], commentCount: 0, choices: [],
     identifying: [], doubtful: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
   if (!Array.isArray(rows) || !rows.length) return { ...out, empty: true };
@@ -734,14 +734,17 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
-        worse: !askDirection && col.worse === true, directionGuessed: askDirection, confirmed: Boolean(conf),
+        worse: !askDirection && col.worse === true, directionGuessed: askDirection, confirmed: Boolean(conf), notChecked: col.isNew,
         ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
       // headline average; a guessed scale could make 3 of 5 out of 3 of 10,
       // and a guessed direction could count a bad answer as a good one.
+      // Once the columns are saved, a score added later waits for its check
+      // too (before the first save the board says the numbers are guesses).
       if (col.scaleFrom === 'answers') out.scalesGuessed += 1;
       else if (askDirection) out.directionsGuessed += 1;
+      else if (col.isNew) out.scoresUnchecked += 1;
       // Higher is worse: turned round (low + high - answer) so that every
       // score in the average points the same way.
       else for (const v of ok) scored.push({ v: col.worse ? col.low + col.high - v : v, low: col.low, high: col.high });

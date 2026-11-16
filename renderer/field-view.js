@@ -61,8 +61,9 @@ const noteUnlessFlagged = (f) => (f?.flags?.list?.some((x) => x.what === 'choose
 function checkNote(s) {
   if (!s || s.checked || !s.columns?.length) return '';
   const n = s.newColumns?.length ?? 0;
-  const words = n ? `${n === 1 ? 'A new column is' : `${n} new columns are`} not checked yet.` : 'Columns not checked yet: these numbers are the app’s guesses.';
-  return `<p class="field-note">${words} ${checkLink('Check the columns')}</p>`;
+  const words = n ? `${n === 1 ? 'A new column is' : `${n} new columns are`} not checked yet: ${n === 1 ? 'it is' : 'they are'} not in the average or the score flags`
+    : 'Columns not checked yet: these numbers are the app’s guesses, and score flags wait until they are checked';
+  return `<p class="field-note">${words} <span class="nowrap">· ${checkLink('Check the columns')}</span></p>`;
 }
 
 // The section's body. f: snapshot.field.
@@ -91,7 +92,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
     ? `<div class="field-failed"><p class="form-error" role="status">The last update failed: ${esc(f.error)}</p>${refreshBtn('field-try', 'link-btn')}</div>`
     : '';
   const avg = s.overall ? mean1(s.overall.mean) : null;
-  const guessedOnly = !s.overall && s.scalesGuessed + (s.directionsGuessed ?? 0) > 0;
+  const guessedOnly = !s.overall && s.scalesGuessed + (s.directionsGuessed ?? 0) + (s.scoresUnchecked ?? 0) > 0;
   const newLabel = f.sinceFetchedAt ? `New since <span class="nowrap">${esc(boardDay(f.sinceFetchedAt))}</span>` : 'New since the last update';
   // Each label comes first for screen readers; the number shows above it.
   const stats = `<dl class="stats">
@@ -129,7 +130,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
         <p class="field-q-top"><span class="field-q-name">${label(q)}${q.worse ? ' <span class="tag">Higher is worse</span>' : ''}</span>
           <span class="field-q-n">${m != null ? `${m}<small> / ${q.high}</small>` : DASH}</span></p>
         <div class="meter" role="img" aria-label="${m != null ? `${m} of ${q.high}${counts != null ? `, higher is worse: counts as ${mean1(counts)}` : ''}` : 'no answers'}"><span style="width:${along(counts != null ? { ...q, mean: counts } : q)}%"></span></div>
-        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${counts != null ? `: counts as ${mean1(counts)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
+        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.notChecked ? ' · <span class="field-guess">not checked</span>, not in the average' : q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.notChecked ? '' : q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${counts != null ? `: counts as ${mean1(counts)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
       </li>`;
     }).join('')}</ol>`
     : '<p class="empty">No question with scores was found yet.</p>';
@@ -363,7 +364,10 @@ const flagGlyph = (kind) => `<svg class="ico flag-glyph flag-${kind}" viewBox="0
 // What a flag or a Needs attention line links to (app.js fieldAction).
 export const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
 const SETUP_WORDS = {
-  choose: (n) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice; until then the numbers are the app’s guesses`,
+  // saved: the columns were saved before (the column is new, or asked again);
+  // more: new columns besides, that need no choice but are not checked yet.
+  choose: (n, saved, more = 0) => `${plural(n, 'column')} ${n === 1 ? 'needs' : 'need'} a choice${saved ? `${more ? ` and ${more} more ${more === 1 ? 'is' : 'are'} not checked yet` : ''}: not in the average or the score flags until then`
+    : '; until then the numbers are the app’s guesses, and score flags wait until the columns are checked'}`,
   undated: (n) => `${plural(n, 'answer')} ${n === 1 ? 'has' : 'have'} no readable date and ${n === 1 ? 'isn’t' : 'aren’t'} in the flags`,
   doubt: (n) => `${plural(n, 'checked column')} now ${n === 1 ? 'looks' : 'look'} like emails or phone numbers`,
   share: () => 'The sheet is not shared with the key’s reader address',
@@ -372,7 +376,8 @@ const SETUP_WORDS = {
 };
 
 // One flag in words. days: the window's length.
-export function flagText(flag, { privacy = true, days = 7 } = {}) {
+// saved: the columns were saved at least once.
+export function flagText(flag, { privacy = true, days = 7, saved = false, more = 0 } = {}) {
   const name = privacy || !flag.question ? `Question ${flag.no ?? ''}`.trim() : `“${flag.question}”`;
   const when = `in the last ${days} days`;
   if (flag.kind === 'low') {
@@ -383,7 +388,7 @@ export function flagText(flag, { privacy = true, days = 7 } = {}) {
     return `${name} average ${flag.worse ? 'up' : 'down'} to ${mean1(flag.recentMean)} of ${flag.high} ${when} (was ${mean1(flag.earlierMean)}${flag.worse ? '; higher is worse' : ''})`;
   }
   if (flag.kind === 'comments') return `${plural(flag.count, 'comment')} ${when}`;
-  return (SETUP_WORDS[flag.what] ?? (() => 'Field feedback needs a look'))(flag.count ?? 0);
+  return (SETUP_WORDS[flag.what] ?? (() => 'Field feedback needs a look'))(flag.count ?? 0, saved, more);
 }
 
 // Why the window could not be compared, in words.
@@ -410,30 +415,32 @@ export function flagsHtml(f, { privacy = true, said = [], now = Date.now() } = {
   const fixOf = (why) => (WHY_FIX[why] ? `<p class="field-fix"><button type="button" class="link-btn" data-field="${WHY_FIX[why]}">${FIXES[WHY_FIX[why]]}</button></p>` : '');
   const why = info.why ? `<p class="field-calm">${(WHY_WORDS[info.why] ?? WHY_WORDS.unread)(info, days)}</p>${fixOf(info.why)}` : '';
   const scored = (f.summary?.questions ?? []).some((q) => q.confirmed && !q.guessed && !q.directionGuessed);
-  // Scores never checked raise no score flags until the columns are saved.
-  const wait = !info.why && info.unchecked > 0
-    ? `<p class="field-calm">Score flags start once the columns are checked · <button type="button" class="link-btn inline" data-field="check">${FIXES.check}</button></p>` : '';
+  const saved = (f.summary?.columns ?? []).some((c) => c.confirmed);
+  // The note above the numbers gives way to the choose flag, so the flag
+  // counts the other new columns too.
+  const more = saved ? (f.summary?.columns ?? []).filter((c) => c.isNew && !c.needsChoice).length : 0;
   const noEarlier = !info.why && !info.earlier && scored ? `<p class="field-calm">No answers from before the last ${days} days, so averages are not compared yet.</p>` : '';
   // After a failed update the answers are older than they look.
   const calm = f.error && f.fetchedAt ? `Nothing to flag in the answers read ${age(f.fetchedAt, now)}` : 'Nothing to flag';
-  if (!list.length) return why || wait || `<p class="field-calm">${esc(calm)}</p>${noEarlier}`;
+  // Scores never checked are not compared (the note above the numbers says
+  // so): with none checked, there is nothing to call calm.
+  if (!list.length) return why || (info.unchecked > 0 && !scored ? '' : `<p class="field-calm">${esc(calm)}</p>${noEarlier}`);
   const items = list.map((x) => {
     const fix = x.fix && FIXES[x.fix] ? `<button type="button" class="link-btn" data-field="${x.fix}">${FIXES[x.fix]}</button>` : '';
     const glyph = x.kind === 'falling' && x.worse ? 'rising' : x.kind;
-    return `<li class="field-flag">${flagGlyph(glyph)}<span class="field-flag-text">${esc(flagText(x, { privacy, days }))}</span>${fix}</li>`;
+    return `<li class="field-flag">${flagGlyph(glyph)}<span class="field-flag-text">${esc(flagText(x, { privacy, days, saved, more }))}</span>${fix}</li>`;
   }).join('');
-  return `${why}${wait}<ul class="field-flags">${items}</ul>${noEarlier}`;
+  return `${why}<ul class="field-flags">${items}</ul>${noEarlier}`;
 }
-// The block with its heading. While dates are waiting the note above says
-// so, so the block shows only for set-up flags.
+// The block with its heading, when it has anything to say. While dates are
+// waiting the note above says so, so the block shows only for set-up flags.
 const flagsBlock = (f, privacy, cls, said = [], now = Date.now()) => {
   const info = f?.flags;
   if (!info || !Array.isArray(info.list)) return '';
-  if (info.why === 'waiting') {
-    const left = info.list.filter((x) => !said.includes(x.what));
-    return left.length ? `<h3 class="${cls}">Flags</h3>${flagsHtml({ ...f, flags: { ...info, why: null, earlier: true, list: left } }, { privacy, now })}` : '';
-  }
-  return `<h3 class="${cls}">Flags</h3>${flagsHtml(f, { privacy, said, now })}`;
+  const body = info.why === 'waiting'
+    ? flagsHtml({ ...f, flags: { ...info, why: null, earlier: true, list: info.list.filter((x) => !said.includes(x.what)) } }, { privacy, now })
+    : flagsHtml(f, { privacy, said, now });
+  return body ? `<h3 class="${cls}">Flags</h3>${body}` : '';
 };
 
 const FORM_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6v3H9zM7.5 5H5.5v15.5h13V5h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg>';
