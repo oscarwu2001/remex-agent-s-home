@@ -23,6 +23,7 @@ const {
 } = require('../src/core/rooms');
 const decorCatalogue = require('../src/core/decor');
 const weatherService = require('../src/core/weather');
+const fieldSurvey = require('../src/core/fieldsurvey');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
 const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
@@ -497,6 +498,269 @@ app.whenReady().then(() => {
       return { ok: false, error: reason(err) };
     }
   });
+
+  // ---- field feedback -------------------------------------------------------
+  // The answers to the user's field survey, from a Google Sheet they shared
+  // with their own service account. Off until turned on in Settings; then
+  // fetched from here only, on Monday, Wednesday and Friday at 08:00 (and on
+  // start when a slot was missed), and only from the hosts named in
+  // src/core/fieldsurvey.js. The key file stays where the user keeps it: only
+  // its path is saved, and the key is read for each fetch, never copied or
+  // logged. The last rows are kept in the app's data folder so the board has
+  // them after a restart.
+  const fieldFile = path.join(app.getPath('userData'), 'field-survey.json');
+  const fieldCacheFile = path.join(app.getPath('userData'), 'field-survey-cache.json');
+  const FIELD_RETRY_MS = 30 * 60_000; // after a failed try, the schedule waits this long before trying again
+  const FIELD_CHECK_MS = 10 * 60_000; // how often to look whether a slot has come (a timer can miss one across sleep)
+  const FIELD_TIMEOUT_MS = 20_000;
+  let field = { enabled: false, sheetUrl: '', keyPath: '' };
+  // { rows, fetchedAt, tab, timeZone, since, sinceFetchedAt, lastAttemptAt, lastError: { at, kind, message } }
+  let fieldCache = null;
+  let fieldSummary = null;
+  let fieldKey = { clientEmail: null, error: null }; // read from the key file, for Settings
+  let fieldRun = null; // the fetch under way
+  let fieldGeneration = 0; // bumped when the link or key changes, so a fetch for the old ones is dropped
+  let fieldTimer;
+  let fieldLogged = '';
+  const writeJsonFile = (file, data) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+    fs.renameSync(tmp, file);
+  };
+  try {
+    const saved = JSON.parse(fs.readFileSync(fieldFile, 'utf8'));
+    if (!saved || typeof saved !== 'object') throw new SyntaxError('not an object');
+    field = {
+      enabled: saved.enabled === true,
+      sheetUrl: typeof saved.sheetUrl === 'string' ? saved.sheetUrl : '',
+      keyPath: typeof saved.keyPath === 'string' ? saved.keyPath : '',
+    };
+  } catch (err) {
+    if (err.code !== 'ENOENT') problem('The field feedback settings could not be read; field feedback is off until it is set again in Settings', fieldFile);
+  }
+  try {
+    const saved = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
+    const valid = saved && typeof saved === 'object'
+      && (saved.rows === null || Array.isArray(saved.rows))
+      && (saved.fetchedAt === null || Number.isFinite(saved.fetchedAt));
+    if (!valid) throw new SyntaxError('unexpected shape');
+    fieldCache = saved;
+  } catch (err) {
+    if (err.code !== 'ENOENT') problem('The saved field feedback could not be read; it is fetched again', fieldCacheFile);
+  }
+  function summariseField() {
+    fieldSummary = fieldCache?.rows
+      ? fieldSurvey.summarise(fieldCache.rows, { since: fieldCache.since ?? null, timeZone: fieldCache.timeZone })
+      : null;
+  }
+  function saveFieldCache() {
+    try {
+      writeJsonFile(fieldCacheFile, fieldCache);
+    } catch (err) {
+      problem(`The field feedback could not be saved (${err.code || err.message}); it shows until the app closes`, fieldCacheFile);
+    }
+  }
+  function readFieldKey() {
+    if (!field.keyPath) throw new fieldSurvey.FieldSurveyError('setup', 'Choose the key file in Settings → Field feedback.');
+    let text;
+    try {
+      text = fs.readFileSync(field.keyPath, 'utf8');
+    } catch (err) {
+      throw new fieldSurvey.FieldSurveyError('key', err.code === 'ENOENT'
+        ? 'The key file is no longer where it was chosen; choose it again in Settings.'
+        : `The key file could not be read (${err.code || err.message}).`);
+    }
+    try {
+      return fieldSurvey.readKey(text);
+    } catch (err) {
+      throw new fieldSurvey.FieldSurveyError('key', err.message);
+    }
+  }
+  function checkFieldKey() {
+    if (!field.keyPath) {
+      fieldKey = { clientEmail: null, error: null };
+      return;
+    }
+    try {
+      fieldKey = { clientEmail: readFieldKey().clientEmail, error: null };
+    } catch (err) {
+      fieldKey = { clientEmail: null, error: err.message };
+    }
+  }
+  // Electron's own network stack (the system proxy applies), and only to
+  // the hosts in fieldsurvey.HOSTS: checkUrl refuses anything else.
+  async function askGoogle(url, init) {
+    fieldSurvey.checkUrl(url);
+    return net.fetch(url, { ...init, signal: AbortSignal.timeout(FIELD_TIMEOUT_MS) });
+  }
+  function refreshField() {
+    if (fieldRun) return fieldRun;
+    const generation = fieldGeneration;
+    const started = Date.now();
+    fieldRun = (async () => {
+      try {
+        let link;
+        try {
+          link = fieldSurvey.parseSheetLink(field.sheetUrl);
+        } catch (err) {
+          throw new fieldSurvey.FieldSurveyError('setup', err.message);
+        }
+        const key = readFieldKey();
+        const got = await fieldSurvey.fetchRows({ link, key, fetch: askGoogle, now: started });
+        if (generation !== fieldGeneration) return { ok: false, error: 'The link or key changed while reading; reading again.' };
+        // "New since": answers after the newest one the last different
+        // fetch had, so pressing Refresh twice does not reset the count.
+        const before = fieldSummary?.newest ?? null;
+        const after = fieldSurvey.summarise(got.rows, { timeZone: got.timeZone }).newest;
+        const changed = Boolean(fieldCache?.rows) && after !== before;
+        fieldCache = {
+          rows: got.rows, tab: got.tab, timeZone: got.timeZone ?? null, fetchedAt: Date.now(), lastAttemptAt: started, lastError: null,
+          since: changed ? before : (fieldCache?.since ?? null),
+          sinceFetchedAt: changed ? fieldCache.fetchedAt : (fieldCache?.sinceFetchedAt ?? null),
+        };
+        fieldKey = { clientEmail: key.clientEmail, error: null };
+        saveFieldCache();
+        summariseField();
+        return { ok: true };
+      } catch (err) {
+        if (generation !== fieldGeneration) return { ok: false, error: 'The link or key changed while reading; reading again.' };
+        const known = err instanceof fieldSurvey.FieldSurveyError;
+        const lastError = { at: Date.now(), kind: known ? err.kind : 'bug', message: known ? err.message : 'Something went wrong while reading the sheet; see the system log.' };
+        if (!known) syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
+        if (lastError.kind === 'key') fieldKey = { clientEmail: null, error: lastError.message };
+        // The last good rows stay; the error shows beside them.
+        fieldCache = { rows: null, fetchedAt: null, ...fieldCache, lastAttemptAt: started, lastError };
+        saveFieldCache();
+        return { ok: false, error: lastError.message };
+      }
+    })().finally(() => {
+      fieldRun = null;
+      fieldTick();
+    });
+    return fieldRun;
+  }
+  function fieldTick() {
+    clearTimeout(fieldTimer);
+    if (!field.enabled || !field.sheetUrl || !field.keyPath || fieldRun) return;
+    const { due, next } = fieldSurvey.nextRun(new Date(), fieldCache?.fetchedAt ?? null);
+    const failedLately = fieldCache?.lastError && Date.now() - (fieldCache.lastAttemptAt ?? 0) < FIELD_RETRY_MS;
+    if (due && !failedLately) {
+      refreshField();
+      return;
+    }
+    // Just after the next slot (setTimeout cannot wait more than ~24 days).
+    fieldTimer = setTimeout(fieldTick, Math.min(Math.max(next.getTime() - Date.now() + 1_000, 1_000), 2 ** 31 - 1));
+  }
+  setInterval(fieldTick, FIELD_CHECK_MS);
+  checkFieldKey();
+  summariseField();
+  fieldTick();
+  // A change of sheet starts afresh: the old sheet's rows are not kept.
+  function forgetFieldRows() {
+    fieldCache = null;
+    fieldSummary = null;
+    try {
+      fs.rmSync(fieldCacheFile, { force: true });
+    } catch (err) {
+      problem(`The old sheet's saved answers could not be removed (${err.code || err.message})`, fieldCacheFile);
+    }
+  }
+  ipcMain.handle('home:field-set', (_event, change = {}) => {
+    const next = { ...field };
+    if (change && 'enabled' in change) next.enabled = change.enabled === true;
+    if (change && 'sheetUrl' in change) {
+      const url = String(change.sheetUrl ?? '').trim();
+      if (url) {
+        try {
+          fieldSurvey.parseSheetLink(url);
+        } catch (err) {
+          return { ok: false, error: err.message };
+        }
+      }
+      next.sheetUrl = url;
+    }
+    try {
+      writeJsonFile(fieldFile, next);
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+    const sheetChanged = next.sheetUrl !== field.sheetUrl;
+    field = next;
+    if (sheetChanged) {
+      fieldGeneration += 1;
+      forgetFieldRows();
+    }
+    fieldTick(); // fetches now when on, set up and due
+    return { ok: true };
+  });
+  ipcMain.handle('home:field-choose-key', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Choose the service account key (JSON) that can read the survey sheet',
+      properties: ['openFile'],
+      filters: [{ name: 'Key file (JSON)', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    const file = res.filePaths[0];
+    let key;
+    try {
+      key = fieldSurvey.readKey(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      return { ok: false, error: err.code ? `The file could not be read (${err.code})` : err.message };
+    }
+    const next = { ...field, keyPath: file };
+    try {
+      writeJsonFile(fieldFile, next);
+    } catch (err) {
+      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+    }
+    field = next;
+    fieldGeneration += 1;
+    fieldKey = { clientEmail: key.clientEmail, error: null };
+    // A new key may be the fix for the last error: try again without waiting.
+    if (fieldCache?.lastError) fieldCache = { ...fieldCache, lastAttemptAt: null };
+    fieldTick();
+    return { ok: true, clientEmail: key.clientEmail };
+  });
+  ipcMain.handle('home:field-refresh', () => {
+    if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
+    return refreshField();
+  });
+  function fieldState() {
+    const c = fieldCache ?? {};
+    return {
+      enabled: field.enabled,
+      // A URL and a file name: the board shows them only with privacy off.
+      sheetUrl: field.sheetUrl,
+      keyName: field.keyPath ? path.basename(field.keyPath) : '',
+      clientEmail: fieldKey.clientEmail,
+      keyError: fieldKey.error,
+      busy: Boolean(fieldRun),
+      fetchedAt: c.fetchedAt ?? null,
+      lastAttemptAt: c.lastAttemptAt ?? null,
+      error: c.lastError?.message ?? null,
+      errorKind: c.lastError?.kind ?? null,
+      errorAt: c.lastError?.at ?? null,
+      sinceFetchedAt: c.sinceFetchedAt ?? null,
+      tab: c.tab?.title ?? null,
+      nextAt: field.enabled ? fieldSurvey.nextRun(new Date(), c.fetchedAt ?? null).next.getTime() : null,
+      summary: field.enabled ? fieldSummary : null,
+    };
+  }
+  function fieldProblems() {
+    if (!field.enabled) return [];
+    const out = [];
+    const err = fieldCache?.lastError;
+    if (err) out.push({ label: `Field feedback: ${err.message}`, detail: '', count: 1 });
+    if (fieldKey.error && fieldKey.error !== err?.message) out.push({ label: `Field feedback: ${fieldKey.error}`, detail: '', count: 1 });
+    const unread = fieldSurvey.unreadableText(fieldSummary);
+    if (unread) out.push({ label: `Field feedback: ${unread}`, detail: '', count: 1 });
+    // Each new failure goes to the system log once.
+    const text = out.map((p) => p.label).join(' | ');
+    if (text && text !== fieldLogged) for (const p of out) syslog?.write('errors', 'problem', { what: p.label });
+    fieldLogged = text;
+    return out;
+  }
 
   // Updating: only when the user presses the button, and only for a copy run
   // from a git clone (npm start). It pulls fast-forward only, refuses when
@@ -1105,7 +1369,9 @@ app.whenReady().then(() => {
       })(),
       roster: roster.agents,
       usage: usageSummary,
+      field: fieldState(),
       problems: [
+        ...fieldProblems(),
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
         ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems, ...jobs.problems,
         ...(work.problem ? [{ label: work.problem, detail: '', count: 1 }] : []),
