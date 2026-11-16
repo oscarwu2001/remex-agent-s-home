@@ -1022,7 +1022,8 @@ test('flags say why they could not compare, instead of nothing to flag', () => {
   // Never read.
   assert.deepEqual(F.fieldFlags(), { why: 'unread', earlier: false, list: [] });
   assert.equal(F.fieldFlags({ summary: F.summariseCache(null, []) }).why, 'unread');
-  assert.equal(F.fieldFlags({ summary: F.summarise([]) }).why, 'unread');
+  // Read, but the tab has no rows at all.
+  assert.equal(F.fieldFlags({ summary: F.summarise([]) }).why, 'empty');
   // No timestamp column: nothing to tell recent from earlier.
   const noDates = F.summarise([['Rate it (1-5)', 'Notes'], [4, 'a long answer here'], [1, 'another long answer']], { now: NOW });
   assert.deepEqual(F.fieldFlags({ summary: noDates }).why, 'no-dates');
@@ -1058,8 +1059,8 @@ test('on a scale where higher is worse, once ticked, high answers and a rising a
   const rows = dated(head, [...earlier([2]), [3, 5], [2, 4], [1, 4]]);
   const ticked = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: true }]);
   assert.deepEqual(flagsOf(rows, { roles: ticked }).list.map((f) => [f.kind, f.count ?? null, f.mark ?? null, f.worse]), [['low', 3, 4, true], ['falling', null, null, true]]);
-  // Unticked by the user: a plain scale again, where those are good answers.
-  const plain = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5 }]);
+  // Chosen "Higher is better" by the user: a plain scale again, where those are good answers.
+  const plain = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 1, high: 5, worse: false }]);
   assert.deepEqual(flagsOf(rows, { roles: plain }).list, []);
   // Ticked and saved: kept through checkRoles, the cache and a change of roles.
   assert.equal(ticked[1].worse, true);
@@ -1078,7 +1079,7 @@ test('a guessed direction is unsure: out of the flags and the average until the 
   assert.equal(s.overall, null);
   assert.deepEqual(F.fieldFlags({ summary: s }).list.map((f) => [f.kind, f.what ?? null]), [['setup', 'choose']]);
   // Chosen "higher is better": the fall from 9 to 2 is flagged.
-  const better = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10 }]);
+  const better = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10, worse: false }]);
   const chosen = F.summarise(rows, { now: NOW, roles: better });
   assert.deepEqual(F.fieldFlags({ summary: chosen }).list.map((f) => [f.kind, f.worse]), [['low', false], ['falling', false]]);
   assert.ok(chosen.overall);
@@ -1109,7 +1110,7 @@ test('a saved "higher is worse" that is neither true nor false is refused, not d
   const role = (worse) => [{ header: 'Q', index: 0, role: 'score', low: 1, high: 5, worse }];
   assert.throws(() => F.checkRoles(role('yes')), /could not be read/);
   assert.throws(() => F.checkRoles(role(null)), /could not be read/);
-  assert.equal(F.checkRoles(role(false))[0].worse, undefined);
+  assert.equal(F.checkRoles(role(false))[0].worse, false);
   assert.equal(F.checkRoles([{ header: 'Q', index: 0, role: 'score', low: 1, high: 5 }])[0].worse, undefined);
 });
 
@@ -1147,4 +1148,48 @@ test('Needs attention lines for field feedback carry the fix the board links to'
   assert.deepEqual(fixes({ cache: { lastError: { kind: 'share', message: 'Share the sheet…' } } }), ['settings']);
   assert.deepEqual(fixes({ cache: { lastError: { kind: 'network', message: 'No network' } } }), ['refresh']);
   assert.deepEqual(fixes({ keyError: 'The key file…' }), ['settings']);
+});
+
+test('a saved score with no direction asks again when its title speaks of pain or difficulty; other titles stay higher is better', () => {
+  const head = ['Pain relief achieved (0-10)', 'Ease (1-5)'];
+  // Pain rose from 1–2 to 9, 9, 8; saved before the direction was asked.
+  const rows = dated(head, [...earlier([1, 4]), ...earlier([2, 4], 4), [3, 9, 4], [2, 9, 4], [1, 8, 4]]);
+  const old = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10 }, { header: head[1], index: 2, role: 'score', low: 1, high: 5 }]);
+  const s = F.summarise(rows, { now: NOW, roles: old });
+  assert.deepEqual([col(s, head[0]).needsChoice, col(s, head[0]).askDirection, s.questions[0].directionGuessed], [true, true, true]);
+  assert.deepEqual([col(s, head[1]).needsChoice, col(s, head[1]).askDirection ?? false, s.questions[1].directionGuessed], [false, false, false]);
+  // Out of the flags and the average until chosen; the choice is flagged instead.
+  assert.deepEqual(F.fieldFlags({ summary: s }).list.map((f) => [f.kind, f.what ?? null, f.count ?? null]), [['setup', 'choose', 1]]);
+  assert.deepEqual([s.overall.n, s.directionsGuessed], [s.questions[1].n, 1]);
+  // Chosen either way, it counts: higher is worse flags the rise.
+  const worse = old.map((r) => (r.index === 1 ? { ...r, worse: true } : r));
+  assert.deepEqual(F.fieldFlags({ summary: F.summarise(rows, { now: NOW, roles: worse }) }).list.map((f) => [f.kind, f.worse]), [['low', true], ['falling', true]]);
+  // A save that leaves the direction out is refused, as any unchosen row.
+  const settings = { enabled: true, sheetUrl: SETTINGS.sheetUrl, keyPath: 'k.json', columns: [] };
+  assert.match(F.changeSettings(settings, { columns: old }, { summary: s }).error, /1 column still needs a choice/);
+});
+
+test('"Higher is better" (worse: false) survives a save, a reload and a change of roles', () => {
+  const head = ['Pain relief achieved (0-10)'];
+  const rows = dated(head, [...earlier([9]), [3, 2], [2, 2], [1, 2]]);
+  const unsure = F.summarise(rows, { now: NOW });
+  const chosen = [{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: head[0], index: 1, role: 'score', low: 0, high: 10, worse: false }];
+  const saved = F.changeSettings({ enabled: true, sheetUrl: SETTINGS.sheetUrl, keyPath: 'k.json', columns: [] }, { columns: chosen }, { summary: unsure });
+  assert.equal(saved.settings.columns[1].worse, false);
+  // The settings file read back, as main.js does.
+  const reloaded = F.checkRoles(JSON.parse(JSON.stringify(saved.settings)).columns);
+  assert.equal(reloaded[1].worse, false);
+  const settled = (s) => [col(s, head[0]).worse, col(s, head[0]).needsChoice, col(s, head[0]).askDirection ?? false, s.questions[0].directionGuessed];
+  assert.deepEqual(settled(F.summarise(rows, { now: NOW, roles: reloaded })), [false, false, false, false]);
+  const cache = F.afterFetch(null, got(rows), { now: NOW, started: NOW, link: LINK, roles: reloaded });
+  assert.deepEqual(settled(F.summariseCache(cache, reloaded, { now: NOW })), [false, false, false, false]);
+  assert.deepEqual(settled(F.summariseCache(F.reroleCache(cache, reloaded), reloaded, { now: NOW })), [false, false, false, false]);
+  // And the fall from 9 to 2 is flagged.
+  assert.deepEqual(F.fieldFlags({ summary: F.summariseCache(cache, reloaded, { now: NOW }) }).list.map((f) => f.kind), ['low', 'falling']);
+});
+
+test('a tab with no rows at all says the sheet has no answers yet', () => {
+  const blank = F.summariseCache(F.afterFetch(null, got([]), { now: NOW, started: NOW, link: LINK }), [], { now: NOW });
+  assert.equal(blank.empty, true);
+  assert.equal(F.fieldFlags({ summary: blank }).why, 'empty');
 });

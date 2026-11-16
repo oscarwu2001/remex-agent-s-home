@@ -300,8 +300,9 @@ const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
 // A score whose title speaks of difficulty, effort, pain or problems: higher
 // is worse. Only a guess ("Pain relief achieved" is the other way round),
-// so it is low confidence: shown ticked in Check the columns, and the
-// column stays out of the flags and the average until the user chooses.
+// so it is low confidence: such a score's direction is asked in Check the
+// columns (askDirection), and the column stays out of the flags and the
+// average until the user chooses, even a score saved before it was asked.
 const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|fatigue|tired)\b|困難|困难|難|难|麻煩|麻烦|痛|疼|不適|不适/i;
 const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
@@ -544,7 +545,9 @@ function checkRoles(list) {
       if (!((low === 0 || low === 1) && Number.isInteger(high) && high > low && high <= 10)) {
         throw new RangeError('A score’s scale starts at 0 or 1 and ends above it, at 10 at most.');
       }
-      Object.assign(out, { low, high }, r.worse === true ? { worse: true } : {});
+      // The direction as chosen, either way; missing only in roles saved
+      // before it was asked.
+      Object.assign(out, { low, high }, typeof r.worse === 'boolean' ? { worse: r.worse } : {});
     }
     return out;
   });
@@ -554,7 +557,8 @@ function checkRoles(list) {
 // none (a low-confidence row the user has not chosen yet). Save is refused
 // while any is missing.
 function checkSubmission(summary, roles) {
-  const given = new Set((Array.isArray(roles) ? roles : []).filter(Boolean).map((r) => `${r.index}\u0000${r.header}`));
+  const settled = (r) => r && !(r.role === 'score' && typeof r.worse !== 'boolean' && WORSE.test(String(r.header)));
+  const given = new Set((Array.isArray(roles) ? roles : []).filter(settled).map((r) => `${r.index}\u0000${r.header}`));
   return { missing: (summary?.columns ?? []).filter((c) => !given.has(`${c.index}\u0000${c.header}`)).length };
 }
 
@@ -699,10 +703,14 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
     const conf = saved[i];
     let role = conf ? conf.role : sug.role;
     if (role === 'timestamp' && i !== tsCol) role = 'ignore'; // one timestamp only
+    // The title speaks of pain or difficulty and the user has not said which
+    // end is better: asked for any score here, a confirmed one included.
+    const askDirection = WORSE.test(header) && !(conf?.role === 'score' && typeof conf.worse === 'boolean');
     const col = {
       index: i, header, role, confirmed: Boolean(conf), isNew: roles.length > 0 && !conf, suggested: sug, answers: columns[i].length,
       // Not sure enough to save as it stands: the user chooses.
-      needsChoice: !conf && sug.confidence === LOW,
+      needsChoice: (!conf && sug.confidence === LOW) || (role === 'score' && askDirection),
+      ...(askDirection ? { askDirection: true } : {}),
       // Checked as answers to show, but they now read as emails or phone
       // numbers: kept off the board, and flagged, until checked again.
       ...(conf && SHOWN.has(role) && sug.role === 'identifying' && sug.reason === 'answers' ? { doubt: true } : {}),
@@ -726,14 +734,14 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
       out.questions.push({
         question: header, index: i, n: ok.length, mean: ok.length ? mean(ok) : null,
         low: col.low, high: col.high, scaleFrom: col.scaleFrom, guessed: col.scaleFrom === 'answers', unreadable,
-        worse: col.worse === true, directionGuessed: !conf && sug.worse === true,
+        worse: !askDirection && col.worse === true, directionGuessed: askDirection,
         ...(windowFrom != null ? { window: windowOf(i, col.low, col.high, col.worse === true) } : {}),
       });
       // Only scales the user confirmed or the question states count in the
       // headline average; a guessed scale could make 3 of 5 out of 3 of 10,
       // and a guessed direction could count a bad answer as a good one.
       if (col.scaleFrom === 'answers') out.scalesGuessed += 1;
-      else if (!conf && sug.worse === true) out.directionsGuessed += 1;
+      else if (askDirection) out.directionsGuessed += 1;
       // Higher is worse: turned round (low + high - answer) so that every
       // score in the average points the same way.
       else for (const v of ok) scored.push({ v: col.worse ? col.low + col.high - v : v, low: col.low, high: col.high });
@@ -1025,8 +1033,8 @@ const FALL_MIN_NEW = 3;
 // could be compared.
 function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) {
   const out = [];
-  const s = summary && !summary.empty ? summary : null;
-  const why = !s ? 'unread' : !s.responses ? 'empty' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates'
+  const s = summary ?? null;
+  const why = !s ? 'unread' : s.empty || !s.responses ? 'empty' : s.datesWaiting ? 'waiting' : !s.timestampColumn ? 'no-dates'
     : !s.window ? 'unread' : !s.window.answers ? 'quiet' : null;
   let earlier = false;
   if (!why) {
