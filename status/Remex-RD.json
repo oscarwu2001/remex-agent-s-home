@@ -3,8 +3,8 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794804301758,
- "every": 900000,
+ "at": 1794805201777,
+ "every": 3600000,
  "sessions": [
   {
    "project": "spine-sim",
@@ -16,15 +16,15 @@
   {
    "project": "spine-sim",
    "source": "code",
-   "status": "idle",
-   "lastAt": 1794802912776.813,
+   "status": "working",
+   "lastAt": 1794804977422.2344,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
-   "status": "idle",
-   "lastAt": 1794803945604.1863,
+   "status": "working",
+   "lastAt": 1794804932268.3232,
    "agents": []
   }
  ],
@@ -73,26 +73,19 @@
   }
  ],
  "jobs": [],
- "work": [
-  {
-   "name": "compare.py",
-   "project": "scripts",
-   "on": "cpu",
-   "startedAt": 1794803945598
-  }
- ],
+ "work": [],
  "machine": {
   "gpus": [
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 790,
+    "memUsed": 773,
     "memTotal": 16380,
-    "temp": 39
+    "temp": 37
    }
   ],
-  "cpu": 12,
-  "memUsed": 19350,
+  "cpu": 6,
+  "memUsed": 15964,
   "memTotal": 48916
  }
 }
