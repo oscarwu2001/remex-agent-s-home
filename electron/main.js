@@ -609,9 +609,7 @@ app.whenReady().then(() => {
     try {
       text = fs.readFileSync(field.keyPath, 'utf8');
     } catch (err) {
-      throw new fieldSurvey.FieldSurveyError('key', err.code === 'ENOENT'
-        ? 'The key file is no longer where it was chosen; choose it again in Settings.'
-        : `The key file could not be read (${err.code || err.message}).`);
+      throw fieldSurvey.keyFileError(err); // gone: wait for the user; busy or locked: try again later
     }
     try {
       return fieldSurvey.readKey(text);
@@ -659,7 +657,9 @@ app.whenReady().then(() => {
           syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
         }
         fieldCache = fieldSurvey.afterFailure(fieldCache, err, { now: Date.now(), started, link });
-        if (fieldCache.lastError.kind === 'key') fieldKey = { clientEmail: null, error: fieldCache.lastError.message };
+        const kind = fieldCache.lastError.kind;
+        // A key file that could not be read just now keeps the address it had.
+        if (kind === 'key' || kind === 'keyfile') fieldKey = { clientEmail: kind === 'keyfile' ? fieldKey.clientEmail : null, error: fieldCache.lastError.message };
       }
       saveFieldCache();
       summariseField();
@@ -685,7 +685,9 @@ app.whenReady().then(() => {
   summariseField();
   fieldTick();
   ipcMain.handle('home:field-set', (_event, change = {}) => {
-    const res = fieldSurvey.changeSettings(field, change);
+    // Columns are checked against the sheet as last read: a column with no
+    // choice refuses the save.
+    const res = fieldSurvey.changeSettings(field, change, { summary: fieldSummary });
     if (res.error) return { ok: false, error: res.error };
     try {
       writeJsonFile(fieldFile, res.settings);
@@ -746,6 +748,13 @@ app.whenReady().then(() => {
     clipboard.writeText(fieldKey.clientEmail);
     return { ok: true };
   });
+  // When the next read happens, by the same plan the timer follows (a retry
+  // after a passing trouble comes sooner than the next Mon/Wed/Fri 08:00).
+  function nextFieldRead() {
+    const now = Date.now();
+    const plan = fieldSurvey.planFetch({ now, settings: field, cache: fieldCache, busy: Boolean(fieldRun) });
+    return plan.fetch ? now : plan.wakeAt;
+  }
   function fieldState() {
     const c = fieldCache ?? {};
     return {
@@ -764,7 +773,7 @@ app.whenReady().then(() => {
       errorAt: c.lastError?.at ?? null,
       sinceFetchedAt: c.sinceFetchedAt ?? null,
       tab: c.tab?.title ?? null,
-      nextAt: field.enabled ? fieldSurvey.nextRun(new Date(), c.fetchedAt ?? null).next.getTime() : null,
+      nextAt: nextFieldRead(),
       summary: field.enabled ? fieldSummary : null,
       summaryError: field.enabled ? fieldSummaryError : null,
     };

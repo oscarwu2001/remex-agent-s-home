@@ -797,3 +797,17 @@ test('the app was off over a slot: catch up as soon as it starts', () => {
   assert.equal(r.next.getTime(), local(2026, 11, 20, 8).getTime());
   assert.equal(F.nextRun(local(2026, 11, 19, 10), null).due, true);
 });
+
+test('saving the columns is refused while any column of the sheet has no choice', () => {
+  const s = F.summarise(form(['How satisfied are you overall?', 'Ease (1-5)'], [[6, 4], [7, 5], [5, 3]]));
+  const cur = { enabled: true, sheetUrl: 'u', keyPath: 'k', columns: [] };
+  const sure = [{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Ease (1-5)', index: 2, role: 'score', low: 1, high: 5 }];
+  const refused = F.changeSettings(cur, { columns: sure }, { summary: s });
+  assert.match(refused.error, /^Not saved: 1 column still needs a choice/);
+  assert.equal(refused.settings, undefined);
+  const all = [...sure, { header: 'How satisfied are you overall?', index: 1, role: 'score', low: 1, high: 7 }];
+  assert.equal(F.changeSettings(cur, { columns: all }, { summary: s }).settings.columns.length, 3);
+  // Nothing read yet: there is nothing to check the columns against.
+  assert.match(F.changeSettings(cur, { columns: all }, { summary: null }).error, /not been read/);
+  assert.match(F.changeSettings(cur, { columns: [null] }, { summary: s }).error, /could not be read/);
+});

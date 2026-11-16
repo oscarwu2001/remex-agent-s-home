@@ -531,7 +531,7 @@ function checkRoles(list) {
 // none (a low-confidence row the user has not chosen yet). Save is refused
 // while any is missing.
 function checkSubmission(summary, roles) {
-  const given = new Set((Array.isArray(roles) ? roles : []).map((r) => `${r.index}\u0000${r.header}`));
+  const given = new Set((Array.isArray(roles) ? roles : []).filter(Boolean).map((r) => `${r.index}\u0000${r.header}`));
   return { missing: (summary?.columns ?? []).filter((c) => !given.has(`${c.index}\u0000${c.header}`)).length };
 }
 
@@ -856,8 +856,10 @@ function validCache(raw, link) {
 // A change from Settings -> { settings, sheetChanged } or { error }. An
 // empty link keeps the saved one: Save with the field left blank (as it is
 // when privacy mode hides the saved link) must not wipe the link and the
-// answers read.
-function changeSettings(current, change) {
+// answers read. Columns are saved only all at once, against the sheet as
+// last read (summary): one the user has not chosen refuses the save, so a
+// guess is never stored as the user's choice.
+function changeSettings(current, change, { summary = null } = {}) {
   const next = { enabled: current?.enabled === true, sheetUrl: current?.sheetUrl ?? '', keyPath: current?.keyPath ?? '', columns: current?.columns ?? [] };
   if (change && 'enabled' in change) next.enabled = change.enabled === true;
   if (change && 'sheetUrl' in change) {
@@ -887,6 +889,9 @@ function changeSettings(current, change) {
     } catch (err) {
       return { error: err.message };
     }
+    if (!summary?.columns?.length) return { error: 'Not saved: the sheet has not been read yet, so there are no columns to check.' };
+    const { missing } = checkSubmission(summary, next.columns);
+    if (missing) return { error: `Not saved: ${missing} ${missing === 1 ? 'column still needs' : 'columns still need'} a choice.` };
   }
   const sheetChanged = next.sheetUrl !== (current?.sheetUrl ?? '');
   // Another sheet is another form: its columns are checked afresh. Turned
