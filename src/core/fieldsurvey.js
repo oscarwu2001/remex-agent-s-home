@@ -292,12 +292,9 @@ const PERSON = "(?:your|my|full|first|last|given|family|sur|respondent'?s?|user|
 const ID_LABEL = new RegExp(`^(?:${PERSON} )?(?:name|e-?mail(?: address)?|phone(?: number| no)?|mobile(?: number| phone| no)?|cell ?phone|telephone(?: number)?|tel|contact(?: details| info| number)?|address|user ?name|line id|employee (?:id|number|no)|id number)$`, 'i');
 const PERSON_ROLE = /^(?:surgeon|doctor|physician|nurse|respondent|reporter|interviewer|filled in by|submitted by)$/i;
 const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|number|#)|medical records?)\b|\b(?:case|chart) ?#/i;
-const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
+const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|聯繫方式|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
 const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者)(?:姓名)?$/;
 const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
-// A header that speaks of a person: only then can name-shaped answers be
-// names. Without it, "Easy Setup" or "方便" are just short answers.
-const NAME_HINT = /\b(?:who|whom|names?|nombres?|nom|by|persons?|people|staff|respondents?|reporters?|surgeons?|doctors?|physicians?|nurses?|operators?|testers?|interviewers?|contact)\b|填寫|填写|填表|填答|姓名|名字|名前|氏名|醫師|医师|醫生|医生|護理|护理|人員|人员|操作者|受訪|受访/i;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
@@ -305,6 +302,9 @@ const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[\d\s().-]{8,}$/;
+// A whole number of eight digits or more: a phone number the sheet stored
+// as a number (its leading 0 or + dropped), or an ID number.
+const LONG_NUMBER = /^\+?\d{8,}$/;
 const NAME_WORD = /^(?:\p{Lu}[\p{Ll}'’-]+|\p{Lu}\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Prof\.?)$/u;
 // Common family names, for telling a two-to-four character Chinese name
 // from a short comment ("王小明" from "很好").
@@ -413,8 +413,8 @@ function looksPersonal(v) {
   return typeof v === 'string' && PHONE.test(s) && (s.match(/\d/g) ?? []).length >= 8 && !Number.isFinite(dateOf(s));
 }
 
-// "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape. Only ever
-// asked under a header that speaks of a person (NAME_HINT).
+// "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape. "Easy
+// Setup" has the same shape, so a column of them is only ever a guess.
 function looksLikeName(v) {
   if (typeof v !== 'string') return false;
   const s = v.trim();
@@ -443,10 +443,14 @@ function guessedScale(ints) {
 }
 
 // The suggested role of one column, from its header and its answers, and
-// how sure it is. 'low': a guessed scale, names by their shape, a title word
-// alone, a 0 with no scale: the user must choose before the columns save,
-// and a low-confidence identifying column's answers stay in the cache
-// (kept off the board) until then.
+// how sure it is. 'high' only for a clear label ("Email address", "Patient
+// ID", "電話") or answers that read as emails or phone numbers. 'low': a
+// guessed scale, a 0 with no scale, a patient or case word in a longer
+// title, and answers shaped like personal data with no label to say so
+// (names, long whole numbers). The user chooses each low one before the
+// columns save; an identifying guess, sure or not, keeps its answers off
+// the board and out of the cache, and a wrong one, once changed, costs one
+// update: the answers come back at the next read.
 const HIGH = 'high';
 const LOW = 'low';
 function suggest(header, values, untitled) {
@@ -463,11 +467,11 @@ function suggest(header, values, untitled) {
   const answers = values.map(text);
   const counts = new Map();
   for (const a of answers) counts.set(a, (counts.get(a) ?? 0) + 1);
-  // Names are mostly different from one answer to the next; Title Case
-  // answers that repeat are choices.
-  if (NAME_HINT.test(header) && share(values, looksLikeName) >= 0.7 && (values.length < 4 || counts.size >= values.length / 2)) {
-    return { role: 'identifying', reason: 'names', confidence: LOW };
-  }
+  // Personal data is mostly different from one answer to the next; Title
+  // Case answers or numbers that repeat are choices or counts.
+  const distinct = values.length < 4 || counts.size >= values.length / 2;
+  if (distinct && share(values, looksLikeName) >= 0.7) return { role: 'identifying', reason: 'names', confidence: LOW };
+  if (distinct && share(answers, (a) => LONG_NUMBER.test(a)) >= 0.7) return { role: 'identifying', reason: 'numbers', confidence: LOW };
   if (scoreLike) {
     const stated = statedScale(header);
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
@@ -572,8 +576,9 @@ const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 // rows: the tab, row 0 the headers. since: count answers after this time.
 // comments: how many of the newest to keep. timeZone: the sheet's. roles:
 // the user's confirmed column roles. redacted: columns whose answers the
-// cache does not keep (identifying when they were read).
-function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [] } = {}) {
+// cache does not keep (identifying when they were read); guessed: those of
+// them that were only a guess, so the user is still asked.
+function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [], redacted = [], guessed = [] } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
@@ -581,7 +586,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
     checked: false, needsChoice: 0, newColumns: [], columns: [],
     questions: [], numbers: [], overall: null, scalesGuessed: 0, comments: [], commentCount: 0, choices: [],
-    identifying: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
+    identifying: [], doubtful: [], skipped: [], unreadable: { scores: 0, numbers: 0, timestamps: 0 }, ambiguousDates: 0,
   };
   if (!Array.isArray(rows) || !rows.length) return { ...out, empty: true };
   const head = Array.isArray(rows[0]) ? rows[0] : [];
@@ -597,10 +602,11 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   }
   out.responses = data.length;
   const hidden = new Set(redacted);
+  const unsure = new Set(guessed);
   // A hidden column's answers are not here to look at.
   const columns = headers.map((_, i) => (hidden.has(i) ? [] : data.map((r) => r[i]).filter((v) => !isEmpty(v))));
   const saved = matchRoles(headers, roles);
-  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden', confidence: HIGH } : suggest(h, columns[i], untitled[i])));
+  const suggested = headers.map((h, i) => (hidden.has(i) ? { role: 'identifying', reason: 'hidden', confidence: unsure.has(i) ? LOW : HIGH } : suggest(h, columns[i], untitled[i])));
   const titles = new Map();
   for (const h of headers) titles.set(h, (titles.get(h) ?? 0) + 1);
 
@@ -639,6 +645,9 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
       index: i, header, role, confirmed: Boolean(conf), isNew: roles.length > 0 && !conf, suggested: sug, answers: columns[i].length,
       // Not sure enough to save as it stands: the user chooses.
       needsChoice: !conf && sug.confidence === LOW,
+      // Checked as answers to show, but they now read as emails or phone
+      // numbers: kept off the board, and flagged, until checked again.
+      ...(conf && (role === 'comment' || role === 'choice') && sug.role === 'identifying' && sug.reason === 'answers' ? { doubt: true } : {}),
       ...(untitled[i] ? { untitled: true } : {}), ...(hidden.has(i) ? { hidden: true } : {}), ...(titles.get(header) > 1 ? { repeated: true } : {}),
     };
     if (role === 'score') {
@@ -650,6 +659,7 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
     out.columns.push(col);
     if (col.isNew) out.newColumns.push(header);
     if (role === 'identifying') out.identifying.push(header);
+    else if (col.doubt) out.doubtful.push(header);
     else if (role === 'ignore') out.skipped.push({ question: header, reason: conf ? 'ignored' : (sug.reason ?? 'ignored') });
     else if (role === 'score') {
       const ok = columns[i].map(intOf).filter((n) => Number.isInteger(n) && n >= col.low && n <= col.high);
@@ -749,7 +759,8 @@ function nextRun(now, lastOk) {
 // the decisions are here, where they are tested.
 
 const RETRY_MS = 30 * 60_000;
-const CACHE_VERSION = 2;
+// 3: an identifying guess keeps no answers either (2 kept them, off the board).
+const CACHE_VERSION = 3;
 
 const sameSheet = (cache, link) => Boolean(cache && link && cache.spreadsheetId === link.spreadsheetId && (cache.gid ?? null) === (link.gid ?? null));
 
@@ -776,10 +787,11 @@ function planFetch({ now, settings, cache, busy = false }) {
 // A good read -> the cache to keep. Identifying columns' answers are not
 // kept. "New since" counts answers after the newest one of the last read
 // that brought something new, so pressing Refresh twice does not reset it.
-// The columns whose answers the cache drops: identifying ones the user
-// confirmed or the app is sure of. A low-confidence guess keeps its answers
-// (the board leaves them out) until the user chooses.
-const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying' && (c.confirmed || c.suggested.confidence === HIGH)).map((c) => c.index);
+// The columns whose answers the cache drops: every identifying one, sure,
+// confirmed or only guessed; and of those, the guesses the user has not
+// chosen for yet, which the cache names so the row still asks.
+const toRedact = (summary) => summary.columns.filter((c) => c.role === 'identifying').map((c) => c.index);
+const guessesIn = (summary, hide) => hide.filter((i) => summary.columns[i] && !summary.columns[i].confirmed && summary.columns[i].suggested.confidence === LOW);
 
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const first = summarise(got.rows, { timeZone: got.timeZone, roles });
@@ -790,7 +802,7 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
   return {
     version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null,
     tab: got.tab ?? null, timeZone: got.timeZone ?? null,
-    rows: redactRows(got.rows, hide), redacted: hide,
+    rows: redactRows(got.rows, hide), redacted: hide, guessed: guessesIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
     since: changed ? before : same ? prev.since ?? null : null,
     sinceFetchedAt: changed ? prev.fetchedAt : same ? prev.sinceFetchedAt ?? null : null,
@@ -807,22 +819,23 @@ function afterFailure(prev, err, { now, started, link }) {
     ...(known && err.detail ? { detail: err.detail } : {}),
   };
   const base = sameSheet(prev, link) ? prev
-    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], fetchedAt: null };
+    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], guessed: [], fetchedAt: null };
   return { ...base, lastAttemptAt: started, lastError };
 }
 
 // After the user changes the roles: a column now identifying loses its
-// answers from the cache too.
+// answers from the cache too. A column chosen otherwise stays without them
+// until the next read brings them back.
 function reroleCache(cache, roles) {
   if (!cache?.rows) return cache;
-  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [] });
+  const s = summarise(cache.rows, { timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [] });
   const hide = [...new Set([...(cache.redacted ?? []), ...toRedact(s)])].sort((a, b) => a - b);
-  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide };
+  return { ...cache, rows: redactRows(cache.rows, hide), redacted: hide, guessed: guessesIn(s, hide) };
 }
 
 function summariseCache(cache, roles) {
   if (!cache?.rows) return null;
-  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [] });
+  return summarise(cache.rows, { since: cache.since ?? null, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], guessed: cache.guessed ?? [] });
 }
 
 // The cache file as read -> { cache, problem }. A cache that is not this
@@ -842,6 +855,7 @@ function validCache(raw, link) {
     && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId)
     && (raw.gid == null || Number.isInteger(raw.gid))
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
+    && (raw.guessed == null || (Array.isArray(raw.guessed) && raw.guessed.every((i) => Number.isInteger(i) && i >= 0)))
     && (e == null || (typeof e === 'object' && typeof e.kind === 'string' && typeof e.message === 'string' && num(e.at) && str(e.detail)))
     && (raw.tab == null || (typeof raw.tab === 'object' && typeof raw.tab.title === 'string'))
     && !(raw.rows && raw.fetchedAt == null);
@@ -861,6 +875,7 @@ function validCache(raw, link) {
 // guess is never stored as the user's choice.
 function changeSettings(current, change, { summary = null } = {}) {
   const next = { enabled: current?.enabled === true, sheetUrl: current?.sheetUrl ?? '', keyPath: current?.keyPath ?? '', columns: current?.columns ?? [] };
+  let note;
   if (change && 'enabled' in change) next.enabled = change.enabled === true;
   if (change && 'sheetUrl' in change) {
     const url = String(change.sheetUrl ?? '').trim();
@@ -881,6 +896,7 @@ function changeSettings(current, change, { summary = null } = {}) {
       // the saved link, which names the tab, stays, and so do the columns.
       const same = saved && saved.spreadsheetId === link.spreadsheetId && (link.gid == null || link.gid === saved.gid);
       if (!same) next.sheetUrl = url;
+      else if (link.gid == null && saved.gid != null) note = 'Same sheet: kept the tab you had.';
     }
   }
   if (change && 'columns' in change) {
@@ -897,7 +913,7 @@ function changeSettings(current, change, { summary = null } = {}) {
   // Another sheet is another form: its columns are checked afresh. Turned
   // off, nothing is kept, the question titles in the roles included.
   if ((sheetChanged || (current?.enabled && !next.enabled)) && !(change && 'columns' in change)) next.columns = [];
-  return { settings: next, sheetChanged };
+  return { settings: next, sheetChanged, ...(note ? { note } : {}) };
 }
 
 // Everything that needs the user's attention, as { label, detail }: the
@@ -915,6 +931,11 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     if (unread) add(unread);
     const n = summary.newColumns?.length ?? 0;
     if (n) add(`${n === 1 ? 'a new column' : `${n} new columns`} in the sheet, not checked yet (Settings → Field feedback → Check the columns)`);
+    // Privacy mode keeps the step read-only, so this is the reminder.
+    const unsure = summary.needsChoice ?? 0;
+    if (unsure) add(`${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice (Settings → Field feedback → Check the columns, with privacy mode off)`);
+    const doubt = summary.doubtful?.length ?? 0;
+    if (doubt) add(`${doubt === 1 ? '1 column' : `${doubt} columns`} checked as comments or choices now look like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} kept off the board until checked again (Settings → Field feedback → Check the columns)`);
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);

@@ -599,6 +599,9 @@ test('a saved cache is used only when it is whole and this sheet\'s', () => {
   assert.match(F.validCache([], LINK).problem, /could not be read/);
   // The first version kept names and emails: set aside, quietly, to be read again.
   assert.deepEqual(F.validCache({ rows: [], fetchedAt: 1 }, LINK), { cache: null, problem: null });
+  // Version 2 kept the answers of columns only guessed to be identifying: set aside too.
+  assert.deepEqual(F.validCache({ ...good, version: 2 }, LINK), { cache: null, problem: null });
+  assert.match(F.validCache({ ...good, guessed: ['x'] }, LINK).problem, /could not be read/);
 });
 
 test('Settings changes: an empty link keeps the saved one; a bad link or roles are refused', () => {
@@ -687,22 +690,39 @@ test('a guessed scale is a low-confidence suggestion that needs the user\'s choi
   assert.deepEqual(after.questions.map((q) => [q.scaleFrom, q.high]), [['confirmed', 10], ['confirmed', 5]]);
 });
 
-test('short comments in Chinese and Title Case phrases stay comments', () => {
+test('short answers shaped like names are at most an unsure guess, never surely identifying', () => {
+  const cases = [
+    ['使用心得', ['方便', '高效', '周到', '很好', '方便快速']],
+    ['What did you like most?', ['Tracking Accuracy', 'Screen Size', 'Easy Setup', 'Fast Boot', 'the holder']],
+    ['Best part', ['Tracking Accuracy', 'Screen Size', 'Easy Setup', 'Fast Boot', 'Good Support']],
+  ];
+  for (const [h, vals] of cases) {
+    const c = col(F.summarise(form([h], vals.map((v) => [v]))), h);
+    assert.ok(c.role === 'comment' || (c.role === 'identifying' && c.suggested.confidence === 'low' && c.needsChoice), `${h}: ${c.role}, ${c.suggested.confidence}`);
+  }
+  // Two of five start with a common family name: a comment, as it reads.
   const zh = F.summarise(form(['使用心得'], [['方便'], ['高效'], ['周到'], ['很好'], ['方便快速']]));
-  assert.equal(roleOf(zh, '使用心得'), 'comment');
-  assert.equal(zh.commentCount, 5);
-  const en = F.summarise(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['the holder']]));
-  assert.equal(roleOf(en, 'What did you like most?'), 'comment');
-  const all = F.summarise(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]));
-  assert.equal(roleOf(all, 'Best part'), 'comment');
+  assert.deepEqual([roleOf(zh, '使用心得'), zh.commentCount], ['comment', 5]);
 });
 
-test('names found by their shape need a header that speaks of a person, and are only a low-confidence guess', () => {
+test('names found by their shape are an unsure guess under any title, and their answers are not kept', () => {
   const names = [['Ann Lee'], ['Bo Chan'], ['Cy Wu'], ['Di Ho'], ['Ed Ng']];
-  const s = F.summarise(form(['Who filled this in?'], names));
-  assert.deepEqual([roleOf(s, 'Who filled this in?'), col(s, 'Who filled this in?').suggested.confidence], ['identifying', 'low']);
-  assert.equal(roleOf(F.summarise(form(['Notes'], names)), 'Notes'), 'comment');
-  assert.equal(roleOf(F.summarise(form(['Nombre'], names)), 'Nombre'), 'identifying');
+  for (const h of ['Who filled this in?', 'Notes', 'Nombre']) {
+    const s = F.summarise(form([h], names));
+    assert.deepEqual([roleOf(s, h), col(s, h).suggested.confidence, col(s, h).needsChoice], ['identifying', 'low', true], h);
+  }
+  // Contact people and those in charge, in Chinese: no title word needed.
+  const zhNames = [['王小明'], ['陳美玲'], ['林志豪'], ['黃淑芬']];
+  for (const h of ['聯絡人', '負責人']) {
+    const rows = form([h], zhNames);
+    const s = F.summarise(rows);
+    assert.deepEqual([roleOf(s, h), col(s, h).suggested.confidence, col(s, h).needsChoice, s.commentCount], ['identifying', 'low', true, 0], h);
+    const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
+    assert.deepEqual([c.redacted, c.guessed], [[1], [1]], h);
+    assert.ok(!JSON.stringify(c.rows).includes('王小明'), h);
+    // Read back from the cache, the row still asks for a choice.
+    assert.equal(col(F.summariseCache(c, []), h).needsChoice, true, h);
+  }
   const zh = F.summarise(form(['填寫人'], [['王小明'], ['陳大文'], ['林美玲']]));
   assert.deepEqual([roleOf(zh, '填寫人'), col(zh, '填寫人').suggested.confidence], ['identifying', 'high']);
   // Clear labels and email-shaped answers are sure.
@@ -710,23 +730,71 @@ test('names found by their shape need a header that speaks of a person, and are 
   assert.deepEqual(sure.columns.slice(1).map((c) => [c.role, c.suggested.confidence]), [['identifying', 'high'], ['identifying', 'high'], ['identifying', 'high'], ['identifying', 'high']]);
 });
 
-test('a free-text question titled "Patient …" is a low-confidence guess, and its answers stay in the cache until chosen', () => {
+test('phone numbers the sheet stored as numbers are not averaged: an unsure guess, or sure under a contact title', () => {
+  const phones = [[912345678], [933222111], [987654321], [955000111]];
+  const s = F.summarise(form(['How can we reach you?'], phones));
+  assert.deepEqual([roleOf(s, 'How can we reach you?'), col(s, 'How can we reach you?').suggested.confidence], ['identifying', 'low']);
+  assert.deepEqual(s.numbers, []);
+  const c = F.afterFetch(null, got(form(['How can we reach you?'], phones)), { now: 1, started: 1, link: LINK });
+  assert.ok(!JSON.stringify(c.rows).includes('912345678'));
+  for (const h of ['聯繫方式', '联系方式']) {
+    const t = F.summarise(form([h], phones));
+    assert.deepEqual([roleOf(t, h), col(t, h).suggested.confidence], ['identifying', 'high'], h);
+  }
+  // Small numbers that repeat are still numbers.
+  assert.equal(roleOf(F.summarise(form(['Minutes to set up'], [[12], [15], [12], [20], [9]])), 'Minutes to set up'), 'number');
+});
+
+test('a column wrongly guessed identifying and then chosen a comment gets its answers back at the next read', () => {
   const rows = [['Timestamp', 'Patient positioning issues', 'Email address', 'Patient comfort (1-5)'],
     ['2026-11-10T09:00:00Z', 'Arm board slipped', 'a@example.com', 4], ['2026-11-11T09:00:00Z', 'Had to re-drape', 'b@example.com', 5]];
   const s = F.summarise(rows);
   assert.deepEqual([roleOf(s, 'Patient positioning issues'), col(s, 'Patient positioning issues').suggested.confidence], ['identifying', 'low']);
   assert.equal(roleOf(s, 'Patient comfort (1-5)'), 'score');
-  // Kept out of the board, but not dropped from the cache before the user says.
   assert.equal(s.commentCount, 0);
+  // Unsure or not, an identifying guess keeps nothing on disk.
   const c = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
-  assert.deepEqual(c.redacted, [2]);
-  assert.ok(JSON.stringify(c.rows).includes('Arm board slipped'));
+  assert.deepEqual([c.redacted, c.guessed], [[1, 2], [1]]);
+  assert.ok(!JSON.stringify(c.rows).includes('Arm board slipped'));
   assert.ok(!JSON.stringify(c.rows).includes('@example.com'));
-  // Chosen as a comment: it shows. Chosen as identifying: now it is dropped.
-  const asComment = [{ header: 'Patient positioning issues', index: 1, role: 'comment' }];
-  assert.equal(F.summariseCache(c, asComment).commentCount, 2);
-  const re = F.reroleCache(c, [{ header: 'Patient positioning issues', index: 1, role: 'identifying' }]);
-  assert.ok(!JSON.stringify(re.rows).includes('Arm board slipped'));
+  // Chosen as a comment: nothing to show until the next read, and the row says so.
+  const asComment = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Patient positioning issues', index: 1, role: 'comment' },
+    { header: 'Email address', index: 2, role: 'identifying' }, { header: 'Patient comfort (1-5)', index: 3, role: 'score', low: 1, high: 5 }]);
+  const now = F.summariseCache(F.reroleCache(c, asComment), asComment);
+  assert.deepEqual([col(now, 'Patient positioning issues').hidden, col(now, 'Patient positioning issues').needsChoice, now.commentCount], [true, false, 0]);
+  assert.deepEqual(F.reroleCache(c, asComment).guessed, []);
+  const next = F.afterFetch(F.reroleCache(c, asComment), got(rows), { now: 2, started: 2, link: LINK, roles: asComment });
+  assert.deepEqual(next.redacted, [2]);
+  assert.equal(F.summariseCache(next, asComment).commentCount, 2);
+});
+
+test('a column checked as comments whose answers turn into emails is kept off the board and flagged', () => {
+  const roles = F.checkRoles([{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Anything else?', index: 1, role: 'comment' }]);
+  const rows = form(['Anything else?'], [['Bigger font'], ['Quieter fan'], ['a.b@example.org'], ['c.d@example.org'], ['e.f@example.org']]);
+  const s = F.summarise(rows, { roles });
+  assert.equal(col(s, 'Anything else?').role, 'comment');
+  assert.equal(col(s, 'Anything else?').doubt, true);
+  assert.deepEqual([s.commentCount, s.comments.length, s.doubtful], [0, 0, ['Anything else?']]);
+  const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
+  assert.ok(lines.some((l) => /checked as comments or choices now look like emails or phone numbers/.test(l)), lines.join('\n'));
+  // Before the emails came, nothing to say.
+  const before = F.summarise(form(['Anything else?'], [['Bigger font'], ['Quieter fan']]), { roles });
+  assert.deepEqual([col(before, 'Anything else?').doubt ?? false, before.commentCount], [false, 2]);
+});
+
+test('columns waiting for a choice are a Needs attention line, privacy mode or not', () => {
+  const s = F.summarise(form(['How satisfied are you overall?', 'Who filled this in?'], [[6, 'Ann Lee'], [7, 'Bo Chan'], [5, 'Cy Wu']]));
+  assert.equal(s.needsChoice, 2);
+  const lines = F.fieldProblems({ enabled: true, summary: s }).map((p) => p.label);
+  assert.ok(lines.includes('Field feedback: 2 columns need a choice (Settings → Field feedback → Check the columns, with privacy mode off)'), lines.join('\n'));
+});
+
+test('a link to the same sheet that names no tab keeps the saved tab, and says so', () => {
+  const id = 'B'.repeat(30);
+  const cur = { enabled: true, sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit#gid=123`, keyPath: 'k', columns: [] };
+  const res = F.changeSettings(cur, { sheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit?usp=sharing` });
+  assert.deepEqual([res.sheetChanged, res.settings.sheetUrl, res.note], [false, cur.sheetUrl, 'Same sheet: kept the tab you had.']);
+  assert.equal(F.changeSettings(cur, { sheetUrl: cur.sheetUrl }).note, undefined);
 });
 
 test('repeated titles keep their roles in order when a column is added before them, and are flagged', () => {

@@ -707,7 +707,7 @@ app.whenReady().then(() => {
     }
     summariseField();
     fieldTick(); // reads now when on, set up and due
-    return { ok: true };
+    return { ok: true, ...(res.note ? { note: res.note } : {}) };
   });
   ipcMain.handle('home:field-choose-key', async () => {
     const res = await dialog.showOpenDialog(win, {
