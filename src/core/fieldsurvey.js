@@ -413,13 +413,23 @@ function looksPersonal(v) {
   return typeof v === 'string' && PHONE.test(s) && (s.match(/\d/g) ?? []).length >= 8 && !Number.isFinite(dateOf(s));
 }
 
+// Words of a rating or frequency scale: "Very Easy" or "Strongly Agree" has
+// a name's shape but is an answer on a scale. (Job, room and product words
+// are left out on purpose: "Scrub Nurse" or "Model A" stay an unsure guess.)
+const SCALE_WORDS = new Set(['very', 'quite', 'somewhat', 'strongly', 'slightly', 'extremely', 'fairly', 'not', 'agree', 'disagree', 'neutral',
+  'satisfied', 'dissatisfied', 'easy', 'difficult', 'hard', 'likely', 'unlikely', 'excellent', 'good', 'fair', 'poor', 'always', 'never', 'often',
+  'sometimes', 'rarely', 'usually']);
+const SCALE_HAN = /非常|很|有點|有点|普通|同意|不同意|滿意|满意|容易|困難|困难/;
+
 // "Ann Lee", "Dr Alpha", "王小明": a person's name, by its shape. "Easy
 // Setup" has the same shape, so a column of them is only ever a guess.
 function looksLikeName(v) {
   if (typeof v !== 'string') return false;
   const s = v.trim();
+  if (SCALE_HAN.test(s)) return false;
   if (/^\p{Script=Han}{2,3}$/u.test(s)) return SURNAMES.includes(s[0]);
   const words = s.split(/\s+/);
+  if (words.some((w) => SCALE_WORDS.has(w.toLowerCase().replace(/[^a-z]/g, '')))) return false;
   return words.length >= 2 && words.length <= 3 && words.every((w) => NAME_WORD.test(w));
 }
 
@@ -624,7 +634,12 @@ function summarise(rows, { since = null, comments: keep = 8, timeZone, roles = [
   if (found >= 0) suggested[found] = { role: 'timestamp', confidence: HIGH };
   if (tsCol < 0 && found >= 0 && !saved[found]) tsCol = found;
   const times = data.map(() => null);
-  if (tsCol >= 0) {
+  if (tsCol >= 0 && hidden.has(tsCol)) {
+    // Chosen as the timestamp after the cache dropped its answers: the dates
+    // come back at the next read; until then they are waiting, not unreadable.
+    out.timestampColumn = headers[tsCol];
+    out.datesWaiting = true;
+  } else if (tsCol >= 0) {
     out.timestampColumn = headers[tsCol];
     const dayFirst = dayFirstColumn(columns[tsCol]);
     data.forEach((r, k) => {

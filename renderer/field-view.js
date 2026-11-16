@@ -51,6 +51,10 @@ function setupStep(f) {
 
 // "Columns not checked yet": until the user has confirmed every column, the
 // numbers are the app's guesses, and the board says so.
+// A timestamp column chosen after the cache dropped its answers: its dates
+// come back at the next read.
+const waitNote = (s) => (s?.datesWaiting ? '<p class="field-note">Dates show after the next update. Refresh now to see them sooner.</p>' : '');
+
 function checkNote(s) {
   if (!s || s.checked || !s.columns?.length) return '';
   const n = s.newColumns?.length ?? 0;
@@ -95,7 +99,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   const open = s.responses
     ? `<div class="form-actions"><button type="button" class="link-btn" id="field-open" data-field="open" aria-haspopup="dialog">${privacy ? 'See the score for each question' : 'See each question and the comments'}</button></div>`
     : '';
-  return `<p class="field-line">${line}</p>${failed}${checkNote(s)}${stats}${open}`;
+  return `<p class="field-line">${line}</p>${failed}${checkNote(s)}${waitNote(s)}${stats}${open}`;
 }
 
 // The detail sheet's body.
@@ -157,7 +161,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const doubt = s.doubtful?.length ?? 0;
   if (doubt) left.push(`${plural(doubt, 'column')} you checked now ${doubt === 1 ? 'looks' : 'look'} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored.`);
 
-  return `${head}${hint}${checkNote(s)}
+  return `${head}${hint}${checkNote(s)}${waitNote(s)}
     <h3 class="field-h">Average per question</h3>${questions}
     ${numbers}
     <h3 class="field-h">Newest comments</h3>${comments}

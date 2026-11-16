@@ -437,11 +437,10 @@ test('names under headers no list knows are found by their shape', () => {
   const people = ['Ann Lee', 'Bo Chan', 'Cy Wu', 'Di Ho', 'Ed Ng', 'Fa Li'];
   const s = F.summarise(form(['Who filled this in?', '名前', 'Respondent', 'Rating (1-5)'], people.map((n, i) => [n, ['王小明', '陳大文', '林美玲', '張家豪', '李志明', '黃淑芬'][i], n, 4])));
   assert.deepEqual(s.identifying, ['Who filled this in?', '名前', 'Respondent']);
-  // Title Case answers have a name's shape even when they repeat: an unsure
-  // guess the user settles once. Answers in sentence case are a choice; short
-  // comments are comments.
+  // Title Case scale answers ("Very Easy") are a choice, like sentence case;
+  // short comments are comments.
   const c = F.summarise(form(['How was it?', 'Comments', 'Overall'], [['Very Easy', 'Works well', 'Very easy'], ['Very Easy', '很好', 'Very easy'], ['Quite Easy', 'Faster start-up', 'Quite easy'], ['Very Easy', '太慢了', 'Very easy'], ['Quite Easy', 'Quieter fan', 'Quite easy']]));
-  assert.deepEqual([roleOf(c, 'How was it?'), col(c, 'How was it?').suggested.confidence], ['identifying', 'low']);
+  assert.deepEqual([roleOf(c, 'How was it?'), col(c, 'How was it?').suggested.confidence], ['choice', 'high']);
   assert.equal(roleOf(c, 'Overall'), 'choice');
   assert.equal(roleOf(c, 'Comments'), 'comment');
 });
@@ -709,8 +708,11 @@ test('short answers shaped like names: Title Case phrases are an unsure guess, m
   const zh = F.summarise(form(['使用心得'], [['方便'], ['高效'], ['周到'], ['很好'], ['方便快速']]));
   // Three of five start with a common family name, under the 70% a guess needs.
   assert.deepEqual([roleOf(zh, '使用心得'), col(zh, '使用心得').suggested.confidence, zh.commentCount], ['comment', 'high', 5]);
-  unsureHidden(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['the holder']]), 'What did you like most?');
-  unsureHidden(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]), 'Best part');
+  unsureHidden(form(['What did you like most?'], [['Tracking Accuracy'], ['Screen Size'], ['Quick Setup'], ['Fast Boot'], ['the holder']]), 'What did you like most?');
+  unsureHidden(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Quick Setup'], ['Fast Boot'], ['Helpful Support']]), 'Best part');
+  // With scale words in two of five ("Easy Setup", "Good Support"), under the 70% a guess needs: comments.
+  const some = F.summarise(form(['Best part'], [['Tracking Accuracy'], ['Screen Size'], ['Easy Setup'], ['Fast Boot'], ['Good Support']]));
+  assert.deepEqual([roleOf(some, 'Best part'), col(some, 'Best part').suggested.confidence, some.commentCount], ['comment', 'high', 5]);
 });
 
 test('names found by their shape are an unsure guess under any title, repeated or not; person titles are sure', () => {
@@ -922,4 +924,41 @@ test('saving the columns is refused while any column of the sheet has no choice'
   // Nothing read yet: there is nothing to check the columns against.
   assert.match(F.changeSettings(cur, { columns: all }, { summary: null }).error, /not been read/);
   assert.match(F.changeSettings(cur, { columns: [null] }, { summary: s }).error, /could not be read/);
+});
+
+test('Title Case scale and frequency answers are choices; names, repeated or not, stay hidden; job and model words stay a guess', () => {
+  const six = (list) => list.map((v) => [v]);
+  const agree = F.summarise(form(['The setup was quick'], six(['Strongly Agree', 'Agree', 'Strongly Agree', 'Neutral', 'Agree', 'Strongly Agree'])));
+  assert.deepEqual([roleOf(agree, 'The setup was quick'), col(agree, 'The setup was quick').suggested.confidence], ['choice', 'high']);
+  const happy = F.summarise(form(['Overall'], six(['Very Satisfied', 'Satisfied', 'Very Satisfied', 'Very Satisfied', 'Satisfied', 'Not Satisfied', 'Very Satisfied', 'Satisfied'])));
+  assert.equal(roleOf(happy, 'Overall'), 'choice');
+  const often = F.summarise(form(['How often?'], six(['Always', 'Usually Not', 'Sometimes', 'Rarely Ever', 'Usually Not', 'Always'])));
+  assert.notEqual(roleOf(often, 'How often?'), 'identifying');
+  const zh = F.summarise(form(['整體'], six(['非常滿意', '滿意', '非常滿意', '普通', '滿意', '非常滿意'])));
+  assert.equal(roleOf(zh, '整體'), 'choice');
+  // Names that repeat, with titles and initials, in English and Chinese.
+  const people = F.summarise(form(['Who?'], six(['Ann Lee', 'Dr Lee', 'J. Smith', '王小明', 'Ann Lee', 'Dr Lee', 'J. Smith', '王小明', 'Ann Lee', 'Dr Lee'])));
+  assert.deepEqual([roleOf(people, 'Who?'), col(people, 'Who?').suggested.confidence, col(people, 'Who?').needsChoice], ['identifying', 'low', true]);
+  // No narrow rule tells these from names: an unsure guess, with the prompt.
+  for (const [h, vals] of [['Device', ['Model A', 'Model B', 'Model A', 'Model A', 'Model B']], ['Your role', ['Scrub Nurse', 'Circulating Nurse', 'Scrub Nurse', 'Scrub Nurse', 'Circulating Nurse']]]) {
+    const g = F.summarise(form([h], six(vals)));
+    assert.deepEqual([roleOf(g, h), col(g, h).suggested.confidence, col(g, h).needsChoice], ['identifying', 'low', true], h);
+  }
+});
+
+test('a timestamp column whose answers the cache does not keep waits for the next read, without unreadable dates', () => {
+  const rows = form(['Visit date', 'Rate it (1-5)'], [['2026-11-02', 4], ['2026-11-05', 5], ['2026-11-09', 3], ['2026-11-12', 4]]).map((r) => [r[1], r[2], r[0]]);
+  rows[0] = ['Visit date', 'Rate it (1-5)', 'Submitted at'];
+  const cache = F.afterFetch(null, got(rows), { now: 1, started: 1, link: LINK });
+  assert.deepEqual(cache.redacted, [0]); // the date column, suggested ignore, keeps no answers
+  // The user then chooses it as the timestamp.
+  const roles = F.checkRoles([{ header: 'Visit date', index: 0, role: 'timestamp' }, { header: 'Rate it (1-5)', index: 1, role: 'score', low: 1, high: 5 },
+    { header: 'Submitted at', index: 2, role: 'ignore' }]);
+  const s = F.summariseCache(F.reroleCache(cache, roles), roles);
+  assert.deepEqual([s.timestampColumn, s.datesWaiting, s.unreadable.timestamps, s.newest, s.responses], ['Visit date', true, 0, null, 4]);
+  assert.ok(!F.fieldProblems({ enabled: true, summary: s }).some((p) => /without a readable date/.test(p.label)));
+  // The next read brings the dates back.
+  const next = F.afterFetch(F.reroleCache(cache, roles), got(rows), { now: 2, started: 2, link: LINK, roles });
+  const t = F.summariseCache(next, roles);
+  assert.deepEqual([t.datesWaiting ?? false, t.unreadable.timestamps, t.newest != null], [false, 0, true]);
 });

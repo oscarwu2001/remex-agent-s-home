@@ -146,3 +146,11 @@ test('a flagged column read back from the cache is not promised its answers eith
   assert.match(html, /Answers look like emails or phone numbers/);
   assert.doesNotMatch(html, /Answers show after the next update/);
 });
+
+test('dates waiting for the next read say so on the board and in the sheet', async () => {
+  const { fieldHtml, fieldSheetHtml } = await view();
+  const s = { ...F.summarise(rows), datesWaiting: true, newest: null, oldest: null, newSince: null };
+  for (const html of [fieldHtml(field(s), { privacy: true }), fieldSheetHtml(field(s), { privacy: true })]) {
+    assert.match(html, /Dates show after the next update\. Refresh now to see them sooner\./);
+  }
+});
