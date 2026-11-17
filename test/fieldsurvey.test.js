@@ -1307,6 +1307,22 @@ test('a time saved or submitted in UTC is the timestamp, before one of when the 
   const t = F.summarise([['Time saved', 'Device updated (UTC)', 'Ease (1-5)'], ['12', isoDay(14), '4'], ['30', isoDay(15), '5'], ['25', isoDay(16), '3']]);
   assert.equal(t.timestampColumn, 'Device updated (UTC)');
   assert.equal(roleOf(t, 'Time saved'), 'number');
+  // "Last saved" is when it was last changed: created beats it, wherever it stands.
+  const last = [['Last saved (UTC)', 'Created (UTC)', 'Ease (1-5)'], [isoDay(16), isoDay(10), '4'], [isoDay(17), isoDay(11), '5']];
+  assert.equal(F.summarise(last).timestampColumn, 'Created (UTC)');
+  for (const h of ['Last saved (UTC)', 'Updated saved (UTC)', 'Modified (UTC)']) {
+    assert.equal(F.summarise([[h, 'Hub saved (UTC)'], [isoDay(16), isoDay(10)], [isoDay(17), isoDay(11)]]).timestampColumn, 'Hub saved (UTC)', h);
+  }
+});
+
+test('scores and numbers written with a plus or a true minus are read', () => {
+  // On -3..3: +3, −3 (U+2212), 1 and -1: a score, averaging 0.
+  const s = F.summarise(form(['Comfort (-3..3)', 'How many visits'], [['+3', '+2'], ['−3', '4'], ['1', '−1'], ['-1', '3']]));
+  assert.deepEqual(s.questions.map((q) => [q.question, q.low, q.high, q.n, q.mean, q.unreadable]), [['Comfort (-3..3)', -3, 3, 4, 0, 0]]);
+  assert.deepEqual(s.numbers.map((q) => [q.question, q.n, q.mean]), [['How many visits', 4, 2]]);
+  // A sign alone, or two, is not a number.
+  const odd = F.summarise(form(['Comfort (-3..3)'], [['+-3'], ['−'], ['2'], ['1'], ['3']]));
+  assert.equal(odd.unreadable.scores, 2);
 });
 
 test('a column of JSON objects or lists is left out, never shown as comments; one plain answer among them keeps it a column of answers', () => {
@@ -1315,8 +1331,12 @@ test('a column of JSON objects or lists is left out, never shown as comments; on
     ['[]', '{"a":2}', 'Fine'],
     ['', '{"a":3,"note":"a long note about the visit"}', 'Holder slipped twice'],
   ]));
+  // Three JSON answers or more: sure. Fewer (here two) are a guess the user confirms.
   assert.deepEqual([col(s, 'Fault list (JSON)').suggested, col(s, 'Whole entry JSON').suggested], [
-    { role: 'ignore', reason: 'json', confidence: 'high' }, { role: 'ignore', reason: 'json', confidence: 'high' }]);
+    { role: 'ignore', reason: 'json', confidence: 'low' }, { role: 'ignore', reason: 'json', confidence: 'high' }]);
+  assert.deepEqual([col(s, 'Fault list (JSON)').needsChoice, col(s, 'Whole entry JSON').needsChoice], [true, false]);
+  const one = F.summarise(form(['Fault list (JSON)'], [['{"pump":"loose"}'], [''], ['']]));
+  assert.deepEqual([col(one, 'Fault list (JSON)').suggested.confidence, col(one, 'Fault list (JSON)').needsChoice], ['low', true]);
   assert.deepEqual(s.comments.map((c) => c.question), ['Notes', 'Notes', 'Notes']);
   assert.equal(s.commentCount, 3);
   // Their answers are not kept in the cache either.
@@ -1330,11 +1350,14 @@ test('a column of JSON objects or lists is left out, never shown as comments; on
 });
 
 test('a sales representative, a facility or site and a distributor are identifying by their title; a question about the site is not', () => {
-  const titles = ['Sales rep', 'Representative name', 'Site / facility', 'Facility', 'Distributor', 'Dealer name', '業務代表', '經銷商'];
-  const s = F.summarise(form([...titles, 'Was the site easy to reach?'],
-    [0, 1, 2, 3, 4].map((i) => [...titles.map((_, k) => `code ${k}-${i % 2}`), i % 2 ? 'Yes' : 'No'])));
+  const titles = ['Sales rep', 'Representative name', 'Sales agent', 'Site / facility', 'Facility', 'Distributor', '業務代表', '經銷商'];
+  // Not asked for: an agent, a dealer, or a rep of another kind.
+  const others = ['Agent', 'Dealer name', 'Field rep', 'Account representative'];
+  const s = F.summarise(form([...titles, ...others, 'Was the site easy to reach?'],
+    [0, 1, 2, 3, 4].map((i) => [...[...titles, ...others].map((_, k) => `code ${k}-${i % 2}`), i % 2 ? 'Yes' : 'No'])));
   assert.deepEqual(s.identifying, titles);
   for (const t of titles) assert.deepEqual([col(s, t).suggested.reason, col(s, t).suggested.confidence], ['header', 'high'], t);
+  for (const t of others) assert.equal(roleOf(s, t), 'choice', t);
   assert.equal(roleOf(s, 'Was the site easy to reach?'), 'choice');
   assert.ok(!JSON.stringify(F.afterFetch(null, got(form(['Sales rep'], [['code 7']])), { now: 1, started: 1, link: LINK }).rows).includes('code 7'));
 });

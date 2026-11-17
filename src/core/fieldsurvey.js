@@ -564,9 +564,10 @@ async function fetchReaderRows({ link, secret, send }) {
 const ROLES = ['timestamp', 'score', 'number', 'choice', 'comment', 'identifying', 'ignore'];
 const STRONG_TIME = /^(time ?stamp|submitted( at)?|submission time|時間戳記|时间戳记|提交時間|提交时间|填答時間)$/i;
 const WEAK_TIME = /^(date|time|date ?time|日期|時間|时间)$/i;
-// "Hub saved (UTC)", "Submitted (UTC)": when a web app saved the row, as it
-// states, before a column of when the entry was last updated.
-const SAVED_TIME = /^(?:\p{L}+ )?(?:saved|submitted|received)(?: at)? \((?:utc|gmt)\)$/iu;
+// "Hub saved (UTC)", "Submitted (UTC)", "Created (UTC)": when a web app
+// first saved the row, as it states, before a column of when the entry was
+// last changed ("Last saved", "Updated", "Modified"), which is not taken.
+const SAVED_TIME = /^(?:(?!(?:last|updated|modified|changed|edited)\b)\p{L}+ )?(?:saved|submitted|received|created)(?: at)? \((?:utc|gmt)\)$/iu;
 
 // Identifying by the header only when the header is a short label ("Name",
 // "Email address", "Patient ID", "電話"), never by a word inside a question
@@ -578,11 +579,12 @@ const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|numbe
 const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|聯繫方式|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
 const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者|聯絡人|联络人|聯繫人|联系人|負責人|负责人)(?:姓名)?$/;
 const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
-// Who sold, and where: a sales representative, a facility or site, a
-// distributor ("Sales rep", "Site / facility", "Distributor name"), as a
-// short label. Its answers name a person or a customer.
-const ID_PARTY = /^(?:(?:sales|field|account|medical) )?(?:rep|representative|agent)(?: name)?$|^(?:facility|site|distributor|dealer)(?: ?\/ ?(?:facility|site|hospital|clinic))?(?: name)?$/i;
-const ID_CJK_PARTY = /^(?:業務(?:代表|員|员)?|业务(?:代表|员)?|經銷商|经销商|代理商)(?:名稱|名称|姓名)?$/;
+// Who sold, and where: a sales representative ("Sales rep",
+// "Representative name", "Sales agent"), a facility or site ("Site /
+// facility"), a distributor, as a short label. Its answers name a person or
+// a customer. Nothing wider: "Agent" or "Dealer" alone could be a question.
+const ID_PARTY = /^(?:(?:sales )?(?:rep|representative)|sales agent|facility|site|distributor)(?: ?\/ ?(?:facility|site))?(?: name)?$/i;
+const ID_CJK_PARTY = /^(?:業務代表|业务代表|業務員|业务员|經銷商|经销商)(?:名稱|名称|姓名)?$/;
 // An entry's own id ("Record ID", "Response no."): a key, not an answer.
 const RECORD_ID = /^(?:record|entry|response|submission|report|row|form) ?(?:id|no|number|#)$/i;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
@@ -682,12 +684,22 @@ function dayFirstColumn(values) {
   });
 }
 
+// A number as typed: one sign at most, "+", "-" or the true minus "−"
+// (U+2212, as a scale around 0 is often written).
+const signedText = (v) => {
+  const m = /^\s*([-+−]?)(\d+(?:\.\d+)?)\s*$/.exec(v);
+  return m ? `${m[1] === '+' ? '' : m[1] ? '-' : ''}${m[2]}` : null;
+};
 const intOf = (v) => {
   if (typeof v === 'number') return Number.isInteger(v) ? v : NaN;
-  if (typeof v === 'string' && /^\s*-?\d+\s*$/.test(v)) return Number(v);
-  return NaN;
+  const t = typeof v === 'string' ? signedText(v) : null;
+  return t != null && !t.includes('.') ? Number(t) : NaN;
 };
-const numberOf = (v) => (typeof v === 'number' ? v : typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
+const numberOf = (v) => {
+  if (typeof v === 'number') return v;
+  const t = typeof v === 'string' ? signedText(v) : null;
+  return t != null ? Number(t) : NaN;
+};
 const share = (values, ok) => (values.length ? values.filter(ok).length / values.length : 0);
 const onScale = (n) => Number.isInteger(n) && n >= 0 && n <= 10;
 
@@ -796,7 +808,9 @@ function suggest(header, values, untitled) {
   // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
   if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header', confidence: byHeader === 'label' ? HIGH : LOW };
   if (!untitled && RECORD_ID.test(headerLabel(header))) return { role: 'ignore', reason: 'record id', confidence: HIGH };
-  if (values.every(jsonData)) return { role: 'ignore', reason: 'json', confidence: HIGH };
+  // Three JSON answers or more are surely data; one or two may be a chance
+  // answer, so the user is asked.
+  if (values.every(jsonData)) return { role: 'ignore', reason: 'json', confidence: values.length >= 3 ? HIGH : LOW };
   if (share(values, looksPersonal) >= 0.5) return { role: 'identifying', reason: 'answers', confidence: HIGH };
   const answers = values.map(text);
   const counts = new Map();
