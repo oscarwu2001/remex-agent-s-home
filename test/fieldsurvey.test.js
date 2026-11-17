@@ -1049,6 +1049,33 @@ test('a column titled as the timestamp with no date in it is passed over for the
   assert.deepEqual([s.timestampColumn, s.unreadable.timestamps], ['Timestamp', 1]);
   // With no answers yet, the title alone still names it.
   assert.equal(F.summarise([['Timestamp', 'Ease (1-5)']]).timestampColumn, 'Timestamp');
+  // The key file sends a time of day alone as a fraction of a day (0 up to 1): passed over the same way.
+  const fractions = [['Timestamp', 'Visit day', 'Ease (1-5)'], [0.35, 25_569 + (NOW - 2 * DAY) / DAY, 4], [0.5, 25_569 + (NOW - DAY) / DAY, 2]];
+  assert.equal(F.summarise(fractions, { timeZone: 'UTC', now: NOW }).timestampColumn, 'Visit day');
+  // Times of day with no other column of dates: the titled one is still taken, its cells counted.
+  const alone = F.summarise([['Timestamp', 'Ease (1-5)'], ['1899-12-30T08:00:00.000Z', 4], [0.5, 5]], { now: NOW });
+  assert.deepEqual([alone.timestampColumn, alone.unreadable.timestamps], ['Timestamp', 2]);
+});
+
+test('a column titled as the timestamp whose text is no date the app reads is still taken, its rows counted under Needs attention', () => {
+  const problems = (rows) => {
+    const cache = F.afterFetch(null, got(rows), { now: NOW, started: NOW, link: LINK });
+    return F.fieldProblems({ enabled: true, cache, summary: F.summariseCache(cache, [], { now: NOW }) }).map((p) => p.label).join('\n');
+  };
+  const typed = ['Nov 11, 2026 8:00 AM', 'Nov 12, 2026 9:30 AM'];
+  // Next to a column of dates: the titled one is not passed over for it.
+  const beside = [['Timestamp', 'Visit date', 'Ease (1-5)'], [typed[0], '2026-11-11T09:00:00Z', 4], [typed[1], '2026-11-12T09:00:00Z', 5]];
+  const s = F.summarise(beside, { now: NOW });
+  assert.deepEqual([s.timestampColumn, s.unreadable.timestamps, s.newest], ['Timestamp', 2, null]);
+  assert.match(problems(beside), /2 rows without a readable date/);
+  // Alone: taken, counted, and said.
+  const alone = [['Timestamp', 'Ease (1-5)'], [typed[0], 4], [typed[1], 5]];
+  assert.deepEqual([F.summarise(alone).timestampColumn, F.summarise(alone).unreadable.timestamps], ['Timestamp', 2]);
+  assert.match(problems(alone), /2 rows without a readable date/);
+  // A date with a numeric offset after a space is not a form the app reads: under a UTC title it is taken and counted too.
+  const offset = [['Hub saved (UTC)', 'Ease (1-5)'], ['2026-11-10 09:00:00 +0000', 4], ['2026-11-11 09:00:00 +0000', 5]];
+  assert.deepEqual([F.summarise(offset).timestampColumn, F.summarise(offset).unreadable.timestamps], ['Hub saved (UTC)', 2]);
+  assert.match(problems(offset), /2 rows without a readable date/);
 });
 
 test('a low score from 5 days ago is still flagged after a later read brought one good answer', () => {

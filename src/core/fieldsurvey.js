@@ -967,24 +967,41 @@ function checkSubmission(summary, roles) {
   return { missing: (summary?.columns ?? []).filter((c) => !given.has(`${c.index}\u0000${c.header}`)).length };
 }
 
+// A time of day alone, as each route sends it: the reader on 1899-12-30
+// (an ISO time before 1900), the key file as a fraction of a day.
+function timeOfDay(v) {
+  if (typeof v === 'number') return v >= 0 && v < 1;
+  const t = typeof v === 'string' ? v.trim() : '';
+  return ZONED_ISO.test(t) && Date.parse(t) < ISO_MIN;
+}
+
 // The column of when each answer came in: by its title first, then by its
-// dates. A titled one with answers but not one date among them (times of
-// day alone, as the reader sends them) is passed over for the next; one
-// with some dates is taken, and its unreadable cells are counted.
+// dates. A titled one is taken whatever its cells, and the ones that are no
+// readable date are counted (Needs attention says so), with one exception:
+// when every answer in it is a time of day alone and another column has
+// readable dates, that column is taken instead.
 function findTimestamp(headers, columns, timeZone, candidate) {
-  const isDate = (i) => {
+  const parses = (i) => {
     const dayFirst = dayFirstColumn(columns[i]);
-    return (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }));
+    return columns[i].length > 0 && share(columns[i], (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }))) >= 0.8;
   };
-  const parses = (i) => columns[i].length > 0 && share(columns[i], isDate(i)) >= 0.8;
-  const dated = (i) => columns[i].length === 0 || columns[i].some(isDate(i));
-  let i = headers.findIndex((h, k) => candidate(k) && STRONG_TIME.test(h) && dated(k));
-  if (i >= 0) return i;
-  i = headers.findIndex((h, k) => candidate(k) && SAVED_TIME.test(h) && dated(k));
-  if (i >= 0) return i;
-  i = headers.findIndex((h, k) => candidate(k) && WEAK_TIME.test(h) && parses(k));
-  if (i >= 0) return i;
-  return headers.findIndex((h, k) => candidate(k) && !idByHeader(h) && parses(k));
+  const find = (skip, rules) => {
+    for (const rule of rules) {
+      const i = headers.findIndex((h, k) => k !== skip && candidate(k) && rule(h, k));
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const titled = find(-1, [(h) => STRONG_TIME.test(h), (h) => SAVED_TIME.test(h)]);
+  const byDates = (skip) => find(skip, [
+    (h, k) => (STRONG_TIME.test(h) || SAVED_TIME.test(h)) && parses(k),
+    (h, k) => WEAK_TIME.test(h) && parses(k),
+    (h, k) => !idByHeader(h) && parses(k),
+  ]);
+  if (titled < 0) return byDates(-1);
+  const timesOnly = columns[titled].length > 0 && columns[titled].every(timeOfDay);
+  const instead = timesOnly ? byDates(titled) : -1;
+  return instead >= 0 ? instead : titled;
 }
 
 // Typed dates such as 03/04/2026 that could be either way round: the column
