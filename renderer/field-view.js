@@ -360,12 +360,12 @@ function entryForm({ id, label, input, error, hint = '', button = 'button' }) {
 // secret never comes back from the main process: once saved, only "Secret
 // saved" and Replace.
 function readerSettings(f, { privacy, state }) {
-  const script = `<div class="form-actions"><button type="button" class="link-btn" id="field-copy-script" data-field="copy-script">Copy reader script</button></div>
-    <p class="hint">Paste it into the sheet’s Extensions → Apps Script, run makeSecret once, then deploy it as a web app: execute as you, who has access Anyone. The README goes through it step by step.</p>`;
+  const script = `<p class="hint">Attach the reader script to the sheet: paste it into the sheet’s Extensions → Apps Script, run makeSecret once, then deploy it as a web app (execute as you, who has access Anyone). The README goes through it step by step.</p>
+    <div class="form-actions"><button type="button" class="link-btn" id="field-copy-script" data-field="copy-script">Copy reader script</button></div>`;
   const link = !f.readerUrl || state.readerEditing
     ? entryForm({
       id: 'field-reader-link', label: 'Reader link', error: state.readerError,
-      input: `type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="The web app link, ending in /exec" value="${privacy ? '' : esc(f.readerUrl)}"`,
+      input: `type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Ends in /exec" value="${privacy ? '' : esc(f.readerUrl)}"`,
       hint: f.readerUrl ? 'Leave it empty to keep the saved link.' : '',
     })
     : `<p class="field-set"><span>${privacy ? 'A reader link is saved.' : `Reader: <span class="field-path">${esc(f.readerUrl)}</span>`}</span>
@@ -374,7 +374,7 @@ function readerSettings(f, { privacy, state }) {
   const secret = !f.secretSaved || state.secretEditing
     ? entryForm({
       id: 'field-secret', label: 'Secret', error: state.secretError, button: f.readerUrl ? 'button' : 'link-btn',
-      input: 'type="password" autocomplete="off" spellcheck="false" placeholder="READER_SECRET from the script’s properties"',
+      input: 'type="password" autocomplete="off" spellcheck="false" placeholder="READER_SECRET"',
       hint: 'Kept encrypted with this computer’s own protection, and never shown again.',
     })
     : `<p class="field-set"><span>Secret saved.</span>
