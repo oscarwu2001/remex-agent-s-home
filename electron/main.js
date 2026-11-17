@@ -610,19 +610,9 @@ app.whenReady().then(() => {
     fieldSecretSaved = fs.existsSync(fieldSecretFile);
     if (!fieldSecretSaved) fieldSecretFor = null;
   }
-  if (!field.enabled && fieldSecretSaved) dropFieldSecret();
   {
-    // An earlier build kept the secret in field-reader-secret.bin, tied to
-    // no reader. It is never read: it goes at start, and the reader asks for
-    // its secret again. force: one already gone is no error.
-    const legacy = path.join(app.getPath('userData'), 'field-reader-secret.bin');
-    try {
-      fs.rmSync(legacy, { force: true });
-    } catch (err) {
-      problem(`An old saved reader secret could not be removed (${err.code || 'error'}); remove field-reader-secret.bin from the app's data folder`, legacy);
-    }
-  }
-  {
+    // What to do with the files found here is fieldsurvey.startPlan's; this
+    // only does it.
     let raw = null;
     try {
       raw = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
@@ -634,16 +624,19 @@ app.whenReady().then(() => {
     }
     const checked = fieldSurvey.validCache(raw, fieldLink());
     if (checked.problem) problem(checked.problem, fieldCacheFile);
-    if (checked.cache && field.enabled) {
-      fieldCache = checked.cache;
-      // An older format's "new since", carried without its rows: written in
-      // its place now, so the old rows leave the disk before any read.
-      if (checked.carried) saveFieldCache();
-    } else if (raw != null) {
-      // Not this sheet's, not whole, an older format, or the feature is off:
-      // nothing of it is kept.
-      dropFieldCache();
+    const plan = fieldSurvey.startPlan({ enabled: field.enabled, secretSaved: fieldSecretSaved, found: raw != null, checked });
+    for (const name of plan.remove) {
+      const old = path.join(app.getPath('userData'), name);
+      try {
+        fs.rmSync(old, { force: true }); // force: one already gone is no error
+      } catch (err) {
+        problem(`An old saved reader secret could not be removed (${err.code || 'error'}); remove ${name} from the app's data folder`, old);
+      }
     }
+    if (plan.dropSecret) dropFieldSecret();
+    if (plan.cache === 'keep' || plan.cache === 'write') fieldCache = checked.cache;
+    if (plan.cache === 'write') saveFieldCache();
+    if (plan.cache === 'drop') dropFieldCache();
   }
   function summariseField() {
     try {
@@ -883,20 +876,16 @@ app.whenReady().then(() => {
     const turnedOff = field.enabled && !res.settings.enabled;
     field = res.settings;
     // A secret is never sent to another reader than its own: a link to
-    // another reader drops it, and the reply says why.
-    const secretStale = fieldSecretSaved && fieldSurvey.secretStale(fieldSecretFor, field);
-    // Whether the old reader's secret is really gone, after the attempt (one
-    // that could not be removed is said under Needs attention instead).
-    let secretRemoved = false;
+    // another reader drops it, and the reply says why. Whether it goes, and
+    // the note, are fieldsurvey.secretGoes and secretNote's; this does it.
+    const stale = fieldSecretSaved && fieldSurvey.secretStale(fieldSecretFor, field);
+    const secretGoes = fieldSurvey.secretGoes({ turnedOff, sheetChanged: res.sheetChanged, stale });
+    if (secretGoes) dropFieldSecret();
     if (res.sheetChanged || turnedOff) {
       // Another sheet or reader starts afresh; off keeps nothing, the
       // reader's secret included.
       fieldGeneration += 1;
       dropFieldCache();
-      if (turnedOff || secretStale) {
-        dropFieldSecret();
-        secretRemoved = !fieldSecretSaved;
-      }
       if (change && 'source' in change) checkFieldKey();
     } else if (change && 'columns' in change && fieldCache) {
       // A column now marked identifying loses its answers from the cache too.
@@ -908,10 +897,8 @@ app.whenReady().then(() => {
     // After a columns save, the reply says if one stays hidden (its answers
     // read as emails or phones) whatever was chosen for it.
     const note = change && 'columns' in change ? fieldSurvey.columnsReply(fieldSummary) : res.note;
-    return {
-      ok: true, ...(note ? { note } : {}),
-      ...(secretStale && secretRemoved && !turnedOff ? { secretNote: 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' } : {}),
-    };
+    const secretNote = fieldSurvey.secretNote({ turnedOff, stale, dropped: secretGoes, savedAfter: fieldSecretSaved });
+    return { ok: true, ...(note ? { note } : {}), ...(secretNote ? { secretNote } : {}) };
   });
   ipcMain.handle('home:field-choose-key', async () => {
     const res = await dialog.showOpenDialog(win, {

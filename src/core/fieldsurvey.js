@@ -412,6 +412,18 @@ function secretStale(savedFor, settings) {
     return false; // no link that reads: nothing to send the secret to, and the read says why
   }
 }
+// A change saved from Settings -> whether the saved secret goes (the main
+// process removes it): off keeps none, and another sheet or reader keeps
+// it only while it is still this reader's. stale: secretStale's answer.
+function secretGoes({ turnedOff = false, sheetChanged = false, stale = false } = {}) {
+  return Boolean(turnedOff || (sheetChanged && stale));
+}
+// The reply's note after that, from the state after it: said only when the
+// old reader's secret was removed (dropped: it was meant to go; savedAfter:
+// its file is still there, which Needs attention says instead).
+function secretNote({ turnedOff = false, stale = false, dropped = false, savedAfter = true } = {}) {
+  return stale && dropped && !turnedOff && !savedAfter ? 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' : null;
+}
 
 // The saved secret could not be read -> why, and whether waiting helps: none
 // saved, or a file the app is not allowed to open, waits for the user; a
@@ -1417,6 +1429,25 @@ function validCache(raw, link) {
   return { cache: raw, problem: null };
 }
 
+// Left in the data folder by an earlier build: the secret, tied to no
+// reader. Never read; removed at every start (the reader asks again).
+const OLD_FILES = ['field-reader-secret.bin'];
+
+// What the main process does with the data folder's files at start ->
+// { remove: old files' names, dropSecret, cache }. enabled: the feature is
+// on; secretSaved: a secret file is there; found: a cache file was there;
+// checked: validCache's answer for it. cache: 'keep' it, 'write' it over
+// the old file now (an older format carried: its rows leave the disk at
+// once), 'drop' it (off, another sheet's, or not whole), or 'none'.
+function startPlan({ enabled = false, secretSaved = false, found = false, checked = null } = {}) {
+  const kept = Boolean(enabled && checked?.cache);
+  return {
+    remove: [...OLD_FILES],
+    dropSecret: Boolean(!enabled && secretSaved),
+    cache: kept ? (checked.carried ? 'write' : 'keep') : found ? 'drop' : 'none',
+  };
+}
+
 // A change from Settings -> { settings, sheetChanged } or { error }. An
 // empty link keeps the saved one: Save with the field left blank (as it is
 // when privacy mode hides the saved link) must not wipe the link and the
@@ -1619,8 +1650,8 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, SOURCES, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretFileError, secretLocked,
+  READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretGoes, secretNote, secretFileError, secretLocked,
   readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
-  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems, inSettings,
+  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, startPlan, changeSettings, fieldProblems, inSettings,
 };

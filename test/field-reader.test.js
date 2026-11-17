@@ -531,6 +531,40 @@ test('the reader’s tab is part of what was read: a new TAB starts "new since" 
   assert.deepEqual([onB.since, onB.sinceFetchedAt, onB.tab.title], [null, null, 'Answers B']);
 });
 
+test('at start: the old secret file goes, off keeps no secret, and a carried cache is written in the old one’s place', () => {
+  const rows = [['Saved (UTC)', 'Ease (1-5)'], ['2026-11-10T09:00:00.000Z', 4]];
+  const good = JSON.parse(JSON.stringify(F.afterFetch(null, got(rows), { now: 1000, started: 900, link: KEY_LINK })));
+  const plan = (o) => F.startPlan({ enabled: true, secretSaved: false, found: true, checked: F.validCache(good, KEY_LINK), ...o });
+  // The earlier build's secret file, tied to no reader, is never read: it goes every start. The secret in use stays.
+  assert.deepEqual(plan({}).remove, ['field-reader-secret.bin']);
+  assert.ok(!plan({}).remove.includes('field-reader-secret.json'));
+  assert.deepEqual([plan({}).dropSecret, plan({ secretSaved: true }).dropSecret, plan({ enabled: false, secretSaved: true }).dropSecret], [false, false, true]);
+  // This sheet's cache is kept; a version 4 one, carried, is written over the old file at once (its rows leave the disk).
+  assert.equal(plan({}).cache, 'keep');
+  assert.equal(plan({ checked: F.validCache({ ...good, version: 4 }, KEY_LINK) }).cache, 'write');
+  // Off, another sheet's, or not readable: dropped; none there: nothing to do.
+  assert.equal(plan({ enabled: false }).cache, 'drop');
+  const another = F.parseSheetLink('https://docs.google.com/spreadsheets/d/1AnotherInventedSheet0123456789abcdefgh/edit#gid=777');
+  assert.equal(plan({ checked: F.validCache(good, another) }).cache, 'drop');
+  assert.equal(plan({ checked: F.validCache({ ...good, rows: 'x' }, KEY_LINK) }).cache, 'drop');
+  assert.equal(plan({ found: false, checked: F.validCache(null, KEY_LINK) }).cache, 'none');
+});
+
+test('a settings change drops the secret only when off or for another reader, and says so only when it is really gone', () => {
+  // Off keeps no secret; another reader's link drops the old reader's; the same reader keeps it.
+  assert.equal(F.secretGoes({ turnedOff: true, sheetChanged: false, stale: false }), true);
+  assert.equal(F.secretGoes({ turnedOff: false, sheetChanged: true, stale: true }), true);
+  assert.equal(F.secretGoes({ turnedOff: false, sheetChanged: true, stale: false }), false);
+  assert.equal(F.secretGoes({ turnedOff: false, sheetChanged: false, stale: true }), false);
+  // The note comes from the state after: removed, it is said; still there (Needs attention says why), or not tried, it is not.
+  const note = (o) => F.secretNote({ turnedOff: false, stale: true, dropped: true, savedAfter: false, ...o });
+  assert.match(note({}), /^The saved secret was the old reader’s, so it was removed: save this reader’s secret\.$/);
+  assert.equal(note({ savedAfter: true }), null);
+  assert.equal(note({ dropped: false }), null);
+  assert.equal(note({ stale: false }), null);
+  assert.equal(note({ turnedOff: true }), null);
+});
+
 test('a read is asked for (a new secret, or a read that found its settings changed) is made at once', () => {
   const now = Date.UTC(2026, 10, 16, 9);
   const settings = { enabled: true, source: 'reader', readerUrl: EXEC, secretSaved: true };
