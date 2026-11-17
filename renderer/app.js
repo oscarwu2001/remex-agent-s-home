@@ -147,7 +147,7 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
     // A link typed but not saved shows no more once privacy mode is on.
-    if (key === 'private' && prefs.private) dropFieldDrafts(fieldUi);
+    if (key === 'private' && prefs.private) forgetFieldDrafts();
     savePrefs();
     applyPrefs();
     render(true);
@@ -2650,6 +2650,14 @@ function renderFieldSettings() {
     fieldUi.focusAfter = '';
   }
 }
+// Links typed but not saved go (privacy mode turned on, or Settings
+// closed): the drafts kept after a refusal, and what is in the fields now.
+// Drawn afresh, with focus already off the fields, so paint keeps nothing.
+function forgetFieldDrafts() {
+  dropFieldDrafts(fieldUi);
+  $('field-settings').dataset.sig = '';
+  renderFieldSettings();
+}
 // How to connect, switched: another way starts afresh, so every field's state goes.
 async function setFieldSource(source) {
   const res = await bridge.fieldSet({ source }).catch((err) => ({ ok: false, error: err.message }));
@@ -3462,10 +3470,9 @@ function setSettings(open) {
   }
   else {
     if (buildMode) setBuildMode(false);
-    // A link typed but not saved is not kept past Settings.
-    dropFieldDrafts(fieldUi);
-    renderFieldSettings();
     $('settings-open').focus();
+    // A link typed but not saved is not kept past Settings.
+    forgetFieldDrafts();
   }
 }
 $('settings-open').addEventListener('click', () => setSettings($('settings').hidden));
