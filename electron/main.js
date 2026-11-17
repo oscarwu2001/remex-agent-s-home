@@ -519,7 +519,8 @@ app.whenReady().then(() => {
   // fieldsurvey.js; this keeps the timers, the files, the requests and the IPC.
   const fieldFile = path.join(app.getPath('userData'), 'field-survey.json');
   const fieldCacheFile = path.join(app.getPath('userData'), 'field-survey-cache.json');
-  const fieldSecretFile = path.join(app.getPath('userData'), 'field-reader-secret.bin');
+  // The encrypted secret with the reader it belongs to (fieldsurvey.sealSecret).
+  const fieldSecretFile = path.join(app.getPath('userData'), 'field-reader-secret.json');
   const FIELD_CHECK_MS = 10 * 60_000; // how often to look whether a slot has come (a timer can miss one across sleep)
   const FIELD_TIMEOUT_MS = 20_000;
   const FIELD_STALE = 'The link, key or secret changed while reading; reading again.';
@@ -527,6 +528,22 @@ app.whenReady().then(() => {
   // checked column roles }. source and readerUrl only once set.
   let field = { enabled: false, sheetUrl: '', keyPath: '', columns: [] };
   let fieldSecretSaved = fs.existsSync(fieldSecretFile);
+  // The reader the saved secret belongs to (not secret), or null.
+  let fieldSecretFor = null;
+  if (fieldSecretSaved) {
+    try {
+      fieldSecretFor = fieldSurvey.secretFor(fs.readFileSync(fieldSecretFile, 'utf8'));
+    } catch {
+      fieldSecretFor = null; // unreadable now: the next read says so (secretFileError), and saving again replaces it
+    }
+  }
+  // Whether this computer can keep the secret at all (safeStorage): null, or why not.
+  const fieldStorageProblem = fieldSurvey.secretStorage({
+    available: safeStorage.isEncryptionAvailable(), backend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined,
+  });
+  // A read was asked for (a new secret, or a read that found its settings
+  // changed under it): made at once (fieldsurvey.planFetch's asked).
+  let fieldAsked = false;
   let fieldCache = null;
   let fieldSummary = null;
   let fieldSummaryError = null;
@@ -581,8 +598,9 @@ app.whenReady().then(() => {
       problem(`The saved field feedback could not be removed (${err.code || err.message})`, fieldCacheFile);
     }
   }
-  // Off keeps no secret. One that cannot be removed is said under Needs
-  // attention, and still counts as saved, as it is.
+  // Off keeps no secret, and another reader link drops the old reader's.
+  // One that cannot be removed is said under Needs attention, and still
+  // counts as saved, as it is.
   function dropFieldSecret() {
     try {
       fs.rmSync(fieldSecretFile, { force: true });
@@ -590,6 +608,7 @@ app.whenReady().then(() => {
       problem(`The saved reader secret could not be removed (${err.code || 'error'}); remove it from the app's data folder`, fieldSecretFile);
     }
     fieldSecretSaved = fs.existsSync(fieldSecretFile);
+    if (!fieldSecretSaved) fieldSecretFor = null;
   }
   if (!field.enabled && fieldSecretSaved) dropFieldSecret();
   {
@@ -659,17 +678,19 @@ app.whenReady().then(() => {
     fieldSurvey.checkUrl(url);
     return net.fetch(url, { ...init, signal: AbortSignal.timeout(FIELD_TIMEOUT_MS) });
   }
-  // The reader's secret, decrypted for one read. Never logged or returned to
-  // the window; the caller drops it with the request.
-  function readFieldSecret() {
-    let data;
+  // The reader's secret, decrypted for one read of this reader (link) only.
+  // Never logged or returned to the window; the caller drops it with the
+  // request.
+  function readFieldSecret(link) {
+    let text;
     try {
-      data = fs.readFileSync(fieldSecretFile);
+      text = fs.readFileSync(fieldSecretFile, 'utf8');
     } catch (err) {
-      throw fieldSurvey.secretFileError(err); // none saved: wait for the user; busy just now: try again later
+      throw fieldSurvey.secretFileError(err); // none saved or not the app's to open: wait for the user; busy just now: try again later
     }
+    const sealed = fieldSurvey.openSecret(text, link.deploymentId); // another reader's, or not the app's file: says so
     try {
-      return safeStorage.decryptString(data);
+      return safeStorage.decryptString(sealed);
     } catch {
       throw fieldSurvey.secretLocked(); // the system's key changed: only a new secret helps
     }
@@ -681,7 +702,8 @@ app.whenReady().then(() => {
   // 'redirect' event gives it: the request stops there and
   // fieldsurvey.readerHop decides the one hop. -> { status, location,
   // contentType, text() }, as fetchReaderRows expects. The timeout covers
-  // the answer's body too.
+  // the answer's body too, and a body past fieldsurvey.READER_MAX_BYTES is
+  // cut off there (TooLargeError) rather than held.
   function askReader(url, init) {
     fieldSurvey.checkUrl(url);
     return new Promise((resolve, reject) => {
@@ -708,12 +730,30 @@ app.whenReady().then(() => {
         if (answered) return;
         answered = true;
         const chunks = [];
+        let bytes = 0;
         const body = new Promise((ok, fail) => {
           failBody = fail;
-          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('data', (chunk) => {
+            if (!failBody) return; // already cut off
+            bytes += chunk.length;
+            if (!fieldSurvey.tooLarge(bytes)) {
+              chunks.push(chunk);
+              return;
+            }
+            clearTimeout(timer);
+            chunks.length = 0;
+            failBody = null;
+            fail(Object.assign(new Error('The answer is over the size the app reads'), { name: 'TooLargeError' }));
+            req.abort();
+          });
           res.on('end', () => {
             clearTimeout(timer);
-            ok(Buffer.concat(chunks).toString('utf8'));
+            // Whatever goes wrong here ends the read, so the busy guard always clears.
+            try {
+              ok(Buffer.concat(chunks).toString('utf8'));
+            } catch (err) {
+              fail(err);
+            }
           });
           res.on('aborted', () => fail(new Error('The answer was cut off')));
           res.on('error', (err) => fail(err));
@@ -750,16 +790,24 @@ app.whenReady().then(() => {
         let got;
         let key = null;
         if (source === 'reader') {
-          got = await fieldSurvey.fetchReaderRows({ link, secret: readFieldSecret(), send: askReader });
+          got = await fieldSurvey.fetchReaderRows({ link, secret: readFieldSecret(link), send: askReader });
         } else {
           key = readFieldKey();
           got = await fieldSurvey.fetchRows({ link, key, fetch: askGoogle, now: started });
         }
-        if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
+        // The settings changed under this read: it is dropped, and the new
+        // ones are read as soon as it ends (fieldTick, asked).
+        if (generation !== fieldGeneration) {
+          fieldAsked = true;
+          return { ok: false, error: FIELD_STALE };
+        }
         fieldCache = fieldSurvey.afterFetch(fieldCache, got, { now: Date.now(), started, link, roles: field.columns });
         if (key) fieldKey = { clientEmail: key.clientEmail, error: null };
       } catch (err) {
-        if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
+        if (generation !== fieldGeneration) {
+          fieldAsked = true;
+          return { ok: false, error: FIELD_STALE };
+        }
         if (!(err instanceof fieldSurvey.FieldSurveyError)) {
           syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
         } else if (err.code) {
@@ -788,8 +836,9 @@ app.whenReady().then(() => {
   const fieldPlanSettings = () => ({ ...field, secretSaved: fieldSecretSaved });
   function fieldTick() {
     clearTimeout(fieldTimer);
-    const plan = fieldSurvey.planFetch({ now: Date.now(), settings: fieldPlanSettings(), cache: fieldCache, busy: Boolean(fieldRun) });
+    const plan = fieldSurvey.planFetch({ now: Date.now(), settings: fieldPlanSettings(), cache: fieldCache, busy: Boolean(fieldRun), asked: fieldAsked });
     if (plan.fetch) {
+      fieldAsked = false;
       refreshField();
       return;
     }
@@ -816,12 +865,15 @@ app.whenReady().then(() => {
     }
     const turnedOff = field.enabled && !res.settings.enabled;
     field = res.settings;
+    // A secret is never sent to another reader than its own: a link to
+    // another reader drops it, and the reply says why.
+    const secretDropped = fieldSecretSaved && fieldSurvey.secretStale(fieldSecretFor, field);
     if (res.sheetChanged || turnedOff) {
       // Another sheet or reader starts afresh; off keeps nothing, the
       // reader's secret included.
       fieldGeneration += 1;
       dropFieldCache();
-      if (turnedOff) dropFieldSecret();
+      if (turnedOff || secretDropped) dropFieldSecret();
       if (change && 'source' in change) checkFieldKey();
     } else if (change && 'columns' in change && fieldCache) {
       // A column now marked identifying loses its answers from the cache too.
@@ -833,7 +885,10 @@ app.whenReady().then(() => {
     // After a columns save, the reply says if one stays hidden (its answers
     // read as emails or phones) whatever was chosen for it.
     const note = change && 'columns' in change ? fieldSurvey.columnsReply(fieldSummary) : res.note;
-    return { ok: true, ...(note ? { note } : {}) };
+    return {
+      ok: true, ...(note ? { note } : {}),
+      ...(secretDropped && !turnedOff ? { secretNote: 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' } : {}),
+    };
   });
   ipcMain.handle('home:field-choose-key', async () => {
     const res = await dialog.showOpenDialog(win, {
@@ -864,29 +919,39 @@ app.whenReady().then(() => {
     return { ok: true };
   });
   // The reader's secret, from the Secret field: checked (fieldsurvey.js
-  // checkSecret), encrypted by the system and written to its own file. With
-  // no protected storage it is refused, never kept as plain text. The reply
-  // says only whether it was saved; the window never gets it back.
+  // checkSecret), encrypted by the system and written with the reader it
+  // belongs to. With no protected storage it is refused, never kept as
+  // plain text. The reply says only whether it was saved; the window never
+  // gets it back.
   ipcMain.handle('home:field-save-secret', (_event, text) => {
     if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
     const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined;
-    const checked = fieldSurvey.checkSecret(text, { available: safeStorage.isEncryptionAvailable(), backend });
+    const checked = fieldSurvey.checkSecret(text, {
+      available: safeStorage.isEncryptionAvailable(), backend, saved: fieldSecretSaved, readerUrl: fieldSource() === 'reader' ? field.readerUrl : '',
+    });
     if (checked.error) return { ok: false, error: checked.error };
     const tmp = `${fieldSecretFile}.${process.pid}.tmp`;
     try {
       const sealed = safeStorage.encryptString(checked.secret);
       fs.mkdirSync(path.dirname(fieldSecretFile), { recursive: true });
-      fs.writeFileSync(tmp, sealed, { mode: 0o600 });
+      fs.writeFileSync(tmp, fieldSurvey.sealSecret(checked.deploymentId, sealed), { mode: 0o600 });
       fs.renameSync(tmp, fieldSecretFile);
     } catch (err) {
-      fs.rmSync(tmp, { force: true });
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        // Only the half-written copy is left, encrypted; the save's own error is what is said and logged.
+      }
       syslog?.write('errors', 'field-feedback', { route: 'reader', code: `secret not saved ${err?.code || 'error'}` });
       return { ok: false, error: 'The secret could not be saved; see the system log, then try again.' };
     }
     fieldSecretSaved = true;
+    fieldSecretFor = checked.deploymentId;
     fieldGeneration += 1;
-    // A new secret may be the fix for the last refusal: try again without waiting.
-    if (fieldCache?.lastError) fieldCache = { ...fieldCache, lastAttemptAt: null };
+    // A new secret may be the fix for the last refusal, or the first step
+    // that lets the reader be read: read now, slot or not.
+    if (fieldCache) fieldCache = { ...fieldCache, lastAttemptAt: null };
+    fieldAsked = true;
     fieldTick();
     return { ok: true };
   });
@@ -898,14 +963,17 @@ app.whenReady().then(() => {
       code = fs.readFileSync(path.join(app.getAppPath(), 'docs', 'field-feedback-reader.gs'), 'utf8');
     } catch (err) {
       syslog?.write('errors', 'field-feedback', { route: 'reader', code: `script not read ${err?.code || 'error'}` });
-      return { ok: false, error: 'The reader script that comes with the app could not be read; see the system log. It is also in the README.' };
+      return { ok: false, error: 'The reader script that comes with the app is missing from this copy. Update the app (Settings → App → Updates) or install it again, then copy it.' };
     }
     clipboard.writeText(code);
     return { ok: true };
   });
-  ipcMain.handle('home:field-refresh', () => {
+  // Refresh now reads the settings as they are: a read that started before
+  // they changed is dropped (FIELD_STALE), and this waits for the new one.
+  ipcMain.handle('home:field-refresh', async () => {
     if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
-    return refreshField();
+    const res = await refreshField();
+    return res.error === FIELD_STALE ? refreshField() : res;
   });
   // The reader address goes to the clipboard from here, so it can be pasted
   // into the sheet's Share box while privacy mode keeps it off the screen.
@@ -931,8 +999,12 @@ app.whenReady().then(() => {
       // URLs and a file name: the board shows them only with privacy off.
       sheetUrl: field.sheetUrl,
       readerUrl: field.readerUrl ?? '',
-      // Whether a secret is saved, never the secret.
+      // Whether a secret is saved, never the secret; and, when this computer
+      // cannot keep one, why (Settings says so before anything is typed).
       secretSaved: fieldSecretSaved,
+      secretStorage: fieldStorageProblem,
+      // Columns the user checked: switching how to connect asks first when there are any.
+      checkedColumns: field.columns.length,
       keyName: field.keyPath ? path.basename(field.keyPath) : '',
       clientEmail: fieldKey.clientEmail,
       keyError: fieldKeyError(),
