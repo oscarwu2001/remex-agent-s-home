@@ -295,26 +295,42 @@ const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
 
 // A message as Settings shows it, beside the controls: where the board
 // says "in Settings → Connections → Field feedback", Settings names the
-// control to use there. Every message naming that path has its phrase here
-// (tested); the board keeps the path.
+// control in view there. shown: { secretOpen, linkOpen } whether the
+// Secret field and the link field (Reader link or Sheet link) are open, or
+// folded behind Replace secret and Change link; keyChosen: a key file is
+// chosen, so its button reads Choose another…. Every message naming that
+// path has its phrase here (tested); the board keeps the path.
+const keyButton = (v) => (v.keyChosen ? 'Choose another…' : 'Choose key file…');
 const IN_SETTINGS = [
-  [`In ${SETTINGS}, press Copy reader script,`, 'Press Copy reader script,'],
-  [`press Copy reader script in ${SETTINGS},`, 'press Copy reader script,'],
-  [`Copy the reader script again (${SETTINGS}) and`, 'Press Copy reader script, paste it over the old one and'],
-  [`(copy it in ${SETTINGS})`, '(copy it with Copy reader address)'],
-  [`choose it again in ${SETTINGS}.`, 'choose it again with Choose another…'],
-  [`Choose the key file in ${SETTINGS}.`, 'Choose the key file with Choose key file…'],
-  [`paste it again in ${SETTINGS}`, 'paste it again under Sheet link'],
-  [`paste it in ${SETTINGS}`, 'paste it under Reader link'],
-  [`save it in ${SETTINGS}`, 'save it under Secret'],
-  [`Save it in ${SETTINGS}`, 'Save it under Secret'],
-  [`Save the secret again in ${SETTINGS}`, 'Save the secret again under Secret'],
-  [`Save this reader’s secret in ${SETTINGS}`, 'Save this reader’s secret under Secret'],
+  [`In ${SETTINGS}, press Copy reader script,`, () => 'Press Copy reader script,'],
+  [`press Copy reader script in ${SETTINGS},`, () => 'press Copy reader script,'],
+  [`Copy the reader script again (${SETTINGS}) and`, () => 'Press Copy reader script, paste it over the old one and'],
+  [`(copy it in ${SETTINGS})`, () => '(copy it with Copy reader address)'],
+  [`choose it again in ${SETTINGS}.`, (v) => `choose it again with ${keyButton(v)}`],
+  [`Choose the key file in ${SETTINGS}.`, (v) => `Choose the key file with ${keyButton(v)}`],
+  [`then paste it again in ${SETTINGS}`, (v) => (v.linkOpen ? 'then paste it again under Sheet link' : 'then press Change link and paste it again')],
+  [` and paste it in ${SETTINGS}`, (v) => (v.linkOpen ? ' and paste it under Reader link' : ', press Change link and paste it')],
+  [`then save it in ${SETTINGS}`, (v) => (v.secretOpen ? 'then save it under Secret' : 'then press Replace secret and save the new one')],
+  [`Save it in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save it under Secret' : 'Press Replace secret and save it')],
+  [`Save the secret again in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save the secret again under Secret' : 'Press Replace secret and save it again')],
+  [`Save this reader’s secret in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save this reader’s secret under Secret' : 'Press Replace secret and save this reader’s secret')],
 ];
-function inSettings(message) {
+function inSettings(message, { secretOpen = true, linkOpen = true, keyChosen = false } = {}) {
+  const shown = { secretOpen, linkOpen, keyChosen };
   let m = message == null ? '' : String(message);
-  for (const [board, here] of IN_SETTINGS) m = m.split(board).join(here);
+  for (const [board, here] of IN_SETTINGS) m = m.split(board).join(here(shown));
   return m;
+}
+// Every way Settings can draw a message, keyed by whether the Secret field
+// and the link field are open ('1') or folded ('0'), secret first: the
+// window picks the one it draws. null for no message.
+function settingsWords(message, { keyChosen = false } = {}) {
+  if (message == null) return null;
+  const out = {};
+  for (const s of ['0', '1']) {
+    for (const l of ['0', '1']) out[`${s}${l}`] = inSettings(message, { secretOpen: s === '1', linkOpen: l === '1', keyChosen });
+  }
+  return out;
 }
 
 const readerError = (kind, message, code) => Object.assign(new FieldSurveyError(kind, message), { code });
@@ -1653,5 +1669,5 @@ module.exports = {
   READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretGoes, secretNote, secretFileError, secretLocked,
   readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
-  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, startPlan, changeSettings, fieldProblems, inSettings,
+  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, startPlan, changeSettings, fieldProblems, inSettings, settingsWords,
 };

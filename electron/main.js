@@ -1018,9 +1018,10 @@ app.whenReady().then(() => {
       keyName: field.keyPath ? path.basename(field.keyPath) : '',
       clientEmail: fieldKey.clientEmail,
       keyError: fieldKeyError(),
-      // The same two as Settings words them, naming its controls (the board keeps the Settings path).
-      keyErrorHere: fieldKeyError() ? fieldSurvey.inSettings(fieldKeyError()) : null,
-      errorHere: c.lastError ? fieldSurvey.inSettings(c.lastError.message) : null,
+      // The same two as Settings words them, naming the control in view
+      // (one wording per way its fields can be drawn; the board keeps the Settings path).
+      keyErrorHere: fieldSurvey.settingsWords(fieldKeyError(), { keyChosen: Boolean(field.keyPath) }),
+      errorHere: fieldSurvey.settingsWords(c.lastError?.message ?? null, { keyChosen: Boolean(field.keyPath) }),
       busy: Boolean(fieldRun),
       fetchedAt: c.fetchedAt ?? null,
       lastAttemptAt: c.lastAttemptAt ?? null,

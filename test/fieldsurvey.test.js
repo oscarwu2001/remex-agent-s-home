@@ -222,17 +222,25 @@ test('in Settings a key file message names the control to use; the board keeps t
     assert.fail('expected a refusal');
   };
   const PATH = /Settings → Connections → Field feedback/;
+  // [message, what Settings shows, as Settings shows it]: the control in view then.
+  const linkOpen = { linkOpen: true };
+  const linkFolded = { linkOpen: false };
   const cases = [
-    [await refused(403), 'Share the sheet with the key’s reader address (copy it with Copy reader address) as Viewer, then press Refresh now.'],
-    [await refused(404), 'No sheet was found at this link. Open it in your browser to check it, then paste it again under Sheet link.'],
-    [F.keyFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, 'The key file is no longer where it was chosen; choose it again with Choose another…'],
+    [await refused(403), linkFolded, 'Share the sheet with the key’s reader address (copy it with Copy reader address) as Viewer, then press Refresh now.'],
+    [await refused(404), linkOpen, 'No sheet was found at this link. Open it in your browser to check it, then paste it again under Sheet link.'],
+    [await refused(404), linkFolded, 'No sheet was found at this link. Open it in your browser to check it, then press Change link and paste it again.'],
+    [F.keyFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, { keyChosen: true }, 'The key file is no longer where it was chosen; choose it again with Choose another…'],
     // The main process's own, before any key is chosen.
-    ['Choose the key file in Settings → Connections → Field feedback.', 'Choose the key file with Choose key file…'],
+    ['Choose the key file in Settings → Connections → Field feedback.', {}, 'Choose the key file with Choose key file…'],
   ];
-  for (const [board, here] of cases) {
+  for (const [board, shown, here] of cases) {
     assert.match(board, PATH);
-    assert.equal(F.inSettings(board), here);
+    assert.equal(F.inSettings(board, shown), here);
   }
+  // settingsWords gives each way Settings can draw it; the second digit is the link field.
+  const words = F.settingsWords(await refused(404), { keyChosen: true });
+  assert.match(words['11'], /paste it again under Sheet link\.$/);
+  assert.match(words['10'], /press Change link and paste it again\.$/);
   // A message naming no Settings path reads the same, and nothing is not a message.
   assert.equal(F.inSettings('Google’s answer could not be read. Press Refresh now.'), 'Google’s answer could not be read. Press Refresh now.');
   assert.equal(F.inSettings(null), '');

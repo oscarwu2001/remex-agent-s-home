@@ -384,7 +384,7 @@ function entryForm({ id, label, input, value = null, error, hint = '', button = 
         <button type="button" class="link-btn" data-field="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button></div>`
     : `<div class="add-row">${field}
         ${save}</div>`;
-  return `<form class="field-entry" id="${id}-form">
+  return `<form class="field-entry" id="${id}-form" novalidate>
       <label class="field-entry-label" for="${id}">${label}</label>
       ${row}${err}${hintP}</form>`;
 }
@@ -397,16 +397,14 @@ export function dropFieldDrafts(state) {
 }
 
 // A saved link's field: what it starts with (the refused draft, else the
-// saved link with privacy off, else empty), and the hint that empty keeps
-// the saved link when it does start empty.
-function linkValue(saved, draft, privacy) {
-  const value = draft != null ? draft : privacy ? '' : saved;
-  return { value, hint: saved && !value ? 'Leave it empty to keep the saved link.' : '' };
-}
+// saved link with privacy off, else empty). Opened over a saved link it
+// has Cancel, the way back to it; saving it empty keeps it too, unsaid.
+const linkValue = (saved, draft, privacy) => (draft != null ? draft : privacy ? '' : saved);
 
 // The reader route: the set-up step and Copy reader script, its web app
 // link, its secret. The secret never comes back from the main process:
-// once saved, only "Secret saved" and Replace secret.
+// once saved, only "Secret saved" and Replace secret. -> { html, open: a
+// field's Save is the filled button, shown: which fields are open }.
 function readerSettings(f, { privacy, state }) {
   const script = `<ol class="field-steps">
       <li>Press Copy reader script, paste it into the sheet’s Extensions → Apps Script, and set TAB at the top to your answers’ tab.</li>
@@ -421,7 +419,7 @@ function readerSettings(f, { privacy, state }) {
   const typed = linkValue(f.readerUrl, state.readerDraft, privacy);
   const link = linkOpen
     ? entryForm({
-      id: 'field-reader-link', label: 'Reader link', error: state.readerError, value: typed.value, hint: typed.hint, button: 'Save link',
+      id: 'field-reader-link', label: 'Reader link', error: state.readerError, value: typed, button: 'Save link',
       input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Ends in /exec"', cancel: f.readerUrl ? 'cancel-reader' : '',
       cancelLabel: 'Cancel link change',
     })
@@ -442,14 +440,17 @@ function readerSettings(f, { privacy, state }) {
     secret = `<p class="field-set"><span>Secret saved.</span>
         <button type="button" class="link-btn" id="field-secret-replace" data-field="replace-secret">Replace secret</button></p>`;
   }
-  return { html: `${script}${link}${secret}`, open: linkOpen || (secretOpen && !f.secretStorage) };
+  return { html: `${script}${link}${secret}`, open: linkOpen || (secretOpen && !f.secretStorage), shown: { secretOpen, linkOpen } };
 }
 
 // A message from the main process as Settings shows it: errorHere and
-// keyErrorHere name the control to use there, where the board's name the
-// Settings path (fieldsurvey.js inSettings; a snapshot without them shows
-// the message as it is). After "Last update failed:" it reads on in lower
-// case, a name excepted.
+// keyErrorHere name the control in view there, where the board's name the
+// Settings path. They hold one wording per way the Secret and link fields
+// can be drawn, open ('1') or folded behind Replace secret and Change link
+// ('0'), secret first (fieldsurvey.js settingsWords); this picks the one
+// drawn. A snapshot without them shows the message as it is. After "Last
+// update failed:" it reads on in lower case, a name excepted.
+const inView = (words, message, { secretOpen, linkOpen }) => (words && typeof words === 'object' && words[`${secretOpen ? 1 : 0}${linkOpen ? 1 : 0}`]) || message;
 const NAMES = /^(?:Google|Apps Script|READER_SECRET|TAB|Windows|LINE)\b/;
 const readOn = (m) => (NAMES.test(m) ? m : `${m.charAt(0).toLowerCase()}${m.slice(1)}`);
 
@@ -468,11 +469,12 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   const asking = Boolean(state.pendingSource && state.pendingSource !== source);
   // open: a field is open (or switching is asked), so its button is the one
   // filled action and Refresh now steps back.
-  const common = (ready, fieldOpen) => {
+  // shown: which of the Secret and link fields are open as drawn.
+  const common = (ready, fieldOpen, shown) => {
     const open = fieldOpen || asking;
     const status = f.busy ? 'Updating…'
       : [f.fetchedAt ? `Updated ${boardTime(f.fetchedAt, now)}` : 'Not updated yet', f.nextAt && ready ? `next ${boardTime(f.nextAt, now)}` : ''].filter(Boolean).join(' · ');
-    const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(readOn(f.errorHere || f.error))}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
+    const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(readOn(inView(f.errorHere, f.error, shown)))}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
     return `${ready ? `<div class="form-actions">${refreshBtn('field-refresh', open ? 'link-btn' : 'button')}</div>` : ''}
     <p class="hint field-status" role="status">${esc(status)}${state.note ? ` · ${esc(state.note)}` : ''}</p>${lastError}
     ${fieldColumnsHtml(f, { privacy, draft: state.draft, note: state.checkNote, error: state.checkError })}`;
@@ -480,14 +482,14 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   if (source === 'reader') {
     const reader = readerSettings(f, { privacy, state });
     return `${sourceChoice(f, source, state)}${reader.html}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
-    ${common(Boolean(f.readerUrl && f.secretSaved), reader.open)}`;
+    ${common(Boolean(f.readerUrl && f.secretSaved), reader.open, reader.shown)}`;
   }
   const showLink = !f.sheetUrl || state.editing;
   const typed = linkValue(f.sheetUrl, state.linkDraft, privacy);
   const link = showLink
     ? entryForm({
-      id: 'field-link', label: 'Sheet link', error: state.linkError, value: typed.value, hint: typed.hint, button: 'Save link',
-      input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="docs.google.com/spreadsheets/d/…"', cancel: f.sheetUrl ? 'cancel-link' : '',
+      id: 'field-link', label: 'Sheet link', error: state.linkError, value: typed, button: 'Save link',
+      input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…"', cancel: f.sheetUrl ? 'cancel-link' : '',
       cancelLabel: 'Cancel link change',
     })
     : `<p class="field-set"><span>${privacy ? 'A sheet link is saved.' : `Sheet: <span class="field-path">${esc(f.sheetUrl)}</span>`}</span>
@@ -500,11 +502,12 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   const robot = f.clientEmail
     ? `<p class="field-set"><span>${privacy ? 'Share the sheet with the key’s reader address as Viewer.' : `Share the sheet with <span class="field-robot">${esc(f.clientEmail)}</span> as Viewer.`}</span>
         <button type="button" class="link-btn" id="field-copy" data-field="copy-reader">Copy reader address</button></p>` : '';
-  const keyError = f.keyError ? `<p class="form-error" role="status">${esc(f.keyErrorHere || f.keyError)}</p>` : '';
+  const shown = { secretOpen: true, linkOpen: showLink };
+  const keyError = f.keyError ? `<p class="form-error" role="status">${esc(inView(f.keyErrorHere, f.keyError, shown))}</p>` : '';
   // Older snapshots name no source: no choice to show.
   return `${f.source ? sourceChoice(f, source, state) : ''}${link}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
     ${key}${robot}${keyError}
-    ${common(Boolean(f.sheetUrl && f.keyName), showLink)}`;
+    ${common(Boolean(f.sheetUrl && f.keyName), showLink, shown)}`;
 }
 
 // The roles to save from the step: every row the user has a choice for,

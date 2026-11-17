@@ -658,10 +658,15 @@ test('Replace and Change link open with Cancel; Refresh now steps back while a f
   assert.match(again, /<div class="add-row"><input id="field-reader-link"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button>\s*<button type="button" class="link-btn" data-field="cancel-reader" aria-label="Cancel link change">Cancel<\/button><\/div>/);
   assert.match(again, /<div class="add-row"><input id="field-secret"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="link-btn" type="submit">Save secret<\/button>\s*<button type="button" class="link-btn" data-field="cancel-secret" aria-label="Cancel secret change">Cancel<\/button><\/div>/);
   assert.match(again, /<button type="button" class="link-btn" id="field-refresh"/);
-  // The field starts empty with privacy on: empty keeps the saved link, and the hint says so…
-  assert.match(again, /Leave it empty to keep the saved link/);
-  // …but with privacy off it starts with the link, so there is nothing to say.
+  // Cancel is the way back to the saved link: no hint about leaving the field empty, with privacy on or off.
+  assert.doesNotMatch(again, /Leave it empty/);
   assert.doesNotMatch(fieldSettingsHtml(set, { privacy: false, state: { readerEditing: true } }), /Leave it empty/);
+  const keyAgain = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: 'https://docs.google.com/spreadsheets/d/x/edit', keyName: '' }, { privacy: true, state: { editing: true } });
+  assert.match(keyAgain, /data-field="cancel-link"/);
+  assert.doesNotMatch(keyAgain, /Leave it empty/);
+  // Every field's form leaves checking to the app, whose own error says what is wrong.
+  for (const id of ['field-reader-link', 'field-secret']) assert.match(again, new RegExp(`<form class="field-entry" id="${id}-form" novalidate>`));
+  assert.match(keyAgain, /<form class="field-entry" id="field-link-form" novalidate>/);
 });
 
 test('a refused link or secret marks its own field invalid, names why, and keeps the link as typed', async () => {
@@ -729,19 +734,29 @@ test('switching with checked columns asks first, in place; the reply to each but
   assert.match(replies, /data-field="copy-script">Copy reader script<\/button><\/div>\s*<p class="hint" role="status">Reader script copied\.<\/p>/);
 });
 
-test('in Settings a failed update names the control to use and reads on after its colon; the board keeps the Settings path', async () => {
+test('in Settings a failed update names the button or field in view, and reads on after its colon; the board keeps the Settings path', async () => {
   const { fieldSettingsHtml, fieldHtml } = await view();
   const err = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';
-  const f = readerField({ readerUrl: EXEC, secretSaved: true, error: err, errorHere: F.inSettings(err), errorAt: Date.UTC(2026, 10, 17, 9) });
+  const f = readerField({ readerUrl: EXEC, secretSaved: true, error: err, errorHere: F.settingsWords(err), errorAt: Date.UTC(2026, 10, 17, 9) });
+  // The secret is saved, its field folded: Replace secret is what shows.
   const html = fieldSettingsHtml(f, { privacy: true });
-  assert.match(html, /Last update failed \([^)]*\): the reader refused the secret: .*, then save it under Secret\.<\/p>/);
+  assert.match(html, /Last update failed \([^)]*\): the reader refused the secret: .*, then press Replace secret and save the new one\.<\/p>/);
   assert.doesNotMatch(html, /\bbelow\b|Settings → Connections/);
+  // Replace secret pressed: the Secret field shows, and the message names it.
+  assert.match(fieldSettingsHtml(f, { privacy: true, state: { secretEditing: true } }), /, then save it under Secret\.<\/p>/);
   assert.match(fieldHtml(f, { privacy: true }), /then save it in Settings → Connections → Field feedback\./);
-  // The key file's own trouble too.
+  // A link the reader is not at: Change link while folded, Reader link once open.
+  const gone404 = 'No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in Settings → Connections → Field feedback.';
+  const g = readerField({ readerUrl: EXEC, secretSaved: true, error: gone404, errorHere: F.settingsWords(gone404) });
+  assert.match(fieldSettingsHtml(g, { privacy: true }), /copy the Web app link, press Change link and paste it\.<\/p>/);
+  assert.match(fieldSettingsHtml(g, { privacy: true, state: { readerEditing: true } }), /copy the Web app link and paste it under Reader link\.<\/p>/);
+  // The key file's own trouble too: its key chosen, Choose another… shows.
   const gone = F.keyFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message;
-  const key = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: 'https://docs.google.com/spreadsheets/d/x/edit', keyName: 'k.json', keyError: gone, keyErrorHere: F.inSettings(gone) }, { privacy: true });
+  const key = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: 'https://docs.google.com/spreadsheets/d/x/edit', keyName: 'k.json', keyError: gone, keyErrorHere: F.settingsWords(gone, { keyChosen: true }) }, { privacy: true });
   assert.match(key, /choose it again with Choose another…<\/p>/);
   assert.doesNotMatch(key, /\bbelow\b|Settings → Connections/);
+  // An older snapshot without the Settings wording shows the message as it is.
+  assert.match(fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: err }), { privacy: true }), /then save it in Settings → Connections → Field feedback\./);
   // A name keeps its capital.
   const google = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: 'Google did not let the reader answer.' }), { privacy: true });
   assert.match(google, /Last update failed: Google did not let the reader answer\./);
@@ -751,11 +766,11 @@ test('the key file route shows as before, its sheet link labelled like the reade
   const { fieldSettingsHtml } = await view();
   const html = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true });
   assert.match(html, /value="key" checked> Google key file/);
-  assert.match(html, /<form class="field-entry" id="field-link-form">\s*<label class="field-entry-label" for="field-link">Sheet link<\/label>/);
+  assert.match(html, /<form class="field-entry" id="field-link-form" novalidate>\s*<label class="field-entry-label" for="field-link">Sheet link<\/label>/);
   assert.match(html, /<button class="button" type="submit">Save link<\/button>/);
   assert.match(html, /Choose key file…/);
   // An example of the link it wants.
-  assert.match(html, /<input id="field-link"[^>]*placeholder="docs\.google\.com\/spreadsheets\/d\/…"/);
+  assert.match(html, /<input id="field-link"[^>]*placeholder="https:\/\/docs\.google\.com\/spreadsheets\/d\/…"/);
   assert.doesNotMatch(html, /field-reader-link|field-secret|Copy reader script/);
   // While the link is open again over a saved one, its Save is the one filled button: Choose key file… steps back.
   const SHEET_URL = 'https://docs.google.com/spreadsheets/d/x/edit';
@@ -799,26 +814,39 @@ test('a scale around 0 reads "on −3 to 3" on the board, its meter from its low
   assert.match(fieldColumnsHtml(f, { privacy: true }), /Score, −3 to 3/);
 });
 
-test('in Settings a reader message names the control to use (Secret, Reader link, Copy reader script); the board keeps the path', async () => {
+test('in Settings a reader message names the control in view (the field when open, Replace secret or Change link when folded); the board keeps the path', async () => {
   const fail = async (last) => (await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: fakeReader([MOVED, last]).send }))).message;
+  // [message, with its field open, with it folded behind its button]
   const cases = [
-    [await fail([200, { ok: false, error: 'not allowed' }]), /, then save it under Secret\.$/],
-    [await fail([200, { ok: false, error: 'something new' }]), /does not know\. Press Copy reader script, paste it over the old one and deploy it again/],
-    [await fail([200, 'not json at all']), /^The reader’s answer is not in the shape the app reads\. Press Copy reader script, paste it over the old one/],
-    [await fail([200, '<html><head><title>Error</title></head></html>', { contentType: 'text/html' }]), /then press Copy reader script, paste it over the old one/],
-    [await fail([404, '']), /copy the Web app link and paste it under Reader link\.$/],
-    [await fail([400, '']), /paste it under Reader link, then press Refresh now\.$/],
-    [F.secretFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, /^No reader secret is saved\. Save it under Secret\.$/],
-    [F.secretFileError(Object.assign(new Error('EACCES'), { code: 'EACCES' })).message, /Save the secret again under Secret\.$/],
-    [F.secretLocked().message, /Save the secret again under Secret\.$/],
-    [caught(() => F.openSecret(F.sealSecret(OTHER_DEPLOY, 'c2VhbGVk'), DEPLOY)).message, /^The saved secret was for another reader link\. Save this reader’s secret under Secret\.$/],
+    [await fail([200, { ok: false, error: 'not allowed' }]), /, then save it under Secret\.$/, /, then press Replace secret and save the new one\.$/],
+    [await fail([404, '']), /copy the Web app link and paste it under Reader link\.$/, /copy the Web app link, press Change link and paste it\.$/],
+    [await fail([400, '']), /\(Deploy → Manage deployments\) and paste it under Reader link, then press Refresh now\.$/,
+      /\(Deploy → Manage deployments\), press Change link and paste it, then press Refresh now\.$/],
+    [F.secretFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, /^No reader secret is saved\. Save it under Secret\.$/, /^No reader secret is saved\. Press Replace secret and save it\.$/],
+    [F.secretFileError(Object.assign(new Error('EACCES'), { code: 'EACCES' })).message, /Save the secret again under Secret\.$/, /Press Replace secret and save it again\.$/],
+    [F.secretLocked().message, /Save the secret again under Secret\.$/, /Press Replace secret and save it again\.$/],
+    [caught(() => F.openSecret(F.sealSecret(OTHER_DEPLOY, 'c2VhbGVk'), DEPLOY)).message, /^The saved secret was for another reader link\. Save this reader’s secret under Secret\.$/,
+      /^The saved secret was for another reader link\. Press Replace secret and save this reader’s secret\.$/],
+    // Copy reader script is always in view.
+    [await fail([200, { ok: false, error: 'something new' }]), /does not know\. Press Copy reader script, paste it over the old one and deploy it again/, null],
+    [await fail([200, 'not json at all']), /^The reader’s answer is not in the shape the app reads\. Press Copy reader script, paste it over the old one/, null],
+    [await fail([200, '<html><head><title>Error</title></head></html>', { contentType: 'text/html' }]), /then press Copy reader script, paste it over the old one/, null],
   ];
-  for (const [board, here] of cases) {
+  for (const [board, open, folded] of cases) {
     assert.match(board, /Settings → Connections → Field feedback/, board);
-    assert.match(F.inSettings(board), here);
-    // The app's own Settings path is gone (Apps Script's "Project Settings → Script properties" is not the app's).
-    assert.doesNotMatch(F.inSettings(board), /(?<!Project )Settings →|\bbelow\b/);
+    const words = F.settingsWords(board);
+    assert.deepEqual(Object.keys(words).sort(), ['00', '01', '10', '11']);
+    assert.match(words['11'], open);
+    assert.match(F.inSettings(board), open);
+    // Folded: the secret's messages under the key's first digit, the link's under its second.
+    const shut = /secret/i.test(board) && !/Web app link/.test(board) ? words['01'] : words['10'];
+    assert.match(shut, folded ?? open);
+    for (const w of Object.values(words)) {
+      // The app's own Settings path is gone (Apps Script's "Project Settings → Script properties" is not the app's).
+      assert.doesNotMatch(w, /(?<!Project )Settings →|\bbelow\b/);
+    }
   }
+  assert.equal(F.settingsWords(null), null);
 });
 
 // Last: every error the tests above saw.
