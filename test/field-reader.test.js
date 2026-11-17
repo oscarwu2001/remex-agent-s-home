@@ -314,6 +314,22 @@ test('a question answered with times of day (the reader sends them on 1899-12-30
   assert.deepEqual(key.columns.find((c) => c.header === 'Share').suggested, { role: 'number', confidence: 'high' });
 });
 
+test('answers that look personal outweigh a time of day: a column checked as comments that turns into phone numbers stays hidden', async () => {
+  const phones = ['0912-345-678', '0922-111-333', '+886 933 222 444', '02 2345 6789'];
+  const rows = [['Timestamp', 'Notes', 'Ease (1-5)'], ...[...phones, '1899-12-30T08:00:00.000Z'].map((v, k) => [`2026-11-1${k}T09:00:00.000Z`, v, 4])];
+  const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(rows, 'UTC') });
+  // Guessed identifying from its answers, not left out as times.
+  const guess = F.summarise(got.rows, { timeZone: 'UTC' }).columns.find((c) => c.header === 'Notes').suggested;
+  assert.deepEqual(guess, { role: 'identifying', reason: 'answers', confidence: 'high' });
+  // Checked as comments earlier: kept off the board, flagged, and not kept in the cache.
+  const roles = [{ header: 'Timestamp', index: 0, role: 'timestamp' }, { header: 'Notes', index: 1, role: 'comment' }, { header: 'Ease (1-5)', index: 2, role: 'score', low: 1, high: 5, worse: false }];
+  const cache = F.afterFetch(null, got, { now: 1, started: 1, link: READER, roles });
+  const s = F.summariseCache(cache, roles);
+  assert.deepEqual([s.commentCount, s.comments.length, s.doubtful], [0, 0, ['Notes']]);
+  const kept = JSON.stringify(cache.rows);
+  for (const p of phones) assert.ok(!kept.includes(p), `${p} kept`);
+});
+
 test('dates before 1970 sent by the reader are dates, as they always were', async () => {
   const rows = [['Timestamp', 'Installed', 'Ease (1-5)'],
     ...[1961, 1962, 1963, 1964, 1965].map((y, k) => [`2026-11-1${k}T09:00:00.000Z`, `${y}-06-01T00:00:00.000Z`, 4])];

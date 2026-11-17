@@ -892,13 +892,6 @@ function suggest(header, values, untitled) {
   // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
   if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header', confidence: byHeader === 'label' ? HIGH : LOW };
   if (!untitled && RECORD_ID.test(headerLabel(header))) return { role: 'ignore', reason: 'record id', confidence: HIGH };
-  // Times of day alone, as the reader sends them (on 1899-12-30), are never
-  // shown as comments: left out, surely when most answers are such times,
-  // else as a guess the user is asked about. (The key file sends them as
-  // fractions of a day, which cannot be told from other numbers: those keep
-  // the number guess.)
-  const times = share(values, (v) => typeof v === 'string' && timeOfDay(v));
-  if (times > 0) return { role: 'ignore', reason: 'times of day', confidence: times >= 0.8 ? HIGH : LOW };
   // Three JSON answers or more are surely data; one or two may be a chance
   // answer, so the user is asked.
   if (values.every(jsonData)) return { role: 'ignore', reason: 'json', confidence: values.length >= 3 ? HIGH : LOW };
@@ -910,6 +903,15 @@ function suggest(header, values, untitled) {
   // answer again and again): before the choice and number rules.
   if (share(values, looksLikeName) >= 0.7) return { role: 'identifying', reason: 'names', confidence: LOW };
   if (share(answers, (a) => LONG_NUMBER.test(a)) >= 0.7) return { role: 'identifying', reason: 'numbers', confidence: LOW };
+  // Times of day alone, as the reader sends them (on 1899-12-30), are never
+  // shown as comments: left out, surely when most answers are such times,
+  // else as a guess the user is asked about. After the guesses above, so
+  // answers that look personal are still guessed identifying (and a column
+  // checked otherwise is still kept hidden). (The key file sends times as
+  // fractions of a day, which cannot be told from other numbers: those keep
+  // the number guess.)
+  const times = share(values, (v) => typeof v === 'string' && timeOfDay(v));
+  if (times > 0) return { role: 'ignore', reason: 'times of day', confidence: times >= 0.8 ? HIGH : LOW };
   if (scoreLike) {
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
     if (COUNT_HEADER.test(header)) return { role: 'number', reason: 'count', confidence: HIGH };
