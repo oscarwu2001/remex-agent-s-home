@@ -462,6 +462,9 @@ async function fetchReaderRows({ link, secret, send }) {
 const ROLES = ['timestamp', 'score', 'number', 'choice', 'comment', 'identifying', 'ignore'];
 const STRONG_TIME = /^(time ?stamp|submitted( at)?|submission time|時間戳記|时间戳记|提交時間|提交时间|填答時間)$/i;
 const WEAK_TIME = /^(date|time|date ?time|日期|時間|时间)$/i;
+// "Hub saved (UTC)", "Submitted (UTC)": when a web app saved the row, as it
+// states, before a column of when the entry was last updated.
+const SAVED_TIME = /^(?:\p{L}+ )?(?:saved|submitted|received)(?: at)? \((?:utc|gmt)\)$/iu;
 
 // Identifying by the header only when the header is a short label ("Name",
 // "Email address", "Patient ID", "電話"), never by a word inside a question
@@ -473,6 +476,13 @@ const CASE_ID = /\b(?:patients?|mrn|case (?:id|no|number|#)|chart (?:id|no|numbe
 const ID_CJK_DATA = /姓名|名字|名前|氏名|電子郵件|电子邮件|電郵|电邮|信箱|郵件地址|邮件地址|電話|电话|手機號碼|手机号码|手機|手机|聯絡方式|聯絡電話|聯繫方式|联系方式|联系电话|地址|身分證|身份证|工號|工号|員工編號|员工编号/;
 const ID_CJK_ROLE = /^(?:醫師|医师|醫生|医生|護理師|护理师|填寫人|填写人|填表人|填答者|受訪者|受访者|聯絡人|联络人|聯繫人|联系人|負責人|负责人)(?:姓名)?$/;
 const ID_CJK_CASE = /病歷|病历|病人|病患|患者|個案|个案|病例/;
+// Who sold, and where: a sales representative, a facility or site, a
+// distributor ("Sales rep", "Site / facility", "Distributor name"), as a
+// short label. Its answers name a person or a customer.
+const ID_PARTY = /^(?:(?:sales|field|account|medical) )?(?:rep|representative|agent)(?: name)?$|^(?:facility|site|distributor|dealer)(?: ?\/ ?(?:facility|site|hospital|clinic))?(?: name)?$/i;
+const ID_CJK_PARTY = /^(?:業務(?:代表|員|员)?|业务(?:代表|员)?|經銷商|经销商|代理商)(?:名稱|名称|姓名)?$/;
+// An entry's own id ("Record ID", "Response no."): a key, not an answer.
+const RECORD_ID = /^(?:record|entry|response|submission|report|row|form) ?(?:id|no|number|#)$/i;
 // A header naming a number of its own ("Patient ID", "病歷號碼"): its answers
 // identify even when they are small whole numbers.
 const ID_WORD = /\b(?:id|no|number|mrn)\b|#|號|号|編號|编号/i;
@@ -485,6 +495,11 @@ const WORSE = /\b(?:difficult|difficulty|hard|effort|pain|problems?|discomfort|f
 const worseOf = (header) => (WORSE.test(header) ? { worse: true } : {});
 const COUNT_HEADER = /\bhow many\b|\bnumber of\b|\btimes\b|次數|次数|幾次|几次|多少次|多少個|多少个/i;
 const RANGE = /(\d+)\s*(?:-|–|—|~|～|to|至|到)\s*(\d+)/gi;
+// "(-3..3)", "(1..5)": a range written with "..", whose low end may be below 0.
+const DOTS_RANGE = /(?<![\d.])([-−]?\d+)\s*\.\.\s*\+?([-−]?\d+)(?![\d.])/g;
+// A scale: from 0 or 1, or from below 0 (down to MIN_LOW), up to 10 at most.
+const MIN_LOW = -10;
+const scaleFits = (low, high) => Number.isInteger(low) && Number.isInteger(high) && (low === 0 || low === 1 || (low < 0 && low >= MIN_LOW)) && high > low && high <= 10;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[\d\s().-]{8,}$/;
 // A whole number of eight digits or more: a phone number the sheet stored
@@ -584,7 +599,7 @@ const headerLabel = (header) => header.replace(/[(（【[][^)）】\]]*[)）】\
 function idByHeader(header) {
   const label = headerLabel(header);
   if (!label) return null;
-  if (ID_LABEL.test(label) || PERSON_ROLE.test(label) || ID_CJK_ROLE.test(label)) return 'label';
+  if (ID_LABEL.test(label) || PERSON_ROLE.test(label) || ID_CJK_ROLE.test(label) || ID_PARTY.test(label) || ID_CJK_PARTY.test(label)) return 'label';
   if (ID_CJK_DATA.test(label) && label.length <= 10) return 'label';
   const caseWord = (CASE_ID.test(label) && label.split(' ').length <= 4) || (ID_CJK_CASE.test(label) && label.length <= 10);
   if (caseWord) return ID_WORD.test(label) ? 'label' : 'word';
@@ -621,16 +636,30 @@ function looksLikeName(v) {
   return words.length >= 2 && words.length <= 3 && words.every((w) => NAME_WORD.test(w));
 }
 
-// The scale a header states ("(1-5)", "1~10"); with several ranges in it
-// ("in the first 1-2 weeks? (1-5)") the last one that can be a scale.
+// The scale a header states ("(1-5)", "1~10", "(-3..3)"); with several
+// ranges in it ("in the first 1-2 weeks? (1-5)") the last one that can be a
+// scale. Only ".." takes a low end below 0: "-3-3" reads two ways.
 function statedScale(header) {
+  const signed = (t) => Number(t.replace('−', '-'));
+  const ranges = [...header.matchAll(RANGE)].map((m) => ({ at: m.index, low: Number(m[1]), high: Number(m[2]) }))
+    .concat([...header.matchAll(DOTS_RANGE)].map((m) => ({ at: m.index, low: signed(m[1]), high: signed(m[2]) })))
+    .sort((a, b) => a.at - b.at);
   let found = null;
-  for (const m of header.matchAll(RANGE)) {
-    const low = Number(m[1]);
-    const high = Number(m[2]);
-    if ((low === 0 || low === 1) && high > low && high <= 10) found = { low, high };
-  }
+  for (const { low, high } of ranges) if (scaleFits(low, high)) found = { low, high };
   return found;
+}
+
+// A cell holding a JSON object or list (a web app's record of the entry):
+// data for another program, never an answer to show.
+function jsonData(v) {
+  const s = text(v);
+  if (!/^[[{]/.test(s)) return false;
+  try {
+    const o = JSON.parse(s);
+    return o !== null && typeof o === 'object';
+  } catch {
+    return false; // not JSON after all: an answer like any other, and its column is read as answers
+  }
 }
 
 // The scale the answers fit: 1 up to 5, 7 or 10. Only ever a guess, and
@@ -654,13 +683,18 @@ const LOW = 'low';
 function suggest(header, values, untitled) {
   if (!values.length) return { role: 'ignore', reason: 'no answers', confidence: HIGH };
   const ints = values.map(intOf);
-  // A score: 80% whole numbers on a small scale; or, on a small form where
-  // one "n/a" weighs a lot, at least half, the rest short placeholders.
-  const scored = share(ints, onScale);
-  const scoreLike = scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => onScale(ints[k]) || text(v).length <= 20));
+  // A score: 80% whole numbers on a small scale (or on the one the header
+  // states, below 0 too); or, on a small form where one "n/a" weighs a lot,
+  // at least half, the rest short placeholders.
+  const stated = statedScale(header);
+  const fits = (n) => onScale(n) || (stated != null && Number.isInteger(n) && n >= stated.low && n <= stated.high);
+  const scored = share(ints, fits);
+  const scoreLike = scored >= 0.8 || (scored >= 0.5 && values.every((v, k) => fits(ints[k]) || text(v).length <= 20));
   const byHeader = untitled ? null : idByHeader(header);
   // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
   if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header', confidence: byHeader === 'label' ? HIGH : LOW };
+  if (!untitled && RECORD_ID.test(headerLabel(header))) return { role: 'ignore', reason: 'record id', confidence: HIGH };
+  if (values.every(jsonData)) return { role: 'ignore', reason: 'json', confidence: HIGH };
   if (share(values, looksPersonal) >= 0.5) return { role: 'identifying', reason: 'answers', confidence: HIGH };
   const answers = values.map(text);
   const counts = new Map();
@@ -670,7 +704,6 @@ function suggest(header, values, untitled) {
   if (share(values, looksLikeName) >= 0.7) return { role: 'identifying', reason: 'names', confidence: LOW };
   if (share(answers, (a) => LONG_NUMBER.test(a)) >= 0.7) return { role: 'identifying', reason: 'numbers', confidence: LOW };
   if (scoreLike) {
-    const stated = statedScale(header);
     // "How many times…" with 0, 2, 1, 3: counts, not a scale.
     if (COUNT_HEADER.test(header)) return { role: 'number', reason: 'count', confidence: HIGH };
     if (!stated && ints.includes(0)) return { role: 'number', reason: 'count', confidence: LOW };
@@ -720,8 +753,8 @@ function checkRoles(list) {
     if (r.role === 'score') {
       const low = Number(r.low);
       const high = Number(r.high);
-      if (!((low === 0 || low === 1) && Number.isInteger(high) && high > low && high <= 10)) {
-        throw new RangeError('A score’s scale starts at 0 or 1 and ends above it, at 10 at most.');
+      if (!scaleFits(low, high)) {
+        throw new RangeError(`A score’s scale starts at 0 or 1, or below 0 down to ${MIN_LOW}, and ends above it, at 10 at most.`);
       }
       // The direction as chosen, either way; missing only in roles saved
       // before it was asked.
@@ -746,6 +779,8 @@ function findTimestamp(headers, columns, timeZone, candidate) {
     return columns[i].length > 0 && share(columns[i], (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }))) >= 0.8;
   };
   let i = headers.findIndex((h, k) => candidate(k) && STRONG_TIME.test(h));
+  if (i >= 0) return i;
+  i = headers.findIndex((h, k) => candidate(k) && SAVED_TIME.test(h));
   if (i >= 0) return i;
   i = headers.findIndex((h, k) => candidate(k) && WEAK_TIME.test(h) && parses(k));
   if (i >= 0) return i;
@@ -956,7 +991,9 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
   if (scored.length) {
     const same = scored.every((o) => o.low === scored[0].low && o.high === scored[0].high);
     const vals = same ? scored.map((o) => o.v) : scored.map((o) => ((o.v - o.low) / (o.high - o.low)) * 10);
-    out.overall = { mean: mean(vals), high: same ? scored[0].high : 10, rescaled: !same, n: vals.length };
+    // A scale around 0 ("-3..3") names its low end too: "1.0 / 3" alone
+    // would read as a third of the way.
+    out.overall = { mean: mean(vals), ...(same && scored[0].low < 0 ? { low: scored[0].low } : {}), high: same ? scored[0].high : 10, rescaled: !same, n: vals.length };
   }
 
   // Newest first; with no date, later rows are newer (forms add at the end).

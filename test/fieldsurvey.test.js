@@ -1249,3 +1249,101 @@ test('the new-column line sends the user to Check the columns with privacy mode 
     'Field feedback: 2 new columns in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns, with privacy mode off)',
     'Field feedback: 2 new columns in the sheet, not checked yet (Settings → Connections → Field feedback → Check the columns)', 'check']);
 });
+
+// ---- a web app's survey sheet: its shape, with invented titles and answers ------------------------
+//
+// A sheet written by a survey web app rather than a Google Form: a saved
+// time in UTC and an updated one, an entry id, who sold and where, scores
+// on a scale around 0 written as text, and columns of JSON.
+
+const isoDay = (d, h = 9) => `2026-11-${String(d).padStart(2, '0')}T${String(h).padStart(2, '0')}:00:00.000Z`;
+
+test('a stated scale with a negative low end and ".." is its scale; one turned round or not numbers is not', () => {
+  const s = F.summarise(form(['Comfort (-3..3)', 'Handling (-2..2)', 'Grip (3..-3)', 'Fit (a..b)'],
+    [['-3', '-2', '-3', '1'], ['2', '1', '2', '0'], ['3', '2', '-1', '2'], ['1', '-1', '3', '1'], ['2', '2', '0', '2']]));
+  assert.deepEqual(s.questions.map((q) => [q.question, q.low, q.high, q.scaleFrom, q.mean]), [
+    ['Comfort (-3..3)', -3, 3, 'header', 1], ['Handling (-2..2)', -2, 2, 'header', 0.4]]);
+  assert.equal(col(s, 'Comfort (-3..3)').suggested.confidence, 'high');
+  assert.equal(s.unreadable.scores, 0);
+  // Two scales: each answer put on 0–10 (Comfort 0, 8.33, 10, 6.67, 8.33; Handling 0, 7.5, 10, 2.5, 10).
+  assert.equal(s.overall.rescaled, true);
+  assert.ok(Math.abs(s.overall.mean - 19 / 3) < 1e-9, String(s.overall.mean));
+  // "(3..-3)" and "(a..b)" state no scale.
+  assert.notEqual(col(s, 'Grip (3..-3)').suggested.scaleFrom, 'header');
+  assert.notEqual(col(s, 'Fit (a..b)').suggested.scaleFrom, 'header');
+  assert.equal(roleOf(s, 'Grip (3..-3)'), 'number');
+  // One scale around 0: the headline average keeps it, low end and all.
+  const one = F.summarise(form(['Comfort (-3..3)'], [['-3'], ['2'], ['3'], ['1'], ['2']]));
+  assert.deepEqual(one.overall, { mean: 1, low: -3, high: 3, rescaled: false, n: 5 });
+  // Saved from Check the columns: a low end below 0 is a scale, one below -10 or above the high end is not.
+  assert.deepEqual(F.checkRoles([{ header: 'Q', index: 1, role: 'score', low: '-3', high: '3', worse: false }]), [{ header: 'Q', index: 1, role: 'score', low: -3, high: 3, worse: false }]);
+  for (const [low, high] of [[-11, 3], [3, -3], [-2, -2], [-1.5, 2]]) {
+    assert.throws(() => F.checkRoles([{ header: 'Q', index: 1, role: 'score', low, high }]), /starts at 0 or 1/, `${low}..${high}`);
+  }
+});
+
+test('on a scale around 0, the low mark is its bottom quarter and a fall of a tenth of it is flagged', () => {
+  // -3..3 has 7 points: the bottom quarter, rounded up, is -3 and -2. -2..2: -2 and -1.
+  assert.deepEqual([F.lowMark(-3, 3), F.lowMark(-2, 2)], [-2, -1]);
+  const rows = dated(['Comfort (-3..3)'], [...earlier(['2']), [3, '-3'], [2, '-2'], [1, '0'], [0.5, '1']]);
+  const { why, list } = flagsChecked(rows);
+  assert.equal(why, null);
+  assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => [f.count, f.mark, f.low, f.high]), [[2, -2, -3, 3]]);
+  // From 2 to (-3 - 2 + 0 + 1) / 4 = -1: three points down, far over 0.6.
+  assert.deepEqual(list.filter((f) => f.kind === 'falling').map((f) => [f.recentN, f.recentMean, f.earlierMean]), [[4, -1, 2]]);
+  // Up by 0.5 only (2 to 2.5): no fall.
+  assert.deepEqual(flagsChecked(dated(['Comfort (-3..3)'], [...earlier(['2']), [3, '3'], [2, '2'], [1, '2'], [0.5, '3']])).list.filter((f) => f.kind !== 'comments'), []);
+});
+
+test('a time saved or submitted in UTC is the timestamp, before one of when the entry was updated', () => {
+  const rows = [['Device updated (UTC)', 'Hub saved (UTC)', 'Ease (1-5)'],
+    [isoDay(14), isoDay(10), '4'], [isoDay(15), isoDay(11), '5'], [isoDay(16), isoDay(12), '3']];
+  const s = F.summarise(rows);
+  assert.equal(s.timestampColumn, 'Hub saved (UTC)');
+  assert.deepEqual([s.oldest, s.newest], [isoDay(10), isoDay(12)]);
+  assert.equal(roleOf(s, 'Device updated (UTC)'), 'ignore');
+  assert.equal(F.summarise([['Note', 'Submitted (UTC)'], ['x', isoDay(10)], ['y', isoDay(11)]]).timestampColumn, 'Submitted (UTC)');
+  // "Time saved" in minutes is not when the entry came in: the updated time is the only dates column, so it is that.
+  const t = F.summarise([['Time saved', 'Device updated (UTC)', 'Ease (1-5)'], ['12', isoDay(14), '4'], ['30', isoDay(15), '5'], ['25', isoDay(16), '3']]);
+  assert.equal(t.timestampColumn, 'Device updated (UTC)');
+  assert.equal(roleOf(t, 'Time saved'), 'number');
+});
+
+test('a column of JSON objects or lists is left out, never shown as comments; one plain answer among them keeps it a column of answers', () => {
+  const s = F.summarise(form(['Fault list (JSON)', 'Whole entry JSON', 'Notes'], [
+    ['{"pump":"loose","seen":2}', '{"a":1,"b":[1,2]}', 'The cart squeaks'],
+    ['[]', '{"a":2}', 'Fine'],
+    ['', '{"a":3,"note":"a long note about the visit"}', 'Holder slipped twice'],
+  ]));
+  assert.deepEqual([col(s, 'Fault list (JSON)').suggested, col(s, 'Whole entry JSON').suggested], [
+    { role: 'ignore', reason: 'json', confidence: 'high' }, { role: 'ignore', reason: 'json', confidence: 'high' }]);
+  assert.deepEqual(s.comments.map((c) => c.question), ['Notes', 'Notes', 'Notes']);
+  assert.equal(s.commentCount, 3);
+  // Their answers are not kept in the cache either.
+  const c = F.afterFetch(null, got(form(['Fault list (JSON)'], [['{"pump":"loose"}'], ['[1]']])), { now: 1, started: 1, link: LINK });
+  assert.ok(!JSON.stringify(c.rows).includes('pump'));
+  // One answer that is not JSON: a column of answers like any other.
+  const mixed = F.summarise(form(['Fault list (JSON)'], [['{"pump":"loose"}'], ['loose holder, reported twice'], ['{"b":2}']]));
+  assert.equal(roleOf(mixed, 'Fault list (JSON)'), 'comment');
+  // JSON that is a plain number or text is not data to leave out.
+  assert.notEqual(col(F.summarise(form(['Seen'], [['"a"'], ['"b"'], ['"c"']])), 'Seen').suggested.reason, 'json');
+});
+
+test('a sales representative, a facility or site and a distributor are identifying by their title; a question about the site is not', () => {
+  const titles = ['Sales rep', 'Representative name', 'Site / facility', 'Facility', 'Distributor', 'Dealer name', '業務代表', '經銷商'];
+  const s = F.summarise(form([...titles, 'Was the site easy to reach?'],
+    [0, 1, 2, 3, 4].map((i) => [...titles.map((_, k) => `code ${k}-${i % 2}`), i % 2 ? 'Yes' : 'No'])));
+  assert.deepEqual(s.identifying, titles);
+  for (const t of titles) assert.deepEqual([col(s, t).suggested.reason, col(s, t).suggested.confidence], ['header', 'high'], t);
+  assert.equal(roleOf(s, 'Was the site easy to reach?'), 'choice');
+  assert.ok(!JSON.stringify(F.afterFetch(null, got(form(['Sales rep'], [['code 7']])), { now: 1, started: 1, link: LINK }).rows).includes('code 7'));
+});
+
+test('an entry or record id is left out, not read as comments; a title that only starts like one is not', () => {
+  const s = F.summarise(form(['Entry ID', 'Response no.', 'Entry notes'], [
+    ['e-20261110-0001', '1', 'Smooth visit'], ['e-20261111-0002', '2', 'Cart squeaks'], ['e-20261112-0003', '3', 'Fine']]));
+  assert.deepEqual([col(s, 'Entry ID').suggested, col(s, 'Response no.').suggested.role], [{ role: 'ignore', reason: 'record id', confidence: 'high' }, 'ignore']);
+  assert.equal(roleOf(s, 'Entry notes'), 'comment');
+  assert.equal(s.commentCount, 3);
+  assert.deepEqual(s.questions, []);
+});
