@@ -432,11 +432,10 @@ function readerSettings(f, { privacy, state }) {
   const secretOpen = !f.secretSaved || state.secretEditing;
   let secret;
   // No protected storage: no Secret field and no Replace secret (it would
-  // open onto nothing), only what is so and why.
-  if (f.secretStorage && f.secretSaved) {
-    secret = `<p class="field-set"><span>A secret is saved, but this computer can’t open it now.</span></p>
-    <p class="hint">${esc(f.secretStorage)}</p>`;
-  } else if (f.secretStorage) secret = `<p class="hint">${esc(f.secretStorage)}</p>`;
+  // open onto nothing), only one line on what is so; the reason is said
+  // once, under How to connect.
+  if (f.secretStorage && f.secretSaved) secret = '<p class="field-set"><span>A secret is saved, but this computer can’t open it now (see How to connect).</span></p>';
+  else if (f.secretStorage) secret = '<p class="field-set"><span>This computer can’t keep a secret (see How to connect).</span></p>';
   else if (secretOpen) {
     // The second field's Save is plain until the link is saved: one filled button at a time.
     secret = entryForm({
@@ -492,7 +491,7 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   if (source === 'reader') {
     const reader = readerSettings(f, { privacy, state });
     return `${sourceChoice(f, source, state)}${reader.html}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
-    ${common(Boolean(f.readerUrl && f.secretSaved), reader.open, reader.shown)}`;
+    ${common(Boolean(f.readerUrl && f.secretSaved && !f.secretStorage), reader.open, reader.shown)}`;
   }
   const showLink = !f.sheetUrl || state.editing;
   const typed = linkValue(f.sheetUrl, state.linkDraft, privacy);

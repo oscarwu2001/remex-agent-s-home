@@ -751,16 +751,22 @@ test('with no protected storage, How to connect says so: the reader cannot be ch
   assert.match(onKey, /set up a keyring, then restart Agent’s Home\./);
   const onReader = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE }), { privacy: true });
   assert.doesNotMatch(onReader, /type="password"|Kept encrypted/);
-  assert.match(onReader, /no protected storage/);
-  // A secret saved earlier, and no protected storage now: said, with the reason, and no Replace secret that
-  // would open onto nothing; asked again while Replace secret was open, it reads the same.
+  // The reason is said once, under How to connect; the secret's place points there in one line.
+  const once = (html) => (html.match(/no protected storage/g) ?? []).length;
+  assert.equal(once(onReader), 1);
+  assert.match(onReader, /id="field-source-storage">This computer has no protected storage/);
+  assert.match(onReader, /<p class="field-set"><span>This computer can’t keep a secret \(see How to connect\)\.<\/span><\/p>/);
+  // A secret saved earlier, and no protected storage now: said in one line, and no Replace secret that would
+  // open onto nothing; asked again while Replace secret was open, it reads the same. Nothing can be read
+  // with it, so Refresh now is not offered as if the reader were ready.
   for (const state of [{}, { secretEditing: true }]) {
     const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, secretStorage: NO_STORE }), { privacy: true, state });
-    assert.match(html, /<p class="field-set"><span>A secret is saved, but this computer can’t open it now\.<\/span><\/p>\s*<p class="hint">This computer has no protected storage/);
-    assert.doesNotMatch(html, /Replace secret|type="password"|cancel-secret/);
-    // No field is open: Refresh now is the filled button.
-    assert.match(html, /<button type="button" class="button" id="field-refresh"/);
+    assert.match(html, /<p class="field-set"><span>A secret is saved, but this computer can’t open it now \(see How to connect\)\.<\/span><\/p>/);
+    assert.equal(once(html), 1);
+    assert.doesNotMatch(html, /Replace secret|type="password"|cancel-secret|id="field-refresh"/);
   }
+  // With protected storage, the same saved reader is ready: Refresh now is the filled button.
+  assert.match(fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true }), { privacy: true }), /<button type="button" class="button" id="field-refresh"/);
   // No Secret field is drawn: a failed update about the secret defers to the reason shown, never to a field or
   // Replace secret, whether a secret was saved before or not.
   const mismatch = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';
