@@ -25,8 +25,8 @@ const iso = (...a) => local(...a).toISOString();
 
 // ---- the hosts -------------------------------------------------------------
 
-test('only Google sign-in and Sheets are allowed, over https', () => {
-  assert.deepEqual([...F.HOSTS].sort(), ['oauth2.googleapis.com', 'sheets.googleapis.com']);
+test('only Google sign-in, Sheets and the Apps Script reader are allowed, over https', () => {
+  assert.deepEqual([...F.HOSTS].sort(), ['oauth2.googleapis.com', 'script.google.com', 'script.googleusercontent.com', 'sheets.googleapis.com']);
   for (const url of [F.TOKEN_URL, F.metadataUrl(SHEET_ID), F.valuesUrl(SHEET_ID, 'Form Responses 1')]) {
     assert.equal(F.checkUrl(url), url);
   }

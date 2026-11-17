@@ -2,20 +2,27 @@
 
 // Field feedback: the answers to a Google Form, read from the Google Sheet
 // they land in, so the board can show how the field survey is going. Off
-// until the user turns it on in Settings and gives a sheet link and the JSON
-// key of their own service account, which they have shared the sheet with.
+// until the user turns it on in Settings and connects one of two ways: a
+// sheet link and the JSON key of their own service account, which they have
+// shared the sheet with; or the link and secret of a small reader script
+// attached to the sheet (docs/field-feedback-reader.gs).
 //
 // This module names the only hosts the feature may reach, builds and signs
 // the requests (Node's own crypto, no packages), turns Google's answers into
 // plain sentences and summarises the table; electron/main.js does the
 // fetching. Nothing from the user's sessions is ever sent: only the signed
-// token request, the sheet's id and the name of its tab.
+// token request, the sheet's id and the name of its tab, or the reader's
+// secret to the reader itself.
 
 const crypto = require('crypto');
 
 const TOKEN_HOST = 'oauth2.googleapis.com';
 const SHEETS_HOST = 'sheets.googleapis.com';
-const HOSTS = new Set([TOKEN_HOST, SHEETS_HOST]);
+// The reader route: the user's own Apps Script web app, and the one host
+// Google hands its answer over from.
+const READER_HOST = 'script.google.com';
+const ECHO_HOST = 'script.googleusercontent.com';
+const HOSTS = new Set([TOKEN_HOST, SHEETS_HOST, READER_HOST, ECHO_HOST]);
 const TOKEN_URL = `https://${TOKEN_HOST}/token`;
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
@@ -157,7 +164,7 @@ function checkUrl(url) {
     throw new FieldSurveyError('blocked', 'A request to an address that could not be read was refused.');
   }
   if (u.protocol !== 'https:' || !HOSTS.has(u.host) || u.username || u.password) {
-    throw new FieldSurveyError('blocked', `A request to ${u.host || 'an unknown host'} was refused: field feedback talks only to Google's sign-in and Sheets services.`);
+    throw new FieldSurveyError('blocked', `A request to ${u.host || 'an unknown host'} was refused: field feedback talks only to Google's sign-in, Sheets and Apps Script services.`);
   }
   return url;
 }
@@ -263,6 +270,177 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
   if (vals.values !== undefined && !Array.isArray(vals.values)) throw new FieldSurveyError('answer', 'Google answered without rows. Press Refresh now.');
   const timeZone = typeof meta.properties?.timeZone === 'string' ? meta.properties.timeZone : undefined;
   return { rows: vals.values ?? [], tab: { id: tab.sheetId, title: tab.title }, timeZone };
+}
+
+// ---- the reader script --------------------------------------------------------------------
+//
+// The way in without Google Cloud: a small Apps Script attached to the sheet
+// (docs/field-feedback-reader.gs), deployed as a web app anyone may call,
+// that answers only a POST carrying its secret. The secret goes in the body,
+// never in the address. Google answers every web-app call with a redirect to
+// the reply on script.googleusercontent.com, which is then fetched: that one
+// hop, to that one host, over https, and no other. Messages name the next
+// step and carry no codes; a `code` beside them (never the secret or the
+// link) is for the system log.
+
+const READER_HELP = 'In the reader script, Deploy → Manage deployments and copy the Web app link; it looks like https://script.google.com/macros/s/…/exec';
+const SECRET_HELP = 'Copy READER_SECRET from the reader script’s Project Settings → Script properties.';
+const ANYONE = 'In the reader script, Deploy → Manage deployments → Edit → Who has access → Anyone, then press Refresh now.';
+const NEW_VERSION = 'deploy it again as a new version (Deploy → Manage deployments → Edit → Version: New version)';
+
+const readerError = (kind, message, code) => Object.assign(new FieldSurveyError(kind, message), { code });
+
+// The web app's link -> { deploymentId, url }: url is the link rebuilt from
+// its id alone, so nothing else typed into it (a query, a fragment) is kept
+// or sent.
+function parseReaderLink(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) throw new RangeError(`No reader link yet. ${READER_HELP}`);
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new RangeError(`That is not a link. ${READER_HELP}`);
+  }
+  if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(`That link is not an Apps Script web app. ${READER_HELP}`);
+  if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(`That is the script editor’s link, not the web app’s. ${READER_HELP}`);
+  const m = /^\/macros\/s\/([^/]+)\/(exec|dev)\/?$/.exec(u.pathname);
+  if (m?.[2] === 'dev') {
+    throw new RangeError('That is the test link (it ends in /dev), which works only in your own signed-in browser. In the reader script, Deploy → Manage deployments and copy the Web app link that ends in /exec.');
+  }
+  if (!m) throw new RangeError(`That link is not a reader web app. ${READER_HELP}`);
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The id in that link looks cut short. ${READER_HELP}`);
+  return { deploymentId: m[1], url: `https://${READER_HOST}/macros/s/${m[1]}/exec` };
+}
+
+// The secret as typed in Settings, checked before it is saved. available:
+// the system's own protection can encrypt it (Electron's safeStorage);
+// backend: which one on Linux, where 'basic_text' is no protection at all.
+// Without it the secret is refused, never kept as plain text. No message
+// repeats what was typed.
+function checkSecret(text, { available = false, backend } = {}) {
+  if (!available || backend === 'basic_text' || backend === 'unknown') {
+    return { error: 'Not saved: this computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.' };
+  }
+  const s = typeof text === 'string' ? text.trim() : '';
+  if (!s) return { error: `No secret yet. ${SECRET_HELP}` };
+  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the reader’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}` };
+  return { secret: s };
+}
+
+// The POST to the reader: the secret as JSON text in the body (Apps Script
+// reads it from e.postData.contents).
+function readerRequest(link, secret) {
+  return {
+    url: link.url,
+    init: { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8', accept: 'application/json' }, body: JSON.stringify({ secret }) },
+  };
+}
+
+const isRedirect = (status) => [301, 302, 303, 307, 308].includes(status);
+
+// Where Google sent the reader's answer -> the one address the app fetches
+// next. Only https on script.googleusercontent.com; Google's sign-in page
+// means the web app is not open to Anyone.
+function readerHop(location) {
+  if (typeof location !== 'string' || !location.trim()) {
+    throw readerError('answer', 'Google sent the reader’s answer on without saying where; press Refresh now.', 'redirect without location');
+  }
+  let u;
+  try {
+    u = new URL(location.trim());
+  } catch {
+    throw readerError('blocked', `The reader’s answer was sent to an address that could not be read, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`, 'redirect not a url');
+  }
+  if (u.host === 'accounts.google.com') throw readerError('access', `Google asked for a sign-in instead of letting the reader answer. ${ANYONE}`, 'redirect to sign-in');
+  if (u.protocol !== 'https:' || u.host !== ECHO_HOST || u.username || u.password) {
+    throw readerError('blocked', `The reader’s answer was sent to ${u.protocol === 'https:' ? u.host || 'an unknown host' : 'an address without https'}, which the app does not follow: it takes the answer only from script.googleusercontent.com over https.`, `redirect to ${u.protocol}//${u.host}`);
+  }
+  return u.toString();
+}
+
+// The reader could not be reached: the network's trouble, retried in half an
+// hour. The words of the error go to the log only, without any address in
+// them.
+function readerUnreachable(err) {
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    return readerError('network', 'The reader did not answer in time; check the internet connection, then press Refresh now.', 'timeout');
+  }
+  const said = String(err?.message ?? err).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 120);
+  return readerError('network', 'No network: the reader could not be reached; check the internet connection or proxy, then press Refresh now.', said);
+}
+
+const CELL = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+
+// The reader's last answer -> { rows, tab, timeZone }, in fetchRows' shape
+// (its display strings stand in for the sheet's values; it names no zone).
+function readerReply(status, contentType, raw) {
+  if (status === 429) throw readerError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.', 'http 429');
+  if (status >= 500) throw readerError('google', 'Google’s Apps Script service had a problem; it tries again in half an hour.', `http ${status}`);
+  if (status === 401 || status === 403) throw readerError('access', `Google did not let the reader answer. ${ANYONE}`, `http ${status}`);
+  if (status === 404) {
+    throw readerError('missing', 'No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in Settings → Connections → Field feedback.', 'http 404');
+  }
+  if (!(status >= 200 && status < 300)) throw readerError('google', 'Google answered the reader’s call in a way the app does not know; press Refresh now, and check the reader link if it happens again.', `http ${status}`);
+  const text = typeof raw === 'string' ? raw : '';
+  // Not open to Anyone: Google shows its sign-in page, in HTML.
+  if (/text\/html/i.test(String(contentType ?? '')) || /^\s*</.test(text)) {
+    throw readerError('access', `Google showed a page instead of the reader’s answer, usually its sign-in page. ${ANYONE}`, 'html');
+  }
+  const unreadable = (code) => readerError('answer', `The reader’s answer could not be read. Press Refresh now; if it happens again, copy the reader script again and ${NEW_VERSION}.`, code);
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw unreadable('not json');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw unreadable('not an object');
+  if (body.ok === false) {
+    if (body.error === 'not allowed') {
+      throw readerError('secret', `The reader refused the secret: it does not match the reader’s. ${SECRET_HELP} Then save it in Settings → Connections → Field feedback.`, 'not allowed');
+    }
+    if (body.error === 'tab not found') {
+      throw readerError('tab', `The reader cannot find its tab: check that TAB at the top of the reader script is the tab’s name, then ${NEW_VERSION}.`, 'tab not found');
+    }
+    throw readerError('reader', `The reader said no for a reason the app does not know. Copy the reader script again (Settings → Connections → Field feedback) and ${NEW_VERSION}.`, `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 60)}`);
+  }
+  if (body.ok !== true) throw unreadable('no ok');
+  if (!Array.isArray(body.values) || !body.values.every((r) => Array.isArray(r) && r.every(CELL))) {
+    throw readerError('answer', `The reader answered without rows. Press Refresh now; if it happens again, copy the reader script again and ${NEW_VERSION}.`, 'no values');
+  }
+  return { rows: body.values, tab: typeof body.tab === 'string' ? { id: null, title: body.tab } : null, timeZone: undefined };
+}
+
+// Posts the secret to the reader, follows Google's one redirect and reads
+// the answer. `send(url, init)` is the caller's (Electron's net.request in
+// the app) and never follows a redirect itself: it resolves { status,
+// location, contentType, text() }. Every URL passes checkUrl first.
+// -> { rows, tab, timeZone }. Throws FieldSurveyError.
+async function fetchReaderRows({ link, secret, send }) {
+  const call = async (url, init) => {
+    checkUrl(url);
+    try {
+      return await send(url, init);
+    } catch (err) {
+      if (err instanceof FieldSurveyError) throw err;
+      throw readerUnreachable(err);
+    }
+  };
+  const req = readerRequest(link, secret);
+  let res = await call(req.url, req.init);
+  if (isRedirect(res.status)) {
+    res = await call(readerHop(res.location), { method: 'GET', headers: { accept: 'application/json' } });
+    if (isRedirect(res.status)) {
+      throw readerError('blocked', `Google redirected the reader’s answer a second time, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`, 'second redirect');
+    }
+  }
+  let raw;
+  try {
+    raw = await res.text();
+  } catch (err) {
+    throw readerUnreachable(err);
+  }
+  return readerReply(res.status, res.contentType, raw);
 }
 
 // ---- summarising the table -------------------------------------------------------------
@@ -847,12 +1025,34 @@ const RETRY_MS = 30 * 60_000;
 // was suggested for them (3 kept an ignored column's answers; 2 a guess's).
 const CACHE_VERSION = 4;
 
-const sameSheet = (cache, link) => Boolean(cache && link && cache.spreadsheetId === link.spreadsheetId && (cache.gid ?? null) === (link.gid ?? null));
+// The cache is the source's: a reader's by its deployment id, a key-file
+// sheet's by its id and tab. Rows from one never stand for the other.
+const sameSheet = (cache, link) => Boolean(cache && link && (link.deploymentId
+  ? cache.deploymentId === link.deploymentId
+  : cache.deploymentId == null && cache.spreadsheetId === link.spreadsheetId && (cache.gid ?? null) === (link.gid ?? null)));
 
-// settings: { enabled, sheetUrl, keyPath }. -> { fetch, wakeAt }: fetch now,
-// or look again at wakeAt (null: nothing to wait for).
+// How the app connects: 'reader' (the reader script's link and secret) or
+// 'key' (a sheet link and a service account key file). Settings saved before
+// the reader existed name no source and are the key file's; a fresh set-up
+// starts on the reader.
+const SOURCES = ['reader', 'key'];
+function sourceOf(settings) {
+  if (SOURCES.includes(settings?.source)) return settings.source;
+  return settings?.sheetUrl || settings?.keyPath ? 'key' : 'reader';
+}
+
+// The saved settings' link, for the source in use: { deploymentId, url } or
+// { spreadsheetId, gid }. Throws RangeError with what to do.
+function sourceLink(settings) {
+  return sourceOf(settings) === 'reader' ? parseReaderLink(settings?.readerUrl) : parseSheetLink(settings?.sheetUrl);
+}
+
+// settings: { enabled, source, sheetUrl, keyPath, readerUrl, secretSaved }
+// (secretSaved: the main process holds an encrypted secret). -> { fetch,
+// wakeAt }: fetch now, or look again at wakeAt (null: nothing to wait for).
 function planFetch({ now, settings, cache, busy = false }) {
-  if (!settings?.enabled || !settings.sheetUrl || !settings.keyPath || busy) return { fetch: false, wakeAt: null };
+  const ready = sourceOf(settings) === 'reader' ? settings?.readerUrl && settings.secretSaved : settings?.sheetUrl && settings.keyPath;
+  if (!settings?.enabled || !ready || busy) return { fetch: false, wakeAt: null };
   const { due, next, lastSlot } = nextRun(now, cache?.fetchedAt ?? null);
   const nextMs = next.getTime();
   if (!due) return { fetch: false, wakeAt: nextMs };
@@ -890,7 +1090,7 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const before = same ? prev.newest ?? null : null;
   const changed = same && first.newest !== before;
   return {
-    version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null,
+    version: CACHE_VERSION, spreadsheetId: link.spreadsheetId ?? null, gid: link.gid ?? null, ...(link.deploymentId ? { deploymentId: link.deploymentId } : {}),
     tab: got.tab ?? null, timeZone: got.timeZone ?? null,
     rows: redactRows(got.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
@@ -909,7 +1109,10 @@ function afterFailure(prev, err, { now, started, link }) {
     ...(known && err.detail ? { detail: err.detail } : {}),
   };
   const base = sameSheet(prev, link) ? prev
-    : { version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, rows: null, redacted: [], hiddenAs: [], fetchedAt: null };
+    : {
+      version: CACHE_VERSION, spreadsheetId: link?.spreadsheetId ?? null, gid: link?.gid ?? null, ...(link?.deploymentId ? { deploymentId: link.deploymentId } : {}),
+      rows: null, redacted: [], hiddenAs: [], fetchedAt: null,
+    };
   return { ...base, lastAttemptAt: started, lastError };
 }
 
@@ -942,7 +1145,7 @@ function validCache(raw, link) {
   const e = raw.lastError;
   const ok = (raw.rows === null || (Array.isArray(raw.rows) && raw.rows.every(Array.isArray)))
     && num(raw.fetchedAt) && num(raw.lastAttemptAt) && num(raw.sinceFetchedAt)
-    && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId)
+    && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId) && str(raw.deploymentId)
     && (raw.gid == null || Number.isInteger(raw.gid))
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
     && (raw.hiddenAs == null || (Array.isArray(raw.hiddenAs) && raw.hiddenAs.every((h) => h && Number.isInteger(h.index) && h.index >= 0
@@ -956,7 +1159,13 @@ function validCache(raw, link) {
   // No usable link: nothing to compare with, and the next read says what is
   // wrong with the link; the cache is set aside without a word of its own.
   if (!link) return { cache: null, problem: null };
-  if (!sameSheet(raw, link)) return { cache: null, problem: 'The saved field feedback was for another sheet; it was set aside and this sheet is read again.' };
+  if (!sameSheet(raw, link)) {
+    return {
+      cache: null,
+      problem: link.deploymentId || raw.deploymentId != null ? 'The saved field feedback came from another sheet or reader; it was set aside and read again.'
+        : 'The saved field feedback was for another sheet; it was set aside and this sheet is read again.',
+    };
+  }
   return { cache: raw, problem: null };
 }
 
@@ -966,10 +1175,33 @@ function validCache(raw, link) {
 // answers read. Columns are saved only all at once, against the sheet as
 // last read (summary): one the user has not chosen refuses the save, so a
 // guess is never stored as the user's choice.
+// The source and the reader link are kept only once set, so settings from
+// before the reader read back as they were. A reader link is saved rebuilt
+// from its id (parseReaderLink), and an empty one keeps the saved one too.
+// sheetChanged: the sheet or reader read from is another (another source,
+// sheet or reader), so the answers kept and the checked columns go.
 function changeSettings(current, change, { summary = null } = {}) {
-  const next = { enabled: current?.enabled === true, sheetUrl: current?.sheetUrl ?? '', keyPath: current?.keyPath ?? '', columns: current?.columns ?? [] };
+  const next = {
+    enabled: current?.enabled === true, sheetUrl: current?.sheetUrl ?? '', keyPath: current?.keyPath ?? '',
+    ...(current?.source ? { source: current.source } : {}), ...(current?.readerUrl ? { readerUrl: current.readerUrl } : {}),
+    columns: current?.columns ?? [],
+  };
   let note;
   if (change && 'enabled' in change) next.enabled = change.enabled === true;
+  if (change && 'source' in change) {
+    if (!SOURCES.includes(change.source)) return { error: 'Choose how to connect: the reader script, or a Google key file.' };
+    next.source = change.source;
+  }
+  if (change && 'readerUrl' in change) {
+    const url = String(change.readerUrl ?? '').trim();
+    if (url) {
+      try {
+        next.readerUrl = parseReaderLink(url).url;
+      } catch (err) {
+        return { error: err.message };
+      }
+    }
+  }
   if (change && 'sheetUrl' in change) {
     const url = String(change.sheetUrl ?? '').trim();
     if (url) {
@@ -1002,7 +1234,8 @@ function changeSettings(current, change, { summary = null } = {}) {
     const { missing } = checkSubmission(summary, next.columns);
     if (missing) return { error: `Not saved: ${missing} ${missing === 1 ? 'column still needs' : 'columns still need'} a choice.` };
   }
-  const sheetChanged = next.sheetUrl !== (current?.sheetUrl ?? '');
+  const from = (s) => (sourceOf(s) === 'reader' ? `reader ${s?.readerUrl ?? ''}` : `key ${s?.sheetUrl ?? ''}`);
+  const sheetChanged = from(next) !== from(current);
   // Another sheet is another form: its columns are checked afresh. Turned
   // off, nothing is kept, the question titles in the roles included.
   if ((sheetChanged || (current?.enabled && !next.enabled)) && !(change && 'columns' in change)) next.columns = [];
@@ -1133,8 +1366,9 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 }
 
 module.exports = {
-  HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, FieldSurveyError,
+  HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, SOURCES, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
+  parseReaderLink, checkSecret, readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };
