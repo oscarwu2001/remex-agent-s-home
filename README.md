@@ -253,7 +253,8 @@ the one place Google hands it over, `script.googleusercontent.com`; it
 follows no other redirect, and reads at most 20 MB of answer. The secret is
 kept encrypted with your computer's own protection (Windows' data
 protection, the macOS keychain, or a Linux keyring; without one the app
-refuses to save it, and Settings says so before you choose the reader),
+refuses to save it, and Settings says so before you choose the reader;
+a keyring set up later counts once Agent's Home is restarted),
 together with the reader link it belongs to: it is never sent to another
 reader, and pasting another reader's link removes it. It is never shown
 again and never written to a log.
@@ -290,7 +291,8 @@ and **Needs attention** asks you to copy the script again.
    follows at once.
 6. Check the columns, as in step 7 below.
 
-If the update fails, the error says what to do: a secret that does not match
+If the update fails, the error says what to do (in Settings it names the
+button or field to use there; on the board, the Settings path): a secret that does not match
 (copy `READER_SECRET` again), a tab the reader cannot find (check `TAB`),
 Google showing its sign-in page instead of the answers (the deployment is not
 set to **Anyone**: **Deploy → Manage deployments → Edit → Who has access →
@@ -320,7 +322,7 @@ which you share the sheet with:
    `iam.gserviceaccount.com`) as **Viewer**.
 6. In Agent's Home, open **Settings → Connections → Field feedback (Google Sheet)**, turn on
    **Show field feedback**, choose **Google key file**, paste the sheet's link from the browser's address
-   bar and press **Save**, then press **Choose key file…** and pick the
+   bar and press **Save link**, then press **Choose key file…** and pick the
    `.json` file. **Copy reader address** puts the service account's email on
    the clipboard for step 5 (with privacy off, Settings shows it too).
 7. After the first update, turn **Hide file names, commands and survey
@@ -359,7 +361,7 @@ a distributor ("Distributor", "Distributor name"), and their Chinese titles
 業務代表, 業務員 and 經銷商, are identifying; a wider title such as "Agent" or
 "Dealer" is not, so check such a column yourself. A
 column of when the entry was saved ("… saved (UTC)", "Submitted (UTC)") is
-taken as when answered, before one of when it was last updated. A column added to the form later, and columns
+taken as when answered, before one of when it was last updated. A when-answered column whose title says UTC or GMT ("Hub saved (UTC)", "Timestamp UTC") has its times read as UTC, whatever the sheet's time zone; a cell holding only a time of day is not a date, so such a column is never taken as when answered. A column added to the form later, and columns
 waiting for a choice, are flagged under **Needs attention** until you check
 them. Turning field feedback off deletes the answers kept and your checked
 columns; turned on again, the columns are checked afresh. Answers the app cannot read, such as

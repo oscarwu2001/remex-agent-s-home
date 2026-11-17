@@ -554,20 +554,26 @@ test('no other file in src, electron or renderer names the reader’s hosts', ()
 
 const view = () => import('../renderer/field-view.js');
 const readerField = (extra = {}) => ({ enabled: true, source: 'reader', readerUrl: '', secretSaved: false, sheetUrl: '', keyName: '', secretStorage: null, checkedColumns: 0, ...extra });
-const NO_STORE = 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.';
+const NO_STORE = F.secretStorage({ available: false });
 
 test('Settings: how to connect, the set-up step, then the reader link and the secret, each with its own Save', async () => {
   const { fieldSettingsHtml } = await view();
   const html = fieldSettingsHtml(readerField(), { privacy: true });
-  assert.match(html, /<fieldset class="field field-source" aria-describedby="field-source-hint"><legend>How to connect<\/legend>/);
+  assert.match(html, /<fieldset class="field field-source"><legend>How to connect<\/legend>/);
   // Each radio has its id, so a redraw keeps focus on it (paint finds it again).
   assert.match(html, /<input type="radio" name="field-source" id="field-source-reader" value="reader" checked> Apps Script reader \(link and secret\)/);
   assert.match(html, /<input type="radio" name="field-source" id="field-source-key" value="key"> Google key file/);
-  assert.match(html, /id="field-source-hint">Switching starts afresh/);
-  // The step names Google's own labels and where the secret is, and no README (not in the app).
-  assert.match(html, /\(Execute as: Me; Who has access: Anyone\)/);
-  assert.match(html, /copy READER_SECRET from Project Settings → Script properties into Secret/);
-  assert.match(html, /set TAB at the top to your answers’ tab/);
+  // What switching costs is said when it is asked, not always.
+  assert.doesNotMatch(html, /Switching starts afresh|field-source-hint/);
+  // The steps, numbered: Google's own labels, where the link and the secret go, and no README (not in the app).
+  const steps = html.match(/<ol class="field-steps">([\s\S]*?)<\/ol>/)[1].match(/<li>[\s\S]*?<\/li>/g);
+  assert.equal(steps.length, 4);
+  assert.match(steps[0], /Copy reader script.*Extensions → Apps Script.*set TAB at the top to your answers’ tab/);
+  assert.match(steps[1], /run makeSecret once/i);
+  assert.match(steps[2], /\(Execute as: Me; Who has access: Anyone\).*copy the Web app link into Reader link/);
+  assert.match(steps[3], /copy READER_SECRET from Project Settings → Script properties into Secret/i);
+  // Before anything is saved, each Save sits beside its field.
+  assert.match(html, /<div class="add-row"><input id="field-reader-link"[^>]*>\s*<button class="button" type="submit">Save link<\/button><\/div>/);
   assert.doesNotMatch(html, /README/);
   assert.match(html, /data-field="copy-script">Copy reader script</);
   assert.match(html, /<label class="field-entry-label" for="field-reader-link">Reader link<\/label>/);
@@ -601,8 +607,9 @@ test('Replace and Change link open with Cancel; Refresh now steps back while a f
   assert.match(again, /<input id="field-secret" type="password"[^>]*>/);
   assert.doesNotMatch(again.match(/<input id="field-secret"[^>]*>/)[0], /value=/);
   assert.match(again, /<input id="field-reader-link"[^>]*value=""/);
-  assert.match(again, /data-field="cancel-reader">Cancel</);
-  assert.match(again, /data-field="cancel-secret">Cancel</);
+  // Over a saved value, Save and Cancel get their own row under the field; each Cancel says what it cancels.
+  assert.match(again, /<div class="add-row"><input id="field-reader-link"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button>\s*<button type="button" class="link-btn" data-field="cancel-reader" aria-label="Cancel link change">Cancel<\/button><\/div>/);
+  assert.match(again, /<div class="add-row"><input id="field-secret"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="link-btn" type="submit">Save secret<\/button>\s*<button type="button" class="link-btn" data-field="cancel-secret" aria-label="Cancel secret change">Cancel<\/button><\/div>/);
   assert.match(again, /<button type="button" class="link-btn" id="field-refresh"/);
   // The field starts empty with privacy on: empty keeps the saved link, and the hint says so…
   assert.match(again, /Leave it empty to keep the saved link/);
@@ -623,12 +630,29 @@ test('a refused link or secret marks its own field invalid, names why, and keeps
   assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /aria-invalid/);
 });
 
+test('a refused link kept as typed is dropped when privacy mode turns on or Settings closes', async () => {
+  const { fieldSettingsHtml, dropFieldDrafts } = await view();
+  const typed = EXEC.replace('/exec', '/dev');
+  const sheet = 'https://docs.google.com/spreadsheets/d/typed-not-saved/edit';
+  const state = { readerDraft: typed, readerError: 'That is the test link (it ends in /dev).', linkDraft: sheet, linkError: 'Not saved.', readerEditing: true, secretError: 'Not saved.', note: 'n' };
+  assert.equal(dropFieldDrafts(state), state);
+  // The links typed go with the refusals about them; what is open stays open, and the rest stays.
+  assert.deepEqual(state, { readerDraft: null, readerError: '', linkDraft: null, linkError: '', readerEditing: true, secretError: 'Not saved.', note: 'n' });
+  const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true }), { privacy: true, state });
+  assert.ok(!html.includes(typed) && !html.includes(DEPLOY), 'no link typed or saved shows');
+  assert.match(html, /<input id="field-reader-link"[^>]*value=""/);
+  const keyHtml = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true, state: dropFieldDrafts({ linkDraft: sheet, linkError: 'x' }) });
+  assert.ok(!keyHtml.includes('typed-not-saved'));
+});
+
 test('with no protected storage, How to connect says so: the reader cannot be chosen, and no secret is promised', async () => {
   const { fieldSettingsHtml } = await view();
   const onKey = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '', secretStorage: NO_STORE }, { privacy: true });
   assert.match(onKey, /<input type="radio" name="field-source" id="field-source-reader" value="reader" disabled>/);
   assert.match(onKey, /id="field-source-storage">This computer has no protected storage/);
-  assert.match(onKey, /aria-describedby="field-source-hint field-source-storage"/);
+  assert.match(onKey, /<fieldset class="field field-source" aria-describedby="field-source-storage">/);
+  // A keyring set up later counts once the app starts again, and the hint says so.
+  assert.match(onKey, /set up a keyring, then restart Agent’s Home\./);
   const onReader = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE }), { privacy: true });
   assert.doesNotMatch(onReader, /type="password"|Kept encrypted/);
   assert.match(onReader, /no protected storage/);
@@ -639,20 +663,32 @@ test('switching with checked columns asks first, in place; the reply to each but
   const asking = fieldSettingsHtml(readerField({ checkedColumns: 4 }), { privacy: true, state: { pendingSource: 'key' } });
   assert.match(asking, /id="field-source-key" value="key" checked>/);
   assert.match(asking, /Switching starts afresh: the checked columns and kept answers go\./);
-  assert.match(asking, /data-field="switch-source">Switch</);
-  assert.match(asking, /data-field="keep-source">Keep</);
-  assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /switch-source/);
+  // Each button names the way it leads to.
+  assert.match(asking, /data-field="switch-source">Switch to key file</);
+  assert.match(asking, /data-field="keep-source">Keep the reader</);
+  const back = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '', checkedColumns: 4 }, { privacy: true, state: { pendingSource: 'reader' } });
+  assert.match(back, /data-field="switch-source">Switch to reader</);
+  assert.match(back, /data-field="keep-source">Keep the key file</);
+  assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /switch-source|Switching starts afresh/);
   // The source's refusal under its choice; Copy reader script's reply under its button.
   const replies = fieldSettingsHtml(readerField(), { privacy: true, state: { sourceError: 'Not saved.', scriptNote: 'Reader script copied.' } });
   assert.match(replies, /<\/fieldset>\s*<p class="form-error" id="field-source-err" role="alert">Not saved\.<\/p>/);
   assert.match(replies, /data-field="copy-script">Copy reader script<\/button><\/div>\s*<p class="hint" role="status">Reader script copied\.<\/p>/);
 });
 
-test('in Settings a failed update points below, not to Settings, and reads on after its colon', async () => {
-  const { fieldSettingsHtml } = await view();
+test('in Settings a failed update names the control to use and reads on after its colon; the board keeps the Settings path', async () => {
+  const { fieldSettingsHtml, fieldHtml } = await view();
   const err = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';
-  const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: err, errorAt: Date.UTC(2026, 10, 17, 9) }), { privacy: true });
-  assert.match(html, /Last update failed \([^)]*\): the reader refused the secret: .*, then save it below\.<\/p>/);
+  const f = readerField({ readerUrl: EXEC, secretSaved: true, error: err, errorHere: F.inSettings(err), errorAt: Date.UTC(2026, 10, 17, 9) });
+  const html = fieldSettingsHtml(f, { privacy: true });
+  assert.match(html, /Last update failed \([^)]*\): the reader refused the secret: .*, then save it under Secret\.<\/p>/);
+  assert.doesNotMatch(html, /\bbelow\b|Settings → Connections/);
+  assert.match(fieldHtml(f, { privacy: true }), /then save it in Settings → Connections → Field feedback\./);
+  // The key file's own trouble too.
+  const gone = F.keyFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message;
+  const key = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: 'https://docs.google.com/spreadsheets/d/x/edit', keyName: 'k.json', keyError: gone, keyErrorHere: F.inSettings(gone) }, { privacy: true });
+  assert.match(key, /choose it again with Choose another…<\/p>/);
+  assert.doesNotMatch(key, /\bbelow\b|Settings → Connections/);
   // A name keeps its capital.
   const google = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: 'Google did not let the reader answer.' }), { privacy: true });
   assert.match(google, /Last update failed: Google did not let the reader answer\./);
@@ -665,7 +701,15 @@ test('the key file route shows as before, its sheet link labelled like the reade
   assert.match(html, /<form class="field-entry" id="field-link-form">\s*<label class="field-entry-label" for="field-link">Sheet link<\/label>/);
   assert.match(html, /<button class="button" type="submit">Save link<\/button>/);
   assert.match(html, /Choose key file…/);
+  // An example of the link it wants.
+  assert.match(html, /<input id="field-link"[^>]*placeholder="docs\.google\.com\/spreadsheets\/d\/…"/);
   assert.doesNotMatch(html, /field-reader-link|field-secret|Copy reader script/);
+  // While the link is open again over a saved one, its Save is the one filled button: Choose key file… steps back.
+  const SHEET_URL = 'https://docs.google.com/spreadsheets/d/x/edit';
+  const relink = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: SHEET_URL, keyName: '' }, { privacy: true, state: { editing: true } });
+  assert.match(relink, /<button type="button" class="link-btn" id="field-key" data-field="choose-key">Choose key file…<\/button>/);
+  assert.match(relink, /data-field="cancel-link" aria-label="Cancel link change">Cancel</);
+  assert.match(fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: SHEET_URL, keyName: '' }, { privacy: true }), /class="button" id="field-key" data-field="choose-key">Choose key file…/);
   const refused = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true, state: { linkError: 'That link is not a Google Sheet.', linkDraft: 'https://example.com/x' } });
   assert.match(refused, /<input id="field-link"[^>]*value="https:\/\/example\.com\/x"[^>]*aria-invalid="true" aria-describedby="field-link-err"/);
 });
@@ -683,8 +727,10 @@ test('a scale around 0 reads "on −3 to 3" on the board, its meter from its low
   const s = F.summarise(rows);
   const f = readerField({ readerUrl: EXEC, secretSaved: true, summary: s, fetchedAt: Date.UTC(2026, 10, 12) });
   // The mean is -1: a sixth of the way from -3 to 3 is 33%.
-  // On its own line under the number: "−1.0 on −3 to 3" is wider than the stat.
-  assert.match(fieldHtml(f, { privacy: true }), />−1\.0<small class="stat-scale">on −3 to 3<\/small>/);
+  // The scale goes in the label ("−1.0 on −3 to 3" is wider than the stat), so every number is one line and the labels share a baseline.
+  const board = fieldHtml(f, { privacy: true });
+  assert.match(board, /<dt class="stat-label">Average score, −3 to 3<\/dt><dd class="stat-n">−1\.0<\/dd>/);
+  assert.doesNotMatch(board, /stat-scale/);
   const sheet = fieldSheetHtml(f, { privacy: true });
   assert.match(sheet, /aria-label="−1\.0 on −3 to 3"><span style="width:33%">/);
   assert.match(sheet, /3 answers on a −3 to 3 scale/);

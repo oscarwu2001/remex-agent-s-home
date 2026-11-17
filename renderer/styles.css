@@ -796,6 +796,8 @@ body.no-select, body.no-select * { user-select: none; }
 .field-entry { display: grid; gap: var(--s-1); margin: 0; }
 .field-entry-label { font-size: 13px; color: var(--ink-muted); }
 .field-entry .add-row { align-items: center; }
+/* The reader’s set-up, in numbered steps, as quiet as a hint. */
+.field-steps { margin: 0; padding-left: 1.4em; font-size: 13px; line-height: 1.45; color: var(--ink-muted); display: grid; gap: 2px; }
 /* The browser's own placeholder grey is 4.15:1; the muted ink is checked in every colourway. */
 .field-settings .add-row input::placeholder { color: var(--ink-muted); opacity: 1; }
 .field-source { gap: 0; }
@@ -808,8 +810,6 @@ body.no-select, body.no-select * { user-select: none; }
 .field-confirm-text { margin: 0; font-size: 13px; color: var(--ink); }
 /* The status line keeps its distance from the fields above it. */
 .field-settings .field-status { margin-top: var(--s-3); }
-/* A scale around 0 ("on −3 to 3") goes on a line of its own under the number. */
-.stat-n small.stat-scale { display: block; margin-top: 2px; white-space: normal; }
 .field-robot { color: var(--ink); overflow-wrap: anywhere; }
 .field-check-step { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
 .field-check-step .hint { margin: 0 0 var(--s-2); }

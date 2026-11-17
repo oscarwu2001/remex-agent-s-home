@@ -14,7 +14,7 @@ import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './pr
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, FIXES, problemLabel, age as fieldAge } from './field-view.js';
+import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus } from './line-view.js';
 
 installTips();
@@ -146,6 +146,8 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
   $(id).addEventListener('change', (e) => {
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
+    // A link typed but not saved shows no more once privacy mode is on.
+    if (key === 'private' && prefs.private) dropFieldDrafts(fieldUi);
     savePrefs();
     applyPrefs();
     render(true);
@@ -3460,6 +3462,9 @@ function setSettings(open) {
   }
   else {
     if (buildMode) setBuildMode(false);
+    // A link typed but not saved is not kept past Settings.
+    dropFieldDrafts(fieldUi);
+    renderFieldSettings();
     $('settings-open').focus();
   }
 }

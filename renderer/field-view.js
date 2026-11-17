@@ -122,9 +122,13 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
         : unchecked ? 'New scores are not in the average until the columns are checked' : '';
   const newLabel = f.sinceFetchedAt ? `New since <span class="nowrap">${esc(boardDay(f.sinceFetchedAt))}</span>` : 'New since the last update';
   // Each label comes first for screen readers; the number shows above it.
+  // A scale around 0 goes in the label ("−1.0 on −3 to 3" is wider than a
+  // stat), so every number stays one line and the labels share a baseline.
+  const around0 = avg != null && (s.overall.low ?? 0) < 0;
+  const avgLabel = around0 ? `Average score, ${scaleText(s.overall.low, s.overall.high)}` : 'Average score';
   const stats = `<dl class="stats">
       <div class="stat"><dt class="stat-label">Responses</dt><dd class="stat-n">${s.responses}</dd></div>
-      <div class="stat"${dashWhy ? ` title="${dashWhy}"` : ''}><dt class="stat-label">Average score</dt><dd class="stat-n">${avg != null ? `${avg}${(s.overall.low ?? 0) < 0 ? `<small class="stat-scale">${outOf(s.overall.low, s.overall.high)}</small>` : `<small> ${outOf(0, s.overall.high)}</small>`}` : DASH}</dd></div>
+      <div class="stat"${dashWhy ? ` title="${dashWhy}"` : ''}><dt class="stat-label">${avgLabel}</dt><dd class="stat-n">${avg != null ? `${avg}${around0 ? '' : `<small> ${outOf(0, s.overall.high)}</small>`}` : DASH}</dd></div>
       <div class="stat"><dt class="stat-label">${newLabel}</dt><dd class="stat-n">${s.newSince != null ? s.newSince : DASH}</dd></div>
     </dl>`;
   const open = s.responses
@@ -337,9 +341,11 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
 
 // "How to connect": the reader script (its link and secret) or a Google key
 // file, with ids so a redraw keeps focus on the one chosen. Switching starts
-// afresh, so with checked columns it asks first (pending: the one picked,
-// shown chosen while asking). Without protected storage for a secret the
-// reader cannot be chosen, and the choice says why.
+// afresh, so with checked columns it asks first, and says then what goes
+// (pending: the one picked, shown chosen while asking); each button names
+// the way it leads to. Without protected storage for a secret the reader
+// cannot be chosen, and the choice says why.
+const WAY = { reader: 'the reader', key: 'the key file' };
 function sourceChoice(f, source, state) {
   const shown = state.pendingSource ?? source;
   const noStore = f.secretStorage ? String(f.secretStorage) : '';
@@ -347,33 +353,47 @@ function sourceChoice(f, source, state) {
     const off = value === 'reader' && noStore && source !== 'reader';
     return `<label class="check" for="field-source-${value}"><input type="radio" name="field-source" id="field-source-${value}" value="${value}"${shown === value ? ' checked' : ''}${off ? ' disabled' : ''}> ${words}</label>`;
   };
-  const described = ['field-source-hint', noStore ? 'field-source-storage' : ''].filter(Boolean).join(' ');
-  const ask = state.pendingSource && state.pendingSource !== source
+  const pending = state.pendingSource && state.pendingSource !== source ? state.pendingSource : null;
+  const ask = pending
     ? `<div class="field-confirm" role="group" aria-labelledby="field-source-ask">
         <p class="field-confirm-text" id="field-source-ask" role="status">Switching starts afresh: the checked columns and kept answers go.</p>
-        <div class="form-actions"><button type="button" class="button" id="field-source-switch" data-field="switch-source">Switch</button>
-          <button type="button" class="link-btn" id="field-source-keep" data-field="keep-source">Keep</button></div></div>`
+        <div class="form-actions"><button type="button" class="button" id="field-source-switch" data-field="switch-source">Switch to ${pending === 'key' ? 'key file' : 'reader'}</button>
+          <button type="button" class="link-btn" id="field-source-keep" data-field="keep-source">Keep ${WAY[source]}</button></div></div>`
     : '';
-  return `<fieldset class="field field-source" aria-describedby="${described}"><legend>How to connect</legend>
+  return `<fieldset class="field field-source"${noStore ? ' aria-describedby="field-source-storage"' : ''}><legend>How to connect</legend>
       ${option('reader', 'Apps Script reader (link and secret)')}
-      ${option('key', 'Google key file')}
-      <p class="hint" id="field-source-hint">Switching starts afresh: what was read and checked one way is not kept for the other.</p>${noStore ? `
+      ${option('key', 'Google key file')}${noStore ? `
       <p class="hint" id="field-source-storage">${esc(noStore)}</p>` : ''}</fieldset>${state.sourceError ? `
     <p class="form-error" id="field-source-err" role="alert">${esc(state.sourceError)}</p>` : ''}${ask}`;
 }
 
 // One labelled field with its Save (button: its words), its error tied to it
-// (aria-invalid, aria-describedby) after a Save it refused, and Cancel when
-// it was opened over a saved value.
-function entryForm({ id, label, input, value = null, error, hint = '', button = 'Save', filled = true, cancel = '' }) {
+// (aria-invalid, aria-describedby) after a Save it refused. Opened over a
+// saved value, it has Cancel (cancel: its action; cancelLabel: what it
+// cancels, for screen readers), and Save and Cancel go on their own row
+// under the field, so the field keeps its width.
+function entryForm({ id, label, input, value = null, error, hint = '', button = 'Save', filled = true, cancel = '', cancelLabel = '' }) {
   const err = error ? `<p class="form-error" id="${id}-err" role="alert">${esc(error)}</p>` : '';
   const hintP = hint ? `<p class="hint" id="${id}-hint">${hint}</p>` : '';
   const described = [error ? `${id}-err` : '', hint ? `${id}-hint` : ''].filter(Boolean).join(' ');
+  const field = `<input id="${id}" ${input}${value != null ? ` value="${esc(value)}"` : ''}${error ? ' aria-invalid="true"' : ''}${described ? ` aria-describedby="${described}"` : ''}>`;
+  const save = `<button class="${filled ? 'button' : 'link-btn'}" type="submit">${button}</button>`;
+  const row = cancel
+    ? `<div class="add-row">${field}</div>
+      <div class="form-actions field-entry-actions">${save}
+        <button type="button" class="link-btn" data-field="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button></div>`
+    : `<div class="add-row">${field}
+        ${save}</div>`;
   return `<form class="field-entry" id="${id}-form">
       <label class="field-entry-label" for="${id}">${label}</label>
-      <div class="add-row"><input id="${id}" ${input}${value != null ? ` value="${esc(value)}"` : ''}${error ? ' aria-invalid="true"' : ''}${described ? ` aria-describedby="${described}"` : ''}>
-        <button class="${filled ? 'button' : 'link-btn'}" type="submit">${button}</button>${cancel ? `
-        <button type="button" class="link-btn" data-field="${cancel}">Cancel</button>` : ''}</div>${err}${hintP}</form>`;
+      ${row}${err}${hintP}</form>`;
+}
+
+// A link typed but refused is kept as typed for the next try, but not past
+// privacy mode turning on or Settings closing: it may hold a sheet's id.
+// The refusals about it go with it. Changes state in place and returns it.
+export function dropFieldDrafts(state) {
+  return Object.assign(state, { linkDraft: null, linkError: '', readerDraft: null, readerError: '' });
 }
 
 // A saved link's field: what it starts with (the refused draft, else the
@@ -388,7 +408,12 @@ function linkValue(saved, draft, privacy) {
 // link, its secret. The secret never comes back from the main process:
 // once saved, only "Secret saved" and Replace secret.
 function readerSettings(f, { privacy, state }) {
-  const script = `<p class="hint">Attach the reader script to the sheet: paste it into the sheet’s Extensions → Apps Script and set TAB at the top to your answers’ tab, run makeSecret once, deploy it as a web app (Execute as: Me; Who has access: Anyone), then copy READER_SECRET from Project Settings → Script properties into Secret.</p>
+  const script = `<ol class="field-steps">
+      <li>Press Copy reader script, paste it into the sheet’s Extensions → Apps Script, and set TAB at the top to your answers’ tab.</li>
+      <li>Run makeSecret once.</li>
+      <li>Deploy it as a web app (Execute as: Me; Who has access: Anyone), and copy the Web app link into Reader link.</li>
+      <li>Copy READER_SECRET from Project Settings → Script properties into Secret.</li>
+    </ol>
     <div class="form-actions"><button type="button" class="link-btn" id="field-copy-script" data-field="copy-script">Copy reader script</button></div>${state.scriptNote ? `
     <p class="hint" role="status">${esc(state.scriptNote)}</p>` : ''}${state.scriptError ? `
     <p class="form-error" role="alert">${esc(state.scriptError)}</p>` : ''}`;
@@ -398,6 +423,7 @@ function readerSettings(f, { privacy, state }) {
     ? entryForm({
       id: 'field-reader-link', label: 'Reader link', error: state.readerError, value: typed.value, hint: typed.hint, button: 'Save link',
       input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Ends in /exec"', cancel: f.readerUrl ? 'cancel-reader' : '',
+      cancelLabel: 'Cancel link change',
     })
     : `<p class="field-set"><span>${privacy ? 'A reader link is saved.' : `Reader: <span class="field-path">${esc(f.readerUrl)}</span>`}</span>
         <button type="button" class="link-btn" id="field-reader-change" data-field="change-reader">Change link</button></p>`;
@@ -409,6 +435,7 @@ function readerSettings(f, { privacy, state }) {
     secret = entryForm({
       id: 'field-secret', label: 'Secret', error: state.secretError, button: 'Save secret', filled: Boolean(f.readerUrl) && !linkOpen,
       input: 'type="password" autocomplete="new-password" spellcheck="false" placeholder="READER_SECRET"', cancel: f.secretSaved ? 'cancel-secret' : '',
+      cancelLabel: 'Cancel secret change',
       hint: state.secretNote ? esc(state.secretNote) : 'Kept encrypted with this computer’s own protection, and never shown again.',
     });
   } else {
@@ -418,11 +445,12 @@ function readerSettings(f, { privacy, state }) {
   return { html: `${script}${link}${secret}`, open: linkOpen || (secretOpen && !f.secretStorage) };
 }
 
-// A message from the main process as Settings shows it: it is in Settings
-// already, so "in Settings → … → Field feedback" becomes "below"; after
-// "Last update failed:" it reads on in lower case, a name excepted.
+// A message from the main process as Settings shows it: errorHere and
+// keyErrorHere name the control to use there, where the board's name the
+// Settings path (fieldsurvey.js inSettings; a snapshot without them shows
+// the message as it is). After "Last update failed:" it reads on in lower
+// case, a name excepted.
 const NAMES = /^(?:Google|Apps Script|READER_SECRET|TAB|Windows|LINE)\b/;
-const here = (m) => String(m).replace(/ in Settings → Connections → Field feedback(?: \(Google Sheet\))?/g, ' below');
 const readOn = (m) => (NAMES.test(m) ? m : `${m.charAt(0).toLowerCase()}${m.slice(1)}`);
 
 // Settings → Connections → Field feedback, below the switch. state: { editing, error, note, draft, checkNote, checkError,
@@ -440,7 +468,7 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   const common = (ready, open) => {
     const status = f.busy ? 'Updating…'
       : [f.fetchedAt ? `Updated ${boardTime(f.fetchedAt, now)}` : 'Not updated yet', f.nextAt && ready ? `next ${boardTime(f.nextAt, now)}` : ''].filter(Boolean).join(' · ');
-    const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(readOn(here(f.error)))}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
+    const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(readOn(f.errorHere || f.error))}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
     return `${ready ? `<div class="form-actions">${refreshBtn('field-refresh', open ? 'link-btn' : 'button')}</div>` : ''}
     <p class="hint field-status" role="status">${esc(status)}${state.note ? ` · ${esc(state.note)}` : ''}</p>${lastError}
     ${fieldColumnsHtml(f, { privacy, draft: state.draft, note: state.checkNote, error: state.checkError })}`;
@@ -455,19 +483,20 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   const link = showLink
     ? entryForm({
       id: 'field-link', label: 'Sheet link', error: state.linkError, value: typed.value, hint: typed.hint, button: 'Save link',
-      input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="From the address bar"', cancel: f.sheetUrl ? 'cancel-link' : '',
+      input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="docs.google.com/spreadsheets/d/…"', cancel: f.sheetUrl ? 'cancel-link' : '',
+      cancelLabel: 'Cancel link change',
     })
     : `<p class="field-set"><span>${privacy ? 'A sheet link is saved.' : `Sheet: <span class="field-path">${esc(f.sheetUrl)}</span>`}</span>
         <button type="button" class="link-btn" id="field-change" data-field="change-link">Change link</button></p>`;
-  // One filled button at a time: Save until a link is saved, then the key.
+  // One filled button at a time: Save while the link is open, then the key.
   const key = f.keyName
     ? `<p class="field-set"><span>${privacy ? 'A key file is chosen.' : `Key file: <span class="field-path">${esc(f.keyName)}</span>`}</span>
         <button type="button" class="link-btn" id="field-key" data-field="choose-key">Choose another…</button></p>`
-    : `<div class="form-actions"><button type="button" class="${f.sheetUrl ? 'button' : 'link-btn'}" id="field-key" data-field="choose-key">Choose key file…</button></div>`;
+    : `<div class="form-actions"><button type="button" class="${f.sheetUrl && !showLink ? 'button' : 'link-btn'}" id="field-key" data-field="choose-key">Choose key file…</button></div>`;
   const robot = f.clientEmail
     ? `<p class="field-set"><span>${privacy ? 'Share the sheet with the key’s reader address as Viewer.' : `Share the sheet with <span class="field-robot">${esc(f.clientEmail)}</span> as Viewer.`}</span>
         <button type="button" class="link-btn" id="field-copy" data-field="copy-reader">Copy reader address</button></p>` : '';
-  const keyError = f.keyError ? `<p class="form-error" role="status">${esc(here(f.keyError))}</p>` : '';
+  const keyError = f.keyError ? `<p class="form-error" role="status">${esc(f.keyErrorHere || f.keyError)}</p>` : '';
   // Older snapshots name no source: no choice to show.
   return `${f.source ? sourceChoice(f, source, state) : ''}${link}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
     ${key}${robot}${keyError}
