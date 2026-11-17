@@ -2612,12 +2612,18 @@ setInterval(renderProjects, 1000);
 
 // editing: the link field is open. error/note: the reply to the last button.
 // draft: the column roles being changed in "Check the columns".
+// linkError/linkDraft: the sheet link's refusal and the link as typed then.
 // readerEditing/secretEditing: the reader's link or secret field is open
-// again; readerError/secretError: what its last Save was refused for. The
-// secret itself is never kept here.
+// again; readerError/readerDraft/secretError: what its last Save was
+// refused for (and the link as typed). secretNote: why the secret is asked
+// again. scriptNote/scriptError: Copy reader script's reply. sourceError:
+// How to connect's. pendingSource: the way picked while Settings asks
+// whether to switch. focusAfter: the control to focus once the snapshot has
+// drawn it. The secret itself is never kept here.
 const fieldUi = {
-  editing: false, error: '', note: '', draft: {}, checkNote: '', checkError: '',
-  readerEditing: false, readerError: '', secretEditing: false, secretError: '',
+  editing: false, error: '', note: '', draft: {}, checkNote: '', checkError: '', linkError: '', linkDraft: null,
+  readerEditing: false, readerError: '', readerDraft: null, secretEditing: false, secretError: '', secretNote: '',
+  scriptNote: '', scriptError: '', sourceError: '', pendingSource: null, focusAfter: '',
 };
 let fieldSwitchedAt = 0; // the switch was just pressed: wait for the snapshot before echoing it back
 let fieldOpener;
@@ -2636,6 +2642,22 @@ function renderFieldSettings() {
   if (Date.now() - fieldSwitchedAt > 1500) $('opt-field').checked = Boolean(f?.enabled);
   $('opt-field').disabled = !online || Boolean(f?.demo);
   paint($('field-settings'), fieldSettingsHtml(f, { privacy: prefs.private, online, state: fieldUi }));
+  // After a Save, focus goes to what replaced the field, once it is drawn.
+  if (fieldUi.focusAfter && $(fieldUi.focusAfter)) {
+    $(fieldUi.focusAfter).focus({ preventScroll: true });
+    fieldUi.focusAfter = '';
+  }
+}
+// How to connect, switched: another way starts afresh, so every field's state goes.
+async function setFieldSource(source) {
+  const res = await bridge.fieldSet({ source }).catch((err) => ({ ok: false, error: err.message }));
+  Object.assign(fieldUi, {
+    pendingSource: null, sourceError: res.ok ? '' : res.error, note: '', editing: false, linkError: '', linkDraft: null,
+    readerEditing: false, readerError: '', readerDraft: null, secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '',
+  });
+  if (res.ok) fieldUi.focusAfter = `field-source-${source}`;
+  renderFieldSettings();
+  setTimeout(() => { renderField(); renderFieldSettings(); }, 600);
 }
 // The sheet is modal: the board and the map behind it are inert until it
 // closes, so Tab and Shift+Tab stay inside it.
@@ -2709,11 +2731,24 @@ async function fieldAction(act) {
     fieldUi.secretEditing = true;
     renderFieldSettings();
     $('field-secret')?.focus();
+  } else if (act === 'cancel-reader' || act === 'cancel-secret' || act === 'cancel-link') {
+    // Back to what is saved, and to the button that opened the field.
+    if (act === 'cancel-reader') Object.assign(fieldUi, { readerEditing: false, readerError: '', readerDraft: null });
+    if (act === 'cancel-secret') Object.assign(fieldUi, { secretEditing: false, secretError: '' });
+    if (act === 'cancel-link') Object.assign(fieldUi, { editing: false, linkError: '', linkDraft: null });
+    renderFieldSettings();
+    $({ 'cancel-reader': 'field-reader-change', 'cancel-secret': 'field-secret-replace', 'cancel-link': 'field-change' }[act])?.focus();
+  } else if (act === 'switch-source') {
+    if (bridge.fieldSet && fieldUi.pendingSource) await setFieldSource(fieldUi.pendingSource);
+  } else if (act === 'keep-source') {
+    fieldUi.pendingSource = null;
+    renderFieldSettings();
+    document.querySelector('input[name="field-source"]:checked')?.focus();
   } else if (act === 'copy-script') {
     if (!bridge.fieldCopyScript) return;
     const res = await bridge.fieldCopyScript().catch((err) => ({ ok: false, error: err.message }));
-    fieldUi.note = res.ok ? 'Reader script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
-    fieldUi.error = res.ok ? '' : res.error;
+    fieldUi.scriptNote = res.ok ? 'Reader script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
+    fieldUi.scriptError = res.ok ? '' : res.error;
     renderFieldSettings();
   }
 }
@@ -2726,14 +2761,19 @@ for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-l
 // "Check the columns": each choice goes into the draft, and the row redraws
 // (a score shows its scale).
 $('field-settings').addEventListener('change', async (e) => {
-  // How to connect: the reader script or the key file. Another source starts afresh.
+  // How to connect: the reader script or the key file. Another way starts
+  // afresh, so with checked columns Settings asks first, in place; focus
+  // stays on the radio (arrow keys move within the group).
   if (e.target.name === 'field-source') {
     if (!bridge.fieldSet) return;
-    const res = await bridge.fieldSet({ source: e.target.value }).catch((err) => ({ ok: false, error: err.message }));
-    fieldUi.error = res.ok ? '' : res.error;
-    Object.assign(fieldUi, { note: '', editing: false, readerEditing: false, readerError: '', secretEditing: false, secretError: '' });
-    renderFieldSettings();
-    setTimeout(() => { renderField(); renderFieldSettings(); }, 600);
+    const saved = snapshot.field?.source;
+    if (e.target.value === saved) {
+      fieldUi.pendingSource = null;
+      renderFieldSettings();
+    } else if ((snapshot.field?.checkedColumns ?? 0) > 0) {
+      fieldUi.pendingSource = e.target.value;
+      renderFieldSettings();
+    } else await setFieldSource(e.target.value);
     return;
   }
   const el = e.target.closest('select[data-col]');
@@ -2771,9 +2811,12 @@ $('field-settings').addEventListener('submit', async (e) => {
   }
   if (e.target.id === 'field-reader-link-form') {
     if (!bridge.fieldSet) return;
-    const res = await bridge.fieldSet({ readerUrl: $('field-reader-link').value }).catch((err) => ({ ok: false, error: err.message }));
-    fieldUi.readerError = res.ok ? '' : res.error;
-    if (res.ok) fieldUi.readerEditing = false;
+    const typed = $('field-reader-link').value;
+    const res = await bridge.fieldSet({ readerUrl: typed }).catch((err) => ({ ok: false, error: err.message }));
+    // Refused: the link stays as typed, to be put right.
+    Object.assign(fieldUi, res.ok
+      ? { readerError: '', readerDraft: null, readerEditing: false, focusAfter: 'field-reader-change', secretNote: res.secretNote ?? '' }
+      : { readerError: res.error, readerDraft: typed });
     renderFieldSettings();
     if (!res.ok) $('field-reader-link')?.focus();
     setTimeout(renderFieldSettings, 600);
@@ -2786,24 +2829,23 @@ $('field-settings').addEventListener('submit', async (e) => {
     const secret = input.value;
     input.value = '';
     const res = await bridge.fieldSaveSecret(secret).catch((err) => ({ ok: false, error: err.message }));
-    fieldUi.secretError = res.ok ? '' : res.error;
-    if (res.ok) {
-      fieldUi.secretEditing = false;
-      fieldUi.note = 'Secret saved.';
-    }
+    Object.assign(fieldUi, res.ok
+      ? { secretError: '', secretEditing: false, secretNote: '', focusAfter: 'field-secret-replace' }
+      : { secretError: res.error });
     renderFieldSettings();
     if (!res.ok) $('field-secret')?.focus();
     setTimeout(renderFieldSettings, 600);
     return;
   }
   if (!bridge.fieldSet) return;
-  const res = await bridge.fieldSet({ sheetUrl: $('field-link').value }).catch((err) => ({ ok: false, error: err.message }));
-  fieldUi.error = res.ok ? '' : res.error;
-  if (res.ok) {
-    fieldUi.editing = false;
-    fieldUi.note = res.note ?? ''; // "Same sheet: kept the tab you had."
-  }
+  const typed = $('field-link').value;
+  const res = await bridge.fieldSet({ sheetUrl: typed }).catch((err) => ({ ok: false, error: err.message }));
+  Object.assign(fieldUi, res.ok
+    // "Same sheet: kept the tab you had."
+    ? { linkError: '', linkDraft: null, editing: false, note: res.note ?? '', focusAfter: 'field-change' }
+    : { linkError: res.error, linkDraft: typed });
   renderFieldSettings();
+  if (!res.ok) $('field-link')?.focus();
   setTimeout(renderFieldSettings, 600);
 });
 $('opt-field').addEventListener('change', async (e) => {

@@ -268,8 +268,8 @@ function demoField(nowMs) {
     flags: {
       why: null, earlier: true, unchecked: 1,
       list: [
-        { kind: 'low', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, worse: false, count: 2, mark: 2 },
-        { kind: 'falling', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (1-5)', low: 1, high: 5, worse: false, recentN: 3, recentMean: 2.3, earlierMean: 4.2 },
+        { kind: 'low', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (-3..3)', low: -3, high: 3, worse: false, count: 2, mark: -2 },
+        { kind: 'falling', index: 5, no: 5, question: 'Sample: how well did the tracking keep up? (-3..3)', low: -3, high: 3, worse: false, recentN: 3, recentMean: -1.7, earlierMean: 0.6 },
         { kind: 'comments', count: 2 },
         { kind: 'setup', what: 'choose', count: 1, fix: 'check' },
       ],
@@ -284,22 +284,22 @@ function demoField(nowMs) {
         col(0, 'Timestamp', 'timestamp'),
         col(1, 'Email address', 'identifying', { reason: 'header' }),
         col(2, 'Your name', 'identifying', { reason: 'header' }),
-        col(3, 'Sample: how easy was the setup? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
+        col(3, 'Sample: how easy was the setup? (-3..3)', 'score', { low: -3, high: 3, scaleFrom: 'header' }),
         col(4, 'Sample: how clear was the screen in theatre?', 'score', { low: 1, high: 5, scaleFrom: 'answers' }, 'low'),
-        col(5, 'Sample: how well did the tracking keep up? (1-5)', 'score', { low: 1, high: 5, scaleFrom: 'header' }),
+        col(5, 'Sample: how well did the tracking keep up? (-3..3)', 'score', { low: -3, high: 3, scaleFrom: 'header' }),
         col(6, 'Sample: how many times did you restart it?', 'number', { reason: 'count' }),
         col(7, 'Sample: your role', 'choice'),
         col(8, 'Sample: what should we improve?', 'comment'),
         col(9, 'Sample: anything else?', 'comment'),
       ],
       questions: [
-        { question: 'Sample: how easy was the setup? (1-5)', index: 3, n: 24, mean: 4.3, low: 1, high: 5, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
+        { question: 'Sample: how easy was the setup? (-3..3)', index: 3, n: 24, mean: 0.2, low: -3, high: 3, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
         { question: 'Sample: how clear was the screen in theatre?', index: 4, n: 23, mean: 3.8, low: 1, high: 5, scaleFrom: 'answers', guessed: true, confirmed: false, notChecked: true, unreadable: 0 },
-        { question: 'Sample: how well did the tracking keep up? (1-5)', index: 5, n: 24, mean: 4.0, low: 1, high: 5, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
+        { question: 'Sample: how well did the tracking keep up? (-3..3)', index: 5, n: 24, mean: -1.0, low: -3, high: 3, scaleFrom: 'confirmed', guessed: false, confirmed: true, notChecked: false, unreadable: 0 },
       ],
       numbers: [{ question: 'Sample: how many times did you restart it?', index: 6, n: 24, mean: 0.6, unreadable: 0 }],
-      // The two checked scores only: (4.3 × 24 + 4.0 × 24) / 48.
-      overall: { mean: 4.15, high: 5, rescaled: false, n: 48 }, scalesGuessed: 1,
+      // The two checked scores only, both on −3 to 3: (0.2 × 24 + (−1.0) × 24) / 48.
+      overall: { mean: -0.4, low: -3, high: 3, rescaled: false, n: 48 }, scalesGuessed: 1,
       comments: [
         { question: 'Sample: what should we improve?', text: 'Sample comment: a larger font for the distance readout.', at: at(5 * h) },
         { question: 'Sample: what should we improve?', text: 'Sample comment: the start-up check took a while.', at: at(day + 3 * h) },

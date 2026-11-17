@@ -477,47 +477,69 @@ test('no other file in src, electron or renderer names the reader’s hosts', ()
 // ---- Settings and the board (renderer/field-view.js) -----------------------------------------
 
 const view = () => import('../renderer/field-view.js');
-const readerField = (extra = {}) => ({ enabled: true, source: 'reader', readerUrl: '', secretSaved: false, sheetUrl: '', keyName: '', ...extra });
+const readerField = (extra = {}) => ({ enabled: true, source: 'reader', readerUrl: '', secretSaved: false, sheetUrl: '', keyName: '', secretStorage: null, checkedColumns: 0, ...extra });
+const NO_STORE = 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.';
 
-test('Settings: how to connect, then the reader link and the secret, each with its own Save', async () => {
+test('Settings: how to connect, the set-up step, then the reader link and the secret, each with its own Save', async () => {
   const { fieldSettingsHtml } = await view();
   const html = fieldSettingsHtml(readerField(), { privacy: true });
-  assert.match(html, /<legend>How to connect<\/legend>/);
-  assert.match(html, /<input type="radio" name="field-source" value="reader" checked> Apps Script reader \(link and secret\)/);
-  assert.match(html, /<input type="radio" name="field-source" value="key"> Google key file/);
+  assert.match(html, /<fieldset class="field field-source" aria-describedby="field-source-hint"><legend>How to connect<\/legend>/);
+  // Each radio has its id, so a redraw keeps focus on it (paint finds it again).
+  assert.match(html, /<input type="radio" name="field-source" id="field-source-reader" value="reader" checked> Apps Script reader \(link and secret\)/);
+  assert.match(html, /<input type="radio" name="field-source" id="field-source-key" value="key"> Google key file/);
+  assert.match(html, /id="field-source-hint">Switching starts afresh/);
+  // The step names Google's own labels and where the secret is, and no README (not in the app).
+  assert.match(html, /\(Execute as: Me; Who has access: Anyone\)/);
+  assert.match(html, /copy READER_SECRET from Project Settings → Script properties into Secret/);
+  assert.match(html, /set TAB at the top to your answers’ tab/);
+  assert.doesNotMatch(html, /README/);
   assert.match(html, /data-field="copy-script">Copy reader script</);
   assert.match(html, /<label class="field-entry-label" for="field-reader-link">Reader link<\/label>/);
   assert.match(html, /<label class="field-entry-label" for="field-secret">Secret<\/label>/);
-  assert.match(html, /<input id="field-secret" type="password"/);
-  // Nothing of the key file's route shows.
-  assert.doesNotMatch(html, /Choose key file|field-link-form|Copy reader address/);
+  assert.match(html, /<input id="field-secret" type="password" autocomplete="new-password"/);
+  assert.match(html, /<button class="button" type="submit">Save link<\/button>/);
   // One filled button at a time: the secret's Save is plain until a link is saved.
-  assert.match(html.split('field-secret-form')[1], /<button class="link-btn" type="submit">Save/);
+  assert.match(html, /<button class="link-btn" type="submit">Save secret<\/button>/);
+  assert.match(html, /Kept encrypted with this computer’s own protection/);
+  assert.doesNotMatch(html, /Choose key file|field-link-form|Copy reader address/);
   assert.doesNotMatch(html, /field-refresh/); // nothing to read yet
+  assert.doesNotMatch(html, /Cancel/); // nothing saved to go back to
 });
 
-test('a saved secret shows only that it is saved, with Replace; the link shows only with privacy off', async () => {
+test('a saved secret shows only that it is saved, with Replace secret; the link shows only with privacy off', async () => {
   const { fieldSettingsHtml } = await view();
   const set = readerField({ readerUrl: EXEC, secretSaved: true });
   const shared = fieldSettingsHtml(set, { privacy: true });
-  assert.match(shared, /Secret saved\.<\/span>\s*<button[^>]*data-field="replace-secret">Replace<\/button>/);
+  assert.match(shared, /Secret saved\.<\/span>\s*<button[^>]*id="field-secret-replace"[^>]*>Replace secret<\/button>/);
   assert.doesNotMatch(shared, /type="password"/);
   assert.match(shared, /A reader link is saved\./);
   assert.ok(!shared.includes(DEPLOY));
-  assert.match(shared, /id="field-refresh"/);
+  assert.match(shared, /<button type="button" class="button" id="field-refresh"/);
   assert.ok(fieldSettingsHtml(set, { privacy: false }).includes(EXEC));
-  // Replace opens an empty secret field; Change link opens the link, empty with privacy on.
+});
+
+test('Replace and Change link open with Cancel; Refresh now steps back while a field is open', async () => {
+  const { fieldSettingsHtml } = await view();
+  const set = readerField({ readerUrl: EXEC, secretSaved: true });
   const again = fieldSettingsHtml(set, { privacy: true, state: { secretEditing: true, readerEditing: true } });
   assert.match(again, /<input id="field-secret" type="password"[^>]*>/);
   assert.doesNotMatch(again.match(/<input id="field-secret"[^>]*>/)[0], /value=/);
   assert.match(again, /<input id="field-reader-link"[^>]*value=""/);
+  assert.match(again, /data-field="cancel-reader">Cancel</);
+  assert.match(again, /data-field="cancel-secret">Cancel</);
+  assert.match(again, /<button type="button" class="link-btn" id="field-refresh"/);
+  // The field starts empty with privacy on: empty keeps the saved link, and the hint says so…
   assert.match(again, /Leave it empty to keep the saved link/);
+  // …but with privacy off it starts with the link, so there is nothing to say.
+  assert.doesNotMatch(fieldSettingsHtml(set, { privacy: false, state: { readerEditing: true } }), /Leave it empty/);
 });
 
-test('a refused link or secret marks its own field invalid and names why', async () => {
+test('a refused link or secret marks its own field invalid, names why, and keeps the link as typed', async () => {
   const { fieldSettingsHtml } = await view();
-  const html = fieldSettingsHtml(readerField(), { privacy: true, state: { readerError: 'That is the test link (it ends in /dev).', secretError: 'Not saved: no protected storage.' } });
+  const typed = EXEC.replace('/exec', '/dev');
+  const html = fieldSettingsHtml(readerField(), { privacy: true, state: { readerError: 'That is the test link (it ends in /dev).', readerDraft: typed, secretError: 'Not saved: no protected storage.' } });
   assert.match(html, /<input id="field-reader-link"[^>]*aria-invalid="true" aria-describedby="field-reader-link-err"/);
+  assert.ok(html.includes(`value="${typed}"`));
   assert.match(html, /<p class="form-error" id="field-reader-link-err" role="alert">That is the test link/);
   assert.match(html, /<input id="field-secret"[^>]*aria-invalid="true" aria-describedby="field-secret-err field-secret-hint"/);
   assert.match(html, /id="field-secret-err" role="alert">Not saved: no protected storage\./);
@@ -525,13 +547,51 @@ test('a refused link or secret marks its own field invalid and names why', async
   assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /aria-invalid/);
 });
 
-test('the key file route shows as before, with the choice above it', async () => {
+test('with no protected storage, How to connect says so: the reader cannot be chosen, and no secret is promised', async () => {
+  const { fieldSettingsHtml } = await view();
+  const onKey = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '', secretStorage: NO_STORE }, { privacy: true });
+  assert.match(onKey, /<input type="radio" name="field-source" id="field-source-reader" value="reader" disabled>/);
+  assert.match(onKey, /id="field-source-storage">This computer has no protected storage/);
+  assert.match(onKey, /aria-describedby="field-source-hint field-source-storage"/);
+  const onReader = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE }), { privacy: true });
+  assert.doesNotMatch(onReader, /type="password"|Kept encrypted/);
+  assert.match(onReader, /no protected storage/);
+});
+
+test('switching with checked columns asks first, in place; the reply to each button sits by it', async () => {
+  const { fieldSettingsHtml } = await view();
+  const asking = fieldSettingsHtml(readerField({ checkedColumns: 4 }), { privacy: true, state: { pendingSource: 'key' } });
+  assert.match(asking, /id="field-source-key" value="key" checked>/);
+  assert.match(asking, /Switching starts afresh: the checked columns and kept answers go\./);
+  assert.match(asking, /data-field="switch-source">Switch</);
+  assert.match(asking, /data-field="keep-source">Keep</);
+  assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /switch-source/);
+  // The source's refusal under its choice; Copy reader script's reply under its button.
+  const replies = fieldSettingsHtml(readerField(), { privacy: true, state: { sourceError: 'Not saved.', scriptNote: 'Reader script copied.' } });
+  assert.match(replies, /<\/fieldset>\s*<p class="form-error" id="field-source-err" role="alert">Not saved\.<\/p>/);
+  assert.match(replies, /data-field="copy-script">Copy reader script<\/button><\/div>\s*<p class="hint" role="status">Reader script copied\.<\/p>/);
+});
+
+test('in Settings a failed update points below, not to Settings, and reads on after its colon', async () => {
+  const { fieldSettingsHtml } = await view();
+  const err = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';
+  const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: err, errorAt: Date.UTC(2026, 10, 17, 9) }), { privacy: true });
+  assert.match(html, /Last update failed \([^)]*\): the reader refused the secret: .*, then save it below\.<\/p>/);
+  // A name keeps its capital.
+  const google = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, error: 'Google did not let the reader answer.' }), { privacy: true });
+  assert.match(google, /Last update failed: Google did not let the reader answer\./);
+});
+
+test('the key file route shows as before, its sheet link labelled like the reader’s fields', async () => {
   const { fieldSettingsHtml } = await view();
   const html = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true });
   assert.match(html, /value="key" checked> Google key file/);
-  assert.match(html, /id="field-link-form"/);
+  assert.match(html, /<form class="field-entry" id="field-link-form">\s*<label class="field-entry-label" for="field-link">Sheet link<\/label>/);
+  assert.match(html, /<button class="button" type="submit">Save link<\/button>/);
   assert.match(html, /Choose key file…/);
   assert.doesNotMatch(html, /field-reader-link|field-secret|Copy reader script/);
+  const refused = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true, state: { linkError: 'That link is not a Google Sheet.', linkDraft: 'https://example.com/x' } });
+  assert.match(refused, /<input id="field-link"[^>]*value="https:\/\/example\.com\/x"[^>]*aria-invalid="true" aria-describedby="field-link-err"/);
 });
 
 test('the board asks for the reader link, then the secret, before anything else', async () => {
@@ -547,7 +607,8 @@ test('a scale around 0 reads "on −3 to 3" on the board, its meter from its low
   const s = F.summarise(rows);
   const f = readerField({ readerUrl: EXEC, secretSaved: true, summary: s, fetchedAt: Date.UTC(2026, 10, 12) });
   // The mean is -1: a sixth of the way from -3 to 3 is 33%.
-  assert.match(fieldHtml(f, { privacy: true }), />−1\.0<small> on −3 to 3<\/small>/);
+  // On its own line under the number: "−1.0 on −3 to 3" is wider than the stat.
+  assert.match(fieldHtml(f, { privacy: true }), />−1\.0<small class="stat-scale">on −3 to 3<\/small>/);
   const sheet = fieldSheetHtml(f, { privacy: true });
   assert.match(sheet, /aria-label="−1\.0 on −3 to 3"><span style="width:33%">/);
   assert.match(sheet, /3 answers on a −3 to 3 scale/);
