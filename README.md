@@ -238,8 +238,55 @@ and the newest comments. The sheet is read on Monday, Wednesday and Friday at
 08:00, and when the app starts after missing one of those times; **Refresh
 now** in Settings reads it at once. The section says when it was last read.
 
+There are two ways to connect, chosen under **How to connect** in
+**Settings → Connections → Field feedback (Google Sheet)**: a small **reader
+script** attached to the sheet (no Google Cloud set-up), or a Google Cloud
+**service account** key file. Either way the sheet stays private.
+
+### With the reader script
+
+The reader is a few lines of Apps Script (`docs/field-feedback-reader.gs`)
+that live in the sheet itself. It only reads, and answers only a request that
+carries its secret. The app posts the secret (never in the link) to the
+reader's web app link at `script.google.com`, and fetches the answer from
+the one place Google hands it over, `script.googleusercontent.com`; it
+follows no other redirect. The secret is kept encrypted with your computer's
+own protection (Windows' data protection, the macOS keychain, or a Linux
+keyring; without one the app refuses to save it), never shown again and never
+written to a log.
+
+1. Open the response sheet and choose **Extensions → Apps Script**.
+2. In Agent's Home, open **Settings → Connections → Field feedback (Google
+   Sheet)**, turn on **Show field feedback**, choose **Apps Script reader
+   (link and secret)** and press **Copy reader script**. Paste it into the
+   editor in place of what is there. If your answers are on a tab with
+   another name, change `TAB` at the top to that tab's name. Save.
+3. Choose **makeSecret** in the editor's function list and press **Run**
+   (allow it when Google asks). It saves a new secret under **Project
+   Settings → Script properties** as `READER_SECRET`.
+4. **Deploy → New deployment → Select type → Web app**. Set **Execute as:
+   Me** and **Who has access: Anyone**, then **Deploy**, and copy the **Web
+   app** link: it ends in `/exec` (the `/dev` test link only works in your
+   own signed-in browser). "Anyone" means anyone with the link may call it;
+   without the secret it answers only "not allowed".
+5. In the app, paste the link under **Reader link** and press **Save**. Copy
+   `READER_SECRET` from **Project Settings → Script properties**, paste it
+   under **Secret** and press **Save**. Settings then shows only **Secret
+   saved**, with **Replace** to change it. The first update follows.
+6. Check the columns, as in step 7 below.
+
+If the update fails, the error says what to do: a secret that does not match
+(copy `READER_SECRET` again), a tab the reader cannot find (check `TAB`), or
+Google showing its sign-in page instead of the answers (the deployment is not
+set to **Anyone**: **Deploy → Manage deployments → Edit → Who has access →
+Anyone**). After changing the script, deploy it as a new version (**Deploy →
+Manage deployments → Edit → Version: New version**); the link stays the same.
+The error's code goes to the system log, never the secret or the link.
+
+### With a service account key file
+
 The app reads the sheet as a Google Cloud *service account* of your own,
-which you share the sheet with, so the sheet stays private:
+which you share the sheet with:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), pick or
    create a project.
@@ -254,7 +301,7 @@ which you share the sheet with, so the sheet stays private:
    press **Share** and add the service account's email (it ends in
    `iam.gserviceaccount.com`) as **Viewer**.
 6. In Agent's Home, open **Settings → Connections → Field feedback (Google Sheet)**, turn on
-   **Show field feedback**, paste the sheet's link from the browser's address
+   **Show field feedback**, choose **Google key file**, paste the sheet's link from the browser's address
    bar and press **Save**, then press **Choose key file…** and pick the
    `.json` file. **Copy reader address** puts the service account's email on
    the clipboard for step 5 (with privacy off, Settings shows it too).
@@ -267,7 +314,8 @@ which you share the sheet with, so the sheet stays private:
    app's guesses.
 
 Each column is one of: when answered; a score (whole numbers on a scale such
-as 1–5 or 1–10); a number that is not a score ("How many times…"), averaged
+as 1–5, 1–10 or one around 0 such as −3 to 3, written "(-3..3)" in the
+question); a number that is not a score ("How many times…"), averaged
 separately; multiple choice, counted; a comment; identifying; or ignored.
 The app suggests a role from each column's title and answers, and **Check
 the columns** lets you confirm it. Only scores whose scale you confirmed, or
@@ -284,7 +332,11 @@ not identifying, its answers come back at the next update. Ignored columns
 keep no answers either. A column you checked (comment, choice, score or
 number) whose answers turn into emails or phone numbers is kept off the
 board, its answers are not stored, and it is flagged until you choose
-Identifying or Ignore for it. A column added to the form later, and columns
+Identifying or Ignore for it. A column whose answers are all JSON (data a web
+app keeps for itself) and an entry's own id ("Record ID") are ignored; a sales
+representative, a facility or site and a distributor are identifying. A
+column of when the entry was saved ("… saved (UTC)", "Submitted (UTC)") is
+taken as when answered, before one of when it was last updated. A column added to the form later, and columns
 waiting for a choice, are flagged under **Needs attention** until you check
 them. Turning field feedback off deletes the answers kept and your checked
 columns; turned on again, the columns are checked afresh. Answers the app cannot read, such as
@@ -585,14 +637,18 @@ but never writes there. There are three exceptions, and each happens only when y
   [Open-Meteo](https://open-meteo.com) for the weather and temperature every
   30 minutes. It sends only the place you chose, never anything from your
   sessions.
-- **Field feedback**, switched on in Settings, reads one Google Sheet that you
-  shared with your own service account: when you set it up, on Monday,
-  Wednesday and Friday at 08:00, half an hour after a passing failure, and
-  when you press **Refresh now**. It sends Google only a sign-in request
-  signed with your key, the sheet's id and its tab name, never anything from
-  your sessions. The answers it read are kept in the app's data folder
+- **Field feedback**, switched on in Settings, reads one Google Sheet,
+  through the reader script you attached to it or as your own service
+  account: when you set it up, on Monday, Wednesday and Friday at 08:00, half
+  an hour after a passing failure, and when you press **Refresh now**. With
+  the reader it sends only the reader's secret, to your own reader at
+  `script.google.com`, and follows its one redirect to
+  `script.googleusercontent.com`; with a key file it sends Google only a
+  sign-in request signed with your key, the sheet's id and its tab name.
+  Never anything from your sessions. The reader's secret is kept encrypted
+  (`field-reader-secret.bin`) and the answers it read are kept in the app's data folder
   (`field-survey-cache.json`) without the identifying columns, so the board
-  shows them after a restart; turning the feature off deletes them.
+  shows them after a restart; turning the feature off deletes both.
 - **Update and restart** pulls the newest code with git. **Hide file names, commands, survey answers and LINE chats** is on by default. With
 it on, the board shows "Reading a file" but not the file's name, and it hides
 task descriptions and folder paths too. Error messages never quote the
