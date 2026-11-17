@@ -607,9 +607,10 @@ const WEAK_TIME = /^(date|time|date ?time|日期|時間|时间)$/i;
 // last changed ("Last saved", "Updated", "Modified"), which is not taken.
 const SAVED_TIME = /^(?:(?!(?:last|updated|modified|changed|edited)\b)\p{L}+ )?(?:saved|submitted|received|created)(?: at)? \((?:utc|gmt)\)$/iu;
 // A title that states its times are UTC ("Hub saved (UTC)", "Timestamp
-// UTC", "Saved at (GMT)"), not an offset from it ("GMT+8"): its dates with
-// no zone of their own (typed text, or a date the sheet keeps as a wall
-// clock) are UTC, whatever the sheet's zone.
+// UTC", "Saved at (GMT)"), not an offset from it ("GMT+8"): its dates typed
+// as text with no zone of their own are UTC, whatever the sheet's zone. A
+// date cell is a moment already (the key file's serial day in the sheet's
+// zone, the reader's ISO time with its Z) and reads the same either way.
 const UTC_TITLE = /\b(?:UTC|GMT)\b(?!\s*[+−-]\s*\d)/i;
 
 // Identifying by the header only when the header is a short label ("Name",
@@ -658,8 +659,9 @@ const NAME_WORD = /^(?:\p{Lu}[\p{Ll}'’-]+|\p{Lu}\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|P
 const SURNAMES = '陳陈林黃黄張张李王吳吴劉刘蔡楊杨許许鄭郑謝谢郭洪曾邱廖賴赖周徐蘇苏葉叶莊庄呂吕江何蕭萧羅罗高潘簡简朱鍾钟彭游詹胡施沈余趙赵盧卢梁顏颜柯孫孙魏翁戴范宋方鄧邓杜傅侯曹溫温薛丁馬马蔣蒋唐卓藍蓝馮冯姚石董紀纪歐欧程連连古汪湯汤姜田康鄒邹白涂尤巫韓韩龔龚嚴严袁黎金阮陸陆倪夏童邵';
 const SERIAL_MIN = 25_569; // 1970-01-01 in spreadsheet days
 const SERIAL_MAX = 73_051; // 2100-01-01
-const ISO_MIN = 0; // 1970-01-01, as SERIAL_MIN
-const ISO_MAX = Date.UTC(2100, 0, 1); // as SERIAL_MAX
+// Before 1900 an ISO time is not a date: a time of day alone reaches the
+// reader on 1899-12-30. Dates of 1900 on are dates, as they always were.
+const ISO_MIN = Date.UTC(1900, 0, 1);
 const MS_DAY = 86_400_000;
 const HIDDEN = '[hidden]'; // stands in, in the cache, for an identifying answer
 const isEmpty = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -703,10 +705,8 @@ function dateOf(v, { timeZone, dayFirst = false } = {}) {
   if (typeof v !== 'string') return NaN;
   const t = v.trim();
   if (ZONED_ISO.test(t)) {
-    // The same years as a serial day: a time of day alone reaches the
-    // reader as 1899-12-30, and is not a date.
     const ms = Date.parse(t);
-    return ms >= ISO_MIN && ms < ISO_MAX ? ms : NaN;
+    return ms >= ISO_MIN ? ms : NaN;
   }
   const m = DATE_RE.exec(t);
   if (!m) return NaN;
@@ -939,14 +939,20 @@ function checkSubmission(summary, roles) {
   return { missing: (summary?.columns ?? []).filter((c) => !given.has(`${c.index}\u0000${c.header}`)).length };
 }
 
+// The column of when each answer came in: by its title first, then by its
+// dates. A titled one with answers but not one date among them (times of
+// day alone, as the reader sends them) is passed over for the next; one
+// with some dates is taken, and its unreadable cells are counted.
 function findTimestamp(headers, columns, timeZone, candidate) {
-  const parses = (i) => {
+  const isDate = (i) => {
     const dayFirst = dayFirstColumn(columns[i]);
-    return columns[i].length > 0 && share(columns[i], (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }))) >= 0.8;
+    return (v) => Number.isFinite(dateOf(v, { timeZone, dayFirst }));
   };
-  let i = headers.findIndex((h, k) => candidate(k) && STRONG_TIME.test(h));
+  const parses = (i) => columns[i].length > 0 && share(columns[i], isDate(i)) >= 0.8;
+  const dated = (i) => columns[i].length === 0 || columns[i].some(isDate(i));
+  let i = headers.findIndex((h, k) => candidate(k) && STRONG_TIME.test(h) && dated(k));
   if (i >= 0) return i;
-  i = headers.findIndex((h, k) => candidate(k) && SAVED_TIME.test(h));
+  i = headers.findIndex((h, k) => candidate(k) && SAVED_TIME.test(h) && dated(k));
   if (i >= 0) return i;
   i = headers.findIndex((h, k) => candidate(k) && WEAK_TIME.test(h) && parses(k));
   if (i >= 0) return i;
@@ -1039,9 +1045,10 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
   } else if (tsCol >= 0) {
     out.timestampColumn = headers[tsCol];
     const dayFirst = dayFirstColumn(columns[tsCol]);
-    const tsZone = UTC_TITLE.test(headers[tsCol]) ? 'UTC' : zone;
+    // Text under a title that says UTC is UTC; a date cell keeps its own moment.
+    const utc = UTC_TITLE.test(headers[tsCol]);
     data.forEach((r, k) => {
-      const ms = dateOf(r[tsCol], { timeZone: tsZone, dayFirst });
+      const ms = dateOf(r[tsCol], { timeZone: utc && typeof r[tsCol] === 'string' ? 'UTC' : zone, dayFirst });
       if (Number.isFinite(ms)) times[k] = ms;
       else out.unreadable.timestamps += 1;
     });

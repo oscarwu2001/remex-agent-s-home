@@ -1022,6 +1022,27 @@ test('low scores in the last 7 days are counted per question, by its low mark', 
   assert.deepEqual(list.filter((f) => f.kind === 'falling').map((f) => f.no), [1, 2]);
 });
 
+test('a column titled as the timestamp with no date in it is passed over for the next date column, and the score flags still work', () => {
+  // The reader sends a time of day alone on 1899-12-30: not a date.
+  const answers = [...earlier([4]), [3, 1], [2, 2]];
+  const rows = (title) => [[title, 'Visit day', 'Ease (1-5)'],
+    ...answers.map(([ago, v], k) => [`1899-12-30T${String(k % 10).padStart(2, '0')}:15:00.000Z`, stamp(NOW - ago * DAY), v])];
+  for (const title of ['Timestamp', 'Hub saved (UTC)']) {
+    const s = F.summarise(rows(title), { now: NOW });
+    assert.equal(s.timestampColumn, 'Visit day', title);
+    assert.equal(s.unreadable.timestamps, 0, title);
+    const { why, list } = flagsChecked(rows(title));
+    assert.equal(why, null, title);
+    assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => f.count), [2], title);
+  }
+  // One that has dates is still taken by its title, its unreadable cells counted, never passed over.
+  const mixed = [['Timestamp', 'Visit day', 'Ease (1-5)'], [stamp(NOW - DAY), stamp(NOW - DAY), 4], ['soon', stamp(NOW), 5]];
+  const s = F.summarise(mixed, { now: NOW });
+  assert.deepEqual([s.timestampColumn, s.unreadable.timestamps], ['Timestamp', 1]);
+  // With no answers yet, the title alone still names it.
+  assert.equal(F.summarise([['Timestamp', 'Ease (1-5)']]).timestampColumn, 'Timestamp');
+});
+
 test('a low score from 5 days ago is still flagged after a later read brought one good answer', () => {
   const first = dated(['Ease (1-5)'], [...earlier([4]), [5, 1]]);
   const later = dated(['Ease (1-5)'], [...earlier([4]), [5, 1], [1, 5]]);

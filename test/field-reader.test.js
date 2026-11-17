@@ -256,22 +256,24 @@ test('a column of long whole numbers is guessed the same through the reader as t
   assert.deepEqual(ref(rows), { role: 'identifying', reason: 'numbers', confidence: 'low' });
 });
 
-test('a timestamp column whose title says UTC or GMT reads its dates without a zone as UTC, whatever the sheet’s zone', async () => {
-  const newest = async (header, cell) => {
+test('a title saying UTC or GMT reads only text dates with no zone as UTC; a date cell is the same moment by either route', async () => {
+  const viaReader = async (header, cell) => {
     const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer([[header, 'Ease (1-5)'], [cell, 4]], 'Asia/Taipei') });
     return F.summariseCache(F.afterFetch(null, got, { now: 1, started: 1, link: READER }), []).newest;
   };
-  assert.equal(await newest('Hub saved (UTC)', '2026-11-10 09:00:00'), '2026-11-10T09:00:00.000Z');
-  assert.equal(await newest('Saved at (GMT)', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
-  assert.equal(await newest('Timestamp UTC', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
-  // A date the sheet holds as a date (ISO with its Z) is already a moment: it stays as it is.
-  assert.equal(await newest('Hub saved (UTC)', '2026-11-10T09:00:00.000Z'), '2026-11-10T09:00:00.000Z');
-  // A title naming no zone, or another one, is read in the sheet's zone.
-  assert.equal(await newest('Timestamp', '2026-11-10 09:00'), '2026-11-10T01:00:00.000Z');
-  assert.equal(await newest('Saved at (GMT+8)', '2026-11-10 09:00'), '2026-11-10T01:00:00.000Z');
-  // The key file's serial dates are wall-clock dates too: under a UTC title they are UTC.
+  // (a) A date cell showing 2026-11-10 09:00 in an Asia/Taipei sheet: the key file sends its serial day
+  // (a wall clock in the sheet's zone), the reader the moment itself. Both are 01:00 UTC, whatever the title.
   const serial = 25_569 + Date.UTC(2026, 10, 10, 9) / 86_400_000;
-  assert.equal(F.summarise([['Saved (UTC)', 'Ease (1-5)'], [serial, 4]], { timeZone: 'Asia/Taipei' }).newest, '2026-11-10T09:00:00.000Z');
+  const viaKey = F.summarise([['Hub saved (UTC)', 'Ease (1-5)'], [serial, 4]], { timeZone: 'Asia/Taipei' }).newest;
+  assert.equal(viaKey, '2026-11-10T01:00:00.000Z');
+  assert.equal(await viaReader('Hub saved (UTC)', '2026-11-10T01:00:00.000Z'), viaKey);
+  // (b) Text with no zone of its own, under that title: UTC, as the title says.
+  assert.equal(await viaReader('Hub saved (UTC)', '2026-11-10 09:00:00'), '2026-11-10T09:00:00.000Z');
+  assert.equal(await viaReader('Saved at (GMT)', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
+  assert.equal(await viaReader('Timestamp UTC', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
+  // (c) Under a title naming no zone, or an offset, the same text is read in the sheet's zone.
+  assert.equal(await viaReader('Timestamp', '2026-11-10 09:00:00'), '2026-11-10T01:00:00.000Z');
+  assert.equal(await viaReader('Saved at (GMT+8)', '2026-11-10 09:00'), '2026-11-10T01:00:00.000Z');
 });
 
 test('a time of day alone (the reader sends it on 1899-12-30) is not a date, so its column is never the timestamp', async () => {
@@ -284,8 +286,19 @@ test('a time of day alone (the reader sends it on 1899-12-30) is not a date, so 
   // Times alone with nothing else: no timestamp at all, rather than one in 1899.
   const only = F.summarise([['Time', 'Ease (1-5)'], ['1899-12-30T01:00:00.000Z', 4], ['1899-12-30T02:00:00.000Z', 5]], { timeZone: 'UTC' });
   assert.deepEqual([only.timestampColumn, only.newest], [null, null]);
-  assert.ok(!Number.isFinite(F.dateOf('1969-12-31T23:59:59.000Z')));
-  assert.equal(F.dateOf('1970-01-01T00:00:00.000Z'), 0);
+  // Only years before 1900 are not dates: 1899-12-30 is a time of day, 1900 on a date.
+  assert.ok(!Number.isFinite(F.dateOf('1899-12-31T23:59:59.000Z')));
+  assert.equal(F.dateOf('1900-01-01T00:00:00.000Z'), Date.UTC(1900, 0, 1));
+});
+
+test('dates before 1970 sent by the reader are dates, as they always were', async () => {
+  const rows = [['Timestamp', 'Installed', 'Ease (1-5)'],
+    ...[1961, 1962, 1963, 1964, 1965].map((y, k) => [`2026-11-1${k}T09:00:00.000Z`, `${y}-06-01T00:00:00.000Z`, 4])];
+  const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(rows, 'UTC') });
+  const s = F.summarise(got.rows, { timeZone: 'UTC' });
+  assert.deepEqual(s.columns.find((c) => c.header === 'Installed').suggested, { role: 'ignore', reason: 'dates', confidence: 'high' });
+  assert.equal(s.timestampColumn, 'Timestamp');
+  assert.equal(F.dateOf('1961-06-01T00:00:00.000Z'), Date.UTC(1961, 5, 1));
 });
 
 test('a time zone longer than any real one is taken as none, and Needs attention says so', async () => {
