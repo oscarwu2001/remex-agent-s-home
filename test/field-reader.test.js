@@ -669,6 +669,12 @@ test('switching with checked columns asks first, in place; the reply to each but
   const back = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '', checkedColumns: 4 }, { privacy: true, state: { pendingSource: 'reader' } });
   assert.match(back, /data-field="switch-source">Switch to reader</);
   assert.match(back, /data-field="keep-source">Keep the key file</);
+  // While it asks, Switch is the one filled button: Refresh now steps back, on either way.
+  const ready = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, checkedColumns: 4 }), { privacy: true, state: { pendingSource: 'key' } });
+  assert.match(ready, /<button type="button" class="link-btn" id="field-refresh"/);
+  const keyReady = { enabled: true, source: 'key', sheetUrl: 'https://docs.google.com/spreadsheets/d/x/edit', keyName: 'k.json', checkedColumns: 4 };
+  assert.match(fieldSettingsHtml(keyReady, { privacy: true, state: { pendingSource: 'reader' } }), /<button type="button" class="link-btn" id="field-refresh"/);
+  assert.match(fieldSettingsHtml(keyReady, { privacy: true }), /<button type="button" class="button" id="field-refresh"/);
   assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /switch-source|Switching starts afresh/);
   // The source's refusal under its choice; Copy reader script's reply under its button.
   const replies = fieldSettingsHtml(readerField(), { privacy: true, state: { sourceError: 'Not saved.', scriptNote: 'Reader script copied.' } });

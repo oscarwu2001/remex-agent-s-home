@@ -464,8 +464,12 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   if (!online) return '<p class="hint">The desktop app can read the sheet; this preview cannot.</p>';
   if (!f?.enabled) return '';
   const source = f.source === 'reader' ? 'reader' : 'key';
-  // open: a field is open, so its Save is the one filled action and Refresh now steps back.
-  const common = (ready, open) => {
+  // Switching is being asked: its Switch is the one filled action.
+  const asking = Boolean(state.pendingSource && state.pendingSource !== source);
+  // open: a field is open (or switching is asked), so its button is the one
+  // filled action and Refresh now steps back.
+  const common = (ready, fieldOpen) => {
+    const open = fieldOpen || asking;
     const status = f.busy ? 'Updating…'
       : [f.fetchedAt ? `Updated ${boardTime(f.fetchedAt, now)}` : 'Not updated yet', f.nextAt && ready ? `next ${boardTime(f.nextAt, now)}` : ''].filter(Boolean).join(' · ');
     const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(readOn(f.errorHere || f.error))}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
