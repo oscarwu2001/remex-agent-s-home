@@ -512,9 +512,9 @@ app.whenReady().then(() => {
   // read for each fetch, never copied or logged. The reader's secret is kept
   // encrypted by the system (safeStorage) in its own file, read for each
   // fetch, never logged, never sent back to the window and deleted when the
-  // feature is turned off. The rows are kept in the
-  // app's data folder without identifying answers, so the board has them
-  // after a restart, and deleted when the feature is turned off. The
+  // feature is turned off. The rows are kept in the app's data folder
+  // without identifying answers, so the board has them after a restart, and
+  // deleted when the feature is turned off. The
   // decisions (when to read, what to keep, what to report) are in
   // fieldsurvey.js; this keeps the timers, the files, the requests and the IPC.
   const fieldFile = path.join(app.getPath('userData'), 'field-survey.json');
