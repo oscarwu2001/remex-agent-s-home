@@ -37,7 +37,14 @@ export function problemLabel(p, { privacy = true } = {}) {
   return p.count > 1 ? `${label} (×${p.count})` : label;
 }
 
-const mean1 = (v) => (v == null || !Number.isFinite(v) ? null : v.toFixed(1));
+// A number below 0 with a true minus sign (“−1.5”), which reads as one.
+const signed = (s) => String(s).replace(/^-/, '−');
+const mean1 = (v) => (v == null || !Number.isFinite(v) ? null : signed(v.toFixed(1)));
+// A scale in words: “1–5”, or “−3 to 3” for one around 0, where a dash
+// would read as a second minus.
+export const scaleText = (low, high) => (low < 0 ? `${signed(low)} to ${signed(high)}` : `${low}–${high}`);
+// What an average is out of: “/ 5”, or “on −3 to 3” for a scale around 0.
+const outOf = (low, high) => (low < 0 ? `on ${scaleText(low, high)}` : `/ ${high}`);
 // Where an average sits on its scale, 0–100; 0 for a scale with one value.
 const along = (q) => (q.mean == null || !(q.high > q.low) ? 0 : Math.max(0, Math.min(100, Math.round(((q.mean - q.low) / (q.high - q.low)) * 100))));
 
@@ -52,6 +59,11 @@ const checkLink = (words) => `<button type="button" class="link-btn" id="field-c
 
 // What the section says before there is anything to count.
 function setupStep(f) {
+  if (f.source === 'reader') {
+    if (!f.readerUrl) return 'First paste the reader script’s web app link in Settings → Connections → Field feedback.';
+    if (!f.secretSaved) return 'Now save the reader’s secret in Settings → Connections → Field feedback.';
+    return '';
+  }
   if (!f.sheetUrl) return 'First paste the sheet’s link in Settings → Connections → Field feedback.';
   if (!f.keyName) return 'Now choose the service account’s key file in Settings → Connections → Field feedback.';
   return '';
@@ -112,7 +124,7 @@ export function fieldHtml(f, { privacy = true, now = Date.now() } = {}) {
   // Each label comes first for screen readers; the number shows above it.
   const stats = `<dl class="stats">
       <div class="stat"><dt class="stat-label">Responses</dt><dd class="stat-n">${s.responses}</dd></div>
-      <div class="stat"${dashWhy ? ` title="${dashWhy}"` : ''}><dt class="stat-label">Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> / ${s.overall.high}</small>` : DASH}</dd></div>
+      <div class="stat"${dashWhy ? ` title="${dashWhy}"` : ''}><dt class="stat-label">Average score</dt><dd class="stat-n">${avg != null ? `${avg}<small> ${outOf(s.overall.low ?? 0, s.overall.high)}</small>` : DASH}</dd></div>
       <div class="stat"><dt class="stat-label">${newLabel}</dt><dd class="stat-n">${s.newSince != null ? s.newSince : DASH}</dd></div>
     </dl>`;
   const open = s.responses
@@ -143,9 +155,9 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
       const counts = q.worse && q.mean != null ? q.low + q.high - q.mean : null;
       return `<li class="field-q">
         <p class="field-q-top"><span class="field-q-name">${label(q)}${q.worse ? ' <span class="tag">Higher is worse</span>' : ''}</span>
-          <span class="field-q-n">${m != null ? `${m}<small> / ${q.high}</small>` : DASH}</span></p>
-        <div class="meter" role="img" aria-label="${m != null ? `${m} of ${q.high}${counts != null ? `, higher is worse: counts as ${mean1(counts)}` : ''}` : 'no answers'}"><span style="width:${along(counts != null ? { ...q, mean: counts } : q)}%"></span></div>
-        <p class="muted">${plural(q.n, 'answer')} on a ${q.low}–${q.high} scale${q.notChecked ? ' · <span class="field-guess">not checked</span>, not in the average' : q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.notChecked ? '' : q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${counts != null ? `: counts as ${mean1(counts)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
+          <span class="field-q-n">${m != null ? `${m}<small> ${outOf(q.low, q.high)}</small>` : DASH}</span></p>
+        <div class="meter" role="img" aria-label="${m != null ? `${m} ${q.low < 0 ? outOf(q.low, q.high) : `of ${q.high}`}${counts != null ? `, higher is worse: counts as ${mean1(counts)}` : ''}` : 'no answers'}"><span style="width:${along(counts != null ? { ...q, mean: counts } : q)}%"></span></div>
+        <p class="muted">${plural(q.n, 'answer')} on a ${scaleText(q.low, q.high)} scale${q.notChecked ? ' · <span class="field-guess">not checked</span>, not in the average' : q.guessed ? ' · <span class="field-guess">scale guessed</span>, not in the average' : ''}${q.notChecked ? '' : q.directionGuessed ? ' · <span class="field-guess">direction guessed</span>, not in the average' : q.worse ? ` · higher is worse${counts != null ? `: counts as ${mean1(counts)} in the average` : ''}` : ''}${q.unreadable ? ` · ${plural(q.unreadable, 'answer')} not readable` : ''}</p>
       </li>`;
     }).join('')}</ol>`
     : '<p class="empty">No question with scores was found yet.</p>';
@@ -176,7 +188,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const left = [];
   if (s.identifying?.length) left.push(`${plural(s.identifying.length, 'column')} with names, emails, phone numbers or patient and case numbers ${s.identifying.length === 1 ? 'is' : 'are'} hidden.`);
   if (s.skipped?.length) {
-    const why = { 'no answers': 'no answers yet', dates: 'dates', ignored: 'set to ignore' };
+    const why = { 'no answers': 'no answers yet', dates: 'dates', ignored: 'set to ignore', json: 'data for programs', 'record id': 'entry ids' };
     left.push(privacy ? `${plural(s.skipped.length, 'other column')} not summarised.`
       : `Not summarised: ${s.skipped.map((k) => `${esc(k.question)} (${esc(why[k.reason] ?? k.reason)})`).join(', ')}.`);
   }
@@ -235,7 +247,7 @@ export function draftWith(draft, col, part, value) {
 function guessWords(c) {
   const g = c.suggested ?? {};
   const words = ROLE_WORDS[g.role] ?? g.role ?? '';
-  return g.role === 'score' && g.low != null ? `${words}, ${g.low}–${g.high}${g.worse ? ', higher is worse' : ''}` : words;
+  return g.role === 'score' && g.low != null ? `${words}, ${scaleText(g.low, g.high)}${g.worse ? ', higher is worse' : ''}` : words;
 }
 
 function rowTags(r) {
@@ -254,7 +266,16 @@ function rowTags(r) {
 // "Higher is better" or "Higher is worse", with "Choose direction…" until one is.
 const directionOpts = (worse) => `${worse == null ? '<option value="" selected>Choose direction…</option>' : ''}<option value="better"${worse === false ? ' selected' : ''}>Higher is better</option><option value="worse"${worse === true ? ' selected' : ''}>Higher is worse</option>`;
 const directionWords = (r) => (r.role !== 'score' ? '' : r.worse == null ? ', direction not chosen' : r.worse ? ', higher is worse' : ', higher is better');
-const scaleOpts = (values, chosen) => `${chosen == null ? '<option value="" selected>Choose…</option>' : ''}${values.map((v) => `<option${v === chosen ? ' selected' : ''}>${v}</option>`).join('')}`;
+// A value below 0 carries its own value, as its words have a true minus;
+// a chosen value not in the list (saved, or stated by the question) is
+// added, so what shows is what is saved.
+const scaleOpts = (values, chosen) => {
+  const list = chosen == null || values.includes(chosen) ? values : [...values, chosen].sort((a, b) => a - b);
+  return `${chosen == null ? '<option value="" selected>Choose…</option>' : ''}${list.map((v) => `<option${v < 0 ? ` value="${v}"` : ''}${v === chosen ? ' selected' : ''}>${signed(v)}</option>`).join('')}`;
+};
+const LOWS = [-5, -4, -3, -2, -1, 0, 1];
+// From 2, or from 1 for a scale that starts below 0 (−1 to 1).
+const highsFor = (low) => [...(low != null && low < 0 ? [1] : []), 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 // "Check the columns": one row per column. With privacy off each row has
 // its role to choose (and a score its scale); Save is refused until every
@@ -277,7 +298,7 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
 
   if (privacy) {
     const items = rows.map((r) => {
-      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${r.low}–${r.high}` : ''}${directionWords(r)}` : 'Not chosen';
+      const what = r.role ? `${ROLE_WORDS[r.role] ?? r.role}${r.role === 'score' && r.low != null && r.high != null ? `, ${scaleText(r.low, r.high)}` : ''}${directionWords(r)}` : 'Not chosen';
       return `<li class="field-col">
         <p class="field-col-name"><span>${esc(nameOf(r.c))}</span>${rowTags(r)}</p>
         <p class="field-col-what">${esc(what)}</p>${guess(r)}</li>`;
@@ -296,8 +317,8 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
     const opts = (r.role ? '' : '<option value="" selected>Choose…</option>')
       + Object.entries(ROLE_WORDS).map(([v, w]) => `<option value="${v}"${v === r.role ? ' selected' : ''}>${w}</option>`).join('');
     const scale = r.role === 'score' ? `<span class="field-scale">
-        <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low" aria-label="${esc(name)}: scale from">${scaleOpts([0, 1], r.low)}</select></label>
-        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts([2, 3, 4, 5, 6, 7, 8, 9, 10], r.high)}</select></label></span>
+        <label>from <select id="fc-low-${c.index}" data-col="${c.index}" data-part="low" aria-label="${esc(name)}: scale from">${scaleOpts(LOWS, r.low)}</select></label>
+        <label>to <select id="fc-high-${c.index}" data-col="${c.index}" data-part="high" aria-label="${esc(name)}: scale to">${scaleOpts(highsFor(r.low), r.high)}</select></label></span>
         <select id="fc-worse-${c.index}" data-col="${c.index}" data-part="worse" aria-label="${esc(name)}: higher is better or worse">${directionOpts(r.worse)}</select>` : '';
     return `<li class="field-col${r.missing ? ' needs-choice' : ''}">
       <p class="field-col-name"><span>${esc(name)}</span>${rowTags(r)}</p>
@@ -314,7 +335,55 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
   </section>`;
 }
 
-// Settings → Connections → Field feedback, below the switch. state: { editing, error, note, draft, checkNote, checkError }.
+// "How to connect": the reader script (its link and secret) or a Google key
+// file. Older snapshots name no source: the key file's.
+function sourceChoice(source) {
+  const option = (value, words) => `<label class="check"><input type="radio" name="field-source" value="${value}"${source === value ? ' checked' : ''}> ${words}</label>`;
+  return `<fieldset class="field field-source"><legend>How to connect</legend>
+      ${option('reader', 'Apps Script reader (link and secret)')}
+      ${option('key', 'Google key file')}</fieldset>`;
+}
+
+// One labelled field with its Save, and its error tied to it (aria-invalid,
+// aria-describedby) after a Save it refused.
+function entryForm({ id, label, input, error, hint = '', button = 'button' }) {
+  const err = error ? `<p class="form-error" id="${id}-err" role="alert">${esc(error)}</p>` : '';
+  const hintP = hint ? `<p class="hint" id="${id}-hint">${hint}</p>` : '';
+  const described = [error ? `${id}-err` : '', hint ? `${id}-hint` : ''].filter(Boolean).join(' ');
+  return `<form class="field-entry" id="${id}-form">
+      <label class="field-entry-label" for="${id}">${label}</label>
+      <div class="add-row"><input id="${id}" ${input}${error ? ' aria-invalid="true"' : ''}${described ? ` aria-describedby="${described}"` : ''}>
+        <button class="${button}" type="submit">Save</button></div>${err}${hintP}</form>`;
+}
+
+// The reader route: copy the script, its web app link, its secret. The
+// secret never comes back from the main process: once saved, only "Secret
+// saved" and Replace.
+function readerSettings(f, { privacy, state }) {
+  const script = `<div class="form-actions"><button type="button" class="link-btn" id="field-copy-script" data-field="copy-script">Copy reader script</button></div>
+    <p class="hint">Paste it into the sheet’s Extensions → Apps Script, run makeSecret once, then deploy it as a web app: execute as you, who has access Anyone. The README goes through it step by step.</p>`;
+  const link = !f.readerUrl || state.readerEditing
+    ? entryForm({
+      id: 'field-reader-link', label: 'Reader link', error: state.readerError,
+      input: `type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="The web app link, ending in /exec" value="${privacy ? '' : esc(f.readerUrl)}"`,
+      hint: f.readerUrl ? 'Leave it empty to keep the saved link.' : '',
+    })
+    : `<p class="field-set"><span>${privacy ? 'A reader link is saved.' : `Reader: <span class="field-path">${esc(f.readerUrl)}</span>`}</span>
+        <button type="button" class="link-btn" id="field-reader-change" data-field="change-reader">Change link</button></p>`;
+  // The second field's Save is plain until the link is saved: one filled button at a time.
+  const secret = !f.secretSaved || state.secretEditing
+    ? entryForm({
+      id: 'field-secret', label: 'Secret', error: state.secretError, button: f.readerUrl ? 'button' : 'link-btn',
+      input: 'type="password" autocomplete="off" spellcheck="false" placeholder="READER_SECRET from the script’s properties"',
+      hint: 'Kept encrypted with this computer’s own protection, and never shown again.',
+    })
+    : `<p class="field-set"><span>Secret saved.</span>
+        <button type="button" class="link-btn" id="field-secret-replace" data-field="replace-secret">Replace</button></p>`;
+  return `${script}${link}${secret}`;
+}
+
+// Settings → Connections → Field feedback, below the switch. state: { editing, error, note, draft, checkNote, checkError,
+// readerEditing, readerError, secretEditing, secretError }.
 export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}, now = Date.now() } = {}) {
   if (f?.demo) {
     return `<p class="hint">The demo shows made-up sample feedback. Turn off “Demo patients” to set up your own sheet.</p>
@@ -322,6 +391,19 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
   }
   if (!online) return '<p class="hint">The desktop app can read the sheet; this preview cannot.</p>';
   if (!f?.enabled) return '';
+  const source = f.source === 'reader' ? 'reader' : 'key';
+  const common = (ready) => {
+    const status = f.busy ? 'Updating…'
+      : [f.fetchedAt ? `Updated ${boardTime(f.fetchedAt, now)}` : 'Not updated yet', f.nextAt && ready ? `next ${boardTime(f.nextAt, now)}` : ''].filter(Boolean).join(' · ');
+    const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(f.error)}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
+    return `${ready ? `<div class="form-actions">${refreshBtn('field-refresh')}</div>` : ''}
+    <p class="hint" role="status">${esc(status)}${state.note ? ` · ${esc(state.note)}` : ''}</p>${lastError}
+    ${fieldColumnsHtml(f, { privacy, draft: state.draft, note: state.checkNote, error: state.checkError })}`;
+  };
+  if (source === 'reader') {
+    return `${sourceChoice(source)}${readerSettings(f, { privacy, state })}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
+    ${common(Boolean(f.readerUrl && f.secretSaved))}`;
+  }
   const showLink = !f.sheetUrl || state.editing;
   const link = showLink
     ? `<form class="add-row" id="field-link-form">
@@ -340,15 +422,10 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
     ? `<p class="field-set"><span>${privacy ? 'Share the sheet with the key’s reader address as Viewer.' : `Share the sheet with <span class="field-robot">${esc(f.clientEmail)}</span> as Viewer.`}</span>
         <button type="button" class="link-btn" id="field-copy" data-field="copy-reader">Copy reader address</button></p>` : '';
   const keyError = f.keyError ? `<p class="form-error" role="status">${esc(f.keyError)}</p>` : '';
-  const ready = f.sheetUrl && f.keyName;
-  const status = f.busy ? 'Updating…'
-    : [f.fetchedAt ? `Updated ${boardTime(f.fetchedAt, now)}` : 'Not updated yet', f.nextAt && ready ? `next ${boardTime(f.nextAt, now)}` : ''].filter(Boolean).join(' · ');
-  const lastError = f.error ? `<p class="form-error" role="status">Last update failed${f.errorAt ? ` (${esc(boardTime(f.errorAt, now))})` : ''}: ${esc(f.error)}${!privacy && f.errorDetail ? ` <span class="field-path">${esc(f.errorDetail)}</span>` : ''}</p>` : '';
-  return `${link}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
+  // Older snapshots name no source: no choice to show.
+  return `${f.source ? sourceChoice(source) : ''}${link}${state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : ''}
     ${key}${robot}${keyError}
-    ${ready ? `<div class="form-actions">${refreshBtn('field-refresh')}</div>` : ''}
-    <p class="hint" role="status">${esc(status)}${state.note ? ` · ${esc(state.note)}` : ''}</p>${lastError}
-    ${fieldColumnsHtml(f, { privacy, draft: state.draft, note: state.checkNote, error: state.checkError })}`;
+    ${common(Boolean(f.sheetUrl && f.keyName))}`;
 }
 
 // The roles to save from the step: every row the user has a choice for,
@@ -396,11 +473,11 @@ export function flagText(flag, { privacy = true, days = 7, saved = false, more =
   const name = privacy || !flag.question ? `Question ${flag.no ?? ''}`.trim() : `“${flag.question}”`;
   const when = `in the last ${days} days`;
   if (flag.kind === 'low') {
-    return flag.worse ? `${plural(flag.count, 'high score')} on ${name} ${when} (${flag.mark} or more on ${flag.low}–${flag.high}, higher is worse)`
-      : `${plural(flag.count, 'low score')} on ${name} ${when} (${flag.mark} or less on ${flag.low}–${flag.high})`;
+    return flag.worse ? `${plural(flag.count, 'high score')} on ${name} ${when} (${signed(flag.mark)} or more on ${scaleText(flag.low, flag.high)}, higher is worse)`
+      : `${plural(flag.count, 'low score')} on ${name} ${when} (${signed(flag.mark)} or less on ${scaleText(flag.low, flag.high)})`;
   }
   if (flag.kind === 'falling') {
-    return `${name} average ${flag.worse ? 'up' : 'down'} to ${mean1(flag.recentMean)} of ${flag.high} ${when} (was ${mean1(flag.earlierMean)}${flag.worse ? '; higher is worse' : ''})`;
+    return `${name} average ${flag.worse ? 'up' : 'down'} to ${mean1(flag.recentMean)} ${flag.low < 0 ? outOf(flag.low, flag.high) : `of ${flag.high}`} ${when} (was ${mean1(flag.earlierMean)}${flag.worse ? '; higher is worse' : ''})`;
   }
   if (flag.kind === 'comments') return `${plural(flag.count, 'comment')} ${when}`;
   return (SETUP_WORDS[flag.what] ?? (() => 'Field feedback needs a look'))(flag.count ?? 0, saved, more);

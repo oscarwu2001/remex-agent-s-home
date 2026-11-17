@@ -2612,7 +2612,13 @@ setInterval(renderProjects, 1000);
 
 // editing: the link field is open. error/note: the reply to the last button.
 // draft: the column roles being changed in "Check the columns".
-const fieldUi = { editing: false, error: '', note: '', draft: {}, checkNote: '', checkError: '' };
+// readerEditing/secretEditing: the reader's link or secret field is open
+// again; readerError/secretError: what its last Save was refused for. The
+// secret itself is never kept here.
+const fieldUi = {
+  editing: false, error: '', note: '', draft: {}, checkNote: '', checkError: '',
+  readerEditing: false, readerError: '', secretEditing: false, secretError: '',
+};
 let fieldSwitchedAt = 0; // the switch was just pressed: wait for the snapshot before echoing it back
 let fieldOpener;
 function renderField() {
@@ -2695,6 +2701,20 @@ async function fieldAction(act) {
     fieldUi.error = res.ok || res.canceled ? '' : res.error;
     renderFieldSettings();
     setTimeout(renderFieldSettings, 600);
+  } else if (act === 'change-reader') {
+    fieldUi.readerEditing = true;
+    renderFieldSettings();
+    $('field-reader-link')?.focus();
+  } else if (act === 'replace-secret') {
+    fieldUi.secretEditing = true;
+    renderFieldSettings();
+    $('field-secret')?.focus();
+  } else if (act === 'copy-script') {
+    if (!bridge.fieldCopyScript) return;
+    const res = await bridge.fieldCopyScript().catch((err) => ({ ok: false, error: err.message }));
+    fieldUi.note = res.ok ? 'Reader script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
+    fieldUi.error = res.ok ? '' : res.error;
+    renderFieldSettings();
   }
 }
 for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-list']) {
@@ -2705,7 +2725,17 @@ for (const id of ['field-body', 'field-settings', 'field-sheet-body', 'problem-l
 }
 // "Check the columns": each choice goes into the draft, and the row redraws
 // (a score shows its scale).
-$('field-settings').addEventListener('change', (e) => {
+$('field-settings').addEventListener('change', async (e) => {
+  // How to connect: the reader script or the key file. Another source starts afresh.
+  if (e.target.name === 'field-source') {
+    if (!bridge.fieldSet) return;
+    const res = await bridge.fieldSet({ source: e.target.value }).catch((err) => ({ ok: false, error: err.message }));
+    fieldUi.error = res.ok ? '' : res.error;
+    Object.assign(fieldUi, { note: '', editing: false, readerEditing: false, readerError: '', secretEditing: false, secretError: '' });
+    renderFieldSettings();
+    setTimeout(() => { renderField(); renderFieldSettings(); }, 600);
+    return;
+  }
   const el = e.target.closest('select[data-col]');
   if (!el) return;
   const col = Number(el.dataset.col);
@@ -2736,6 +2766,33 @@ $('field-settings').addEventListener('submit', async (e) => {
       fieldUi.checkNote = res.note ?? 'Columns saved.'; // or "Kept hidden: …" from the main process
     } else fieldUi.checkError = res.error;
     renderFieldSettings();
+    setTimeout(renderFieldSettings, 600);
+    return;
+  }
+  if (e.target.id === 'field-reader-link-form') {
+    if (!bridge.fieldSet) return;
+    const res = await bridge.fieldSet({ readerUrl: $('field-reader-link').value }).catch((err) => ({ ok: false, error: err.message }));
+    fieldUi.readerError = res.ok ? '' : res.error;
+    if (res.ok) fieldUi.readerEditing = false;
+    renderFieldSettings();
+    if (!res.ok) $('field-reader-link')?.focus();
+    setTimeout(renderFieldSettings, 600);
+    return;
+  }
+  if (e.target.id === 'field-secret-form') {
+    if (!bridge.fieldSaveSecret) return;
+    // Read once and cleared at once: the secret stays in no field or state.
+    const input = $('field-secret');
+    const secret = input.value;
+    input.value = '';
+    const res = await bridge.fieldSaveSecret(secret).catch((err) => ({ ok: false, error: err.message }));
+    fieldUi.secretError = res.ok ? '' : res.error;
+    if (res.ok) {
+      fieldUi.secretEditing = false;
+      fieldUi.note = 'Secret saved.';
+    }
+    renderFieldSettings();
+    if (!res.ok) $('field-secret')?.focus();
     setTimeout(renderFieldSettings, 600);
     return;
   }

@@ -792,6 +792,11 @@ body.no-select, body.no-select * { user-select: none; }
 /* Its link button lines up with the text when it wraps to a line of its own. */
 .field-set > .link-btn { margin-left: calc(-1 * var(--s-2)); }
 .field-path { min-width: 0; overflow-wrap: anywhere; color: var(--ink-muted); }
+/* The reader's link and secret: a quiet label over each rounded field. */
+.field-entry { display: grid; gap: var(--s-1); margin: 0; }
+.field-entry-label { font-size: 13px; color: var(--ink-muted); }
+.field-source { gap: 0; }
+.field-source legend { margin-bottom: 0; }
 .field-robot { color: var(--ink); overflow-wrap: anywhere; }
 .field-check-step { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
 .field-check-step .hint { margin: 0 0 var(--s-2); }

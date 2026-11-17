@@ -342,6 +342,95 @@ test('no other file in src, electron or renderer names the reader’s hosts', ()
   assert.deepEqual(hits.map((h) => h.replace(/\\/g, '/')), ['src/core/fieldsurvey.js']);
 });
 
+// ---- Settings and the board (renderer/field-view.js) -----------------------------------------
+
+const view = () => import('../renderer/field-view.js');
+const readerField = (extra = {}) => ({ enabled: true, source: 'reader', readerUrl: '', secretSaved: false, sheetUrl: '', keyName: '', ...extra });
+
+test('Settings: how to connect, then the reader link and the secret, each with its own Save', async () => {
+  const { fieldSettingsHtml } = await view();
+  const html = fieldSettingsHtml(readerField(), { privacy: true });
+  assert.match(html, /<legend>How to connect<\/legend>/);
+  assert.match(html, /<input type="radio" name="field-source" value="reader" checked> Apps Script reader \(link and secret\)/);
+  assert.match(html, /<input type="radio" name="field-source" value="key"> Google key file/);
+  assert.match(html, /data-field="copy-script">Copy reader script</);
+  assert.match(html, /<label class="field-entry-label" for="field-reader-link">Reader link<\/label>/);
+  assert.match(html, /<label class="field-entry-label" for="field-secret">Secret<\/label>/);
+  assert.match(html, /<input id="field-secret" type="password"/);
+  // Nothing of the key file's route shows.
+  assert.doesNotMatch(html, /Choose key file|field-link-form|Copy reader address/);
+  // One filled button at a time: the secret's Save is plain until a link is saved.
+  assert.match(html.split('field-secret-form')[1], /<button class="link-btn" type="submit">Save/);
+  assert.doesNotMatch(html, /field-refresh/); // nothing to read yet
+});
+
+test('a saved secret shows only that it is saved, with Replace; the link shows only with privacy off', async () => {
+  const { fieldSettingsHtml } = await view();
+  const set = readerField({ readerUrl: EXEC, secretSaved: true });
+  const shared = fieldSettingsHtml(set, { privacy: true });
+  assert.match(shared, /Secret saved\.<\/span>\s*<button[^>]*data-field="replace-secret">Replace<\/button>/);
+  assert.doesNotMatch(shared, /type="password"/);
+  assert.match(shared, /A reader link is saved\./);
+  assert.ok(!shared.includes(DEPLOY));
+  assert.match(shared, /id="field-refresh"/);
+  assert.ok(fieldSettingsHtml(set, { privacy: false }).includes(EXEC));
+  // Replace opens an empty secret field; Change link opens the link, empty with privacy on.
+  const again = fieldSettingsHtml(set, { privacy: true, state: { secretEditing: true, readerEditing: true } });
+  assert.match(again, /<input id="field-secret" type="password"[^>]*>/);
+  assert.doesNotMatch(again.match(/<input id="field-secret"[^>]*>/)[0], /value=/);
+  assert.match(again, /<input id="field-reader-link"[^>]*value=""/);
+  assert.match(again, /Leave it empty to keep the saved link/);
+});
+
+test('a refused link or secret marks its own field invalid and names why', async () => {
+  const { fieldSettingsHtml } = await view();
+  const html = fieldSettingsHtml(readerField(), { privacy: true, state: { readerError: 'That is the test link (it ends in /dev).', secretError: 'Not saved: no protected storage.' } });
+  assert.match(html, /<input id="field-reader-link"[^>]*aria-invalid="true" aria-describedby="field-reader-link-err"/);
+  assert.match(html, /<p class="form-error" id="field-reader-link-err" role="alert">That is the test link/);
+  assert.match(html, /<input id="field-secret"[^>]*aria-invalid="true" aria-describedby="field-secret-err field-secret-hint"/);
+  assert.match(html, /id="field-secret-err" role="alert">Not saved: no protected storage\./);
+  // Without an error, no field is marked.
+  assert.doesNotMatch(fieldSettingsHtml(readerField(), { privacy: true }), /aria-invalid/);
+});
+
+test('the key file route shows as before, with the choice above it', async () => {
+  const { fieldSettingsHtml } = await view();
+  const html = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true });
+  assert.match(html, /value="key" checked> Google key file/);
+  assert.match(html, /id="field-link-form"/);
+  assert.match(html, /Choose key file…/);
+  assert.doesNotMatch(html, /field-reader-link|field-secret|Copy reader script/);
+});
+
+test('the board asks for the reader link, then the secret, before anything else', async () => {
+  const { fieldHtml } = await view();
+  assert.match(fieldHtml(readerField(), { privacy: true }), /First paste the reader script’s web app link/);
+  assert.match(fieldHtml(readerField({ readerUrl: EXEC }), { privacy: true }), /Now save the reader’s secret/);
+  assert.match(fieldHtml(readerField({ readerUrl: EXEC, secretSaved: true }), { privacy: true }), /Not updated yet/);
+});
+
+test('a scale around 0 reads "on −3 to 3" on the board, its meter from its low end, and its flags in the same words', async () => {
+  const { fieldHtml, fieldSheetHtml, flagText, fieldColumnsHtml } = await view();
+  const rows = [['Hub saved (UTC)', 'Comfort (-3..3)'], ['2026-11-10T09:00:00.000Z', '-3'], ['2026-11-11T09:00:00.000Z', '2'], ['2026-11-12T09:00:00.000Z', '-2']];
+  const s = F.summarise(rows);
+  const f = readerField({ readerUrl: EXEC, secretSaved: true, summary: s, fetchedAt: Date.UTC(2026, 10, 12) });
+  // The mean is -1: a sixth of the way from -3 to 3 is 33%.
+  assert.match(fieldHtml(f, { privacy: true }), />−1\.0<small> on −3 to 3<\/small>/);
+  const sheet = fieldSheetHtml(f, { privacy: true });
+  assert.match(sheet, /aria-label="−1\.0 on −3 to 3"><span style="width:33%">/);
+  assert.match(sheet, /3 answers on a −3 to 3 scale/);
+  assert.equal(flagText({ kind: 'low', no: 1, count: 2, mark: -2, low: -3, high: 3 }), '2 low scores on Question 1 in the last 7 days (−2 or less on −3 to 3)');
+  assert.equal(flagText({ kind: 'falling', no: 1, recentN: 4, recentMean: -1, earlierMean: 2, low: -3, high: 3 }), 'Question 1 average down to −1.0 on −3 to 3 in the last 7 days (was 2.0)');
+  // A scale from 1 reads as before.
+  assert.equal(flagText({ kind: 'low', no: 1, count: 1, mark: 2, low: 1, high: 5 }), '1 low score on Question 1 in the last 7 days (2 or less on 1–5)');
+  // Check the columns offers the low end below 0, with its value, and the stated one chosen.
+  const step = fieldColumnsHtml(f, { privacy: false });
+  const row = step.split('<li').find((x) => x.includes('Comfort'));
+  assert.match(row, /<option value="-3" selected>−3<\/option>/);
+  assert.match(row, /<option selected>3<\/option>/);
+  assert.match(fieldColumnsHtml(f, { privacy: true }), /Score, −3 to 3/);
+});
+
 // Last: every error the tests above saw.
 test('no error message, detail or log code carries the secret or the link, and messages carry no raw codes', () => {
   assert.ok(seen.length >= 30, `only ${seen.length} errors seen`);
