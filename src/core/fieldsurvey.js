@@ -892,6 +892,13 @@ function suggest(header, values, untitled) {
   // "Patient satisfaction (1-5)" is a score about a patient, not who it was.
   if (byHeader && !(scoreLike && !ID_WORD.test(headerLabel(header)))) return { role: 'identifying', reason: 'header', confidence: byHeader === 'label' ? HIGH : LOW };
   if (!untitled && RECORD_ID.test(headerLabel(header))) return { role: 'ignore', reason: 'record id', confidence: HIGH };
+  // Times of day alone, as the reader sends them (on 1899-12-30), are never
+  // shown as comments: left out, surely when most answers are such times,
+  // else as a guess the user is asked about. (The key file sends them as
+  // fractions of a day, which cannot be told from other numbers: those keep
+  // the number guess.)
+  const times = share(values, (v) => typeof v === 'string' && timeOfDay(v));
+  if (times > 0) return { role: 'ignore', reason: 'times of day', confidence: times >= 0.8 ? HIGH : LOW };
   // Three JSON answers or more are surely data; one or two may be a chance
   // answer, so the user is asked.
   if (values.every(jsonData)) return { role: 'ignore', reason: 'json', confidence: values.length >= 3 ? HIGH : LOW };
@@ -985,7 +992,8 @@ function timeOfDay(v) {
 // dates. A titled one is taken whatever its cells, and the ones that are no
 // readable date are counted (Needs attention says so), with one exception:
 // when every answer in it is a time of day alone and another column has
-// readable dates, that column is taken instead.
+// readable dates, that column is taken instead, as a guess the user
+// confirms (unsure). -> { index (-1: none), unsure }.
 function findTimestamp(headers, columns, timeZone, candidate) {
   const parses = (i) => {
     const dayFirst = dayFirstColumn(columns[i]);
@@ -1004,10 +1012,10 @@ function findTimestamp(headers, columns, timeZone, candidate) {
     (h, k) => WEAK_TIME.test(h) && parses(k),
     (h, k) => !idByHeader(h) && parses(k),
   ]);
-  if (titled < 0) return byDates(-1);
+  if (titled < 0) return { index: byDates(-1), unsure: false };
   const timesOnly = columns[titled].length > 0 && columns[titled].every(timeOfDay);
   const instead = timesOnly ? byDates(titled) : -1;
-  return instead >= 0 ? instead : titled;
+  return instead >= 0 ? { index: instead, unsure: true } : { index: titled, unsure: false };
 }
 
 // Typed dates such as 03/04/2026 that could be either way round: the column
@@ -1084,8 +1092,9 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
 
   // When each answer came in: the column the user named, or the one found.
   let tsCol = saved.findIndex((r) => r?.role === 'timestamp');
-  const found = findTimestamp(headers, columns, zone, (k) => !hidden.has(k) && (!saved[k] || saved[k].role === 'timestamp') && suggested[k].reason !== 'header');
-  if (found >= 0) suggested[found] = { role: 'timestamp', confidence: HIGH };
+  const pick = findTimestamp(headers, columns, zone, (k) => !hidden.has(k) && (!saved[k] || saved[k].role === 'timestamp') && suggested[k].reason !== 'header');
+  const found = pick.index;
+  if (found >= 0) suggested[found] = { role: 'timestamp', confidence: pick.unsure ? LOW : HIGH };
   if (tsCol < 0 && found >= 0 && !saved[found]) tsCol = found;
   const times = data.map(() => null);
   if (tsCol >= 0 && hidden.has(tsCol)) {

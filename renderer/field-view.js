@@ -192,7 +192,7 @@ export function fieldSheetHtml(f, { privacy = true, now = Date.now() } = {}) {
   const left = [];
   if (s.identifying?.length) left.push(`${plural(s.identifying.length, 'column')} with names, emails, phone numbers or patient and case numbers ${s.identifying.length === 1 ? 'is' : 'are'} hidden.`);
   if (s.skipped?.length) {
-    const why = { 'no answers': 'no answers yet', dates: 'dates', ignored: 'set to ignore', json: 'data for programs', 'record id': 'entry ids' };
+    const why = { 'no answers': 'no answers yet', dates: 'dates', 'times of day': 'times of day', ignored: 'set to ignore', json: 'data for programs', 'record id': 'entry ids' };
     left.push(privacy ? `${plural(s.skipped.length, 'other column')} not summarised.`
       : `Not summarised: ${s.skipped.map((k) => `${esc(k.question)} (${esc(why[k.reason] ?? k.reason)})`).join(', ')}.`);
   }
@@ -431,7 +431,12 @@ function readerSettings(f, { privacy, state }) {
         <button type="button" class="link-btn" id="field-reader-change" data-field="change-reader">Change link</button></p>`;
   const secretOpen = !f.secretSaved || state.secretEditing;
   let secret;
-  if (f.secretStorage && secretOpen) secret = `<p class="hint">${esc(f.secretStorage)}</p>`;
+  // No protected storage: no Secret field and no Replace secret (it would
+  // open onto nothing), only what is so and why.
+  if (f.secretStorage && f.secretSaved) {
+    secret = `<p class="field-set"><span>A secret is saved, but this computer can’t open it now.</span></p>
+    <p class="hint">${esc(f.secretStorage)}</p>`;
+  } else if (f.secretStorage) secret = `<p class="hint">${esc(f.secretStorage)}</p>`;
   else if (secretOpen) {
     // The second field's Save is plain until the link is saved: one filled button at a time.
     secret = entryForm({

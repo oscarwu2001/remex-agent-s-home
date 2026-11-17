@@ -291,6 +291,29 @@ test('a time of day alone (the reader sends it on 1899-12-30) is not a date, so 
   assert.equal(F.dateOf('1900-01-01T00:00:00.000Z'), Date.UTC(1900, 0, 1));
 });
 
+test('a question answered with times of day (the reader sends them on 1899-12-30) is left out, never shown as comments', async () => {
+  const summaryOf = async (cells) => {
+    const rows = [['Timestamp', 'Start time', 'Ease (1-5)'], ...cells.map((t, k) => [`2026-11-1${k}T09:00:00.000Z`, t, 4])];
+    const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(rows, 'UTC') });
+    const s = F.summarise(got.rows, { timeZone: 'UTC' });
+    return { s, start: s.columns.find((c) => c.header === 'Start time') };
+  };
+  const times = ['08:00', '09:30', '13:15', '17:45', '06:05'].map((t) => `1899-12-30T${t}:00.000Z`);
+  const all = await summaryOf(times);
+  assert.deepEqual(all.start.suggested, { role: 'ignore', reason: 'times of day', confidence: 'high' });
+  assert.deepEqual([all.start.needsChoice, all.s.commentCount, all.s.comments.length, all.s.timestampColumn], [false, 0, 0, 'Timestamp']);
+  // Three times and two words: left out too, but as a guess the user is asked about.
+  const mixed = await summaryOf([...times.slice(0, 3), 'around noon', 'not sure']);
+  assert.deepEqual([mixed.start.suggested.role, mixed.start.suggested.reason, mixed.start.suggested.confidence, mixed.start.needsChoice], ['ignore', 'times of day', 'low', true]);
+  assert.equal(mixed.s.commentCount, 0);
+  // Real dates (1900 on) are still dates.
+  const days = await summaryOf(['1900-01-01T00:00:00.000Z', '1961-06-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z']);
+  assert.deepEqual(days.start.suggested, { role: 'ignore', reason: 'dates', confidence: 'high' });
+  // The key file's numbers between 0 and 1 keep their guess: a fraction of a day cannot be told from a share there.
+  const key = F.summarise([['Timestamp', 'Share', 'Ease (1-5)'], ...[0.25, 0.5, 0.75].map((v, k) => [`2026-11-1${k}T09:00:00Z`, v, 4])], { timeZone: 'UTC' });
+  assert.deepEqual(key.columns.find((c) => c.header === 'Share').suggested, { role: 'number', confidence: 'high' });
+});
+
 test('dates before 1970 sent by the reader are dates, as they always were', async () => {
   const rows = [['Timestamp', 'Installed', 'Ease (1-5)'],
     ...[1961, 1962, 1963, 1964, 1965].map((y, k) => [`2026-11-1${k}T09:00:00.000Z`, `${y}-06-01T00:00:00.000Z`, 4])];
@@ -713,6 +736,15 @@ test('with no protected storage, How to connect says so: the reader cannot be ch
   const onReader = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE }), { privacy: true });
   assert.doesNotMatch(onReader, /type="password"|Kept encrypted/);
   assert.match(onReader, /no protected storage/);
+  // A secret saved earlier, and no protected storage now: said, with the reason, and no Replace secret that
+  // would open onto nothing; asked again while Replace secret was open, it reads the same.
+  for (const state of [{}, { secretEditing: true }]) {
+    const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved: true, secretStorage: NO_STORE }), { privacy: true, state });
+    assert.match(html, /<p class="field-set"><span>A secret is saved, but this computer can’t open it now\.<\/span><\/p>\s*<p class="hint">This computer has no protected storage/);
+    assert.doesNotMatch(html, /Replace secret|type="password"|cancel-secret/);
+    // No field is open: Refresh now is the filled button.
+    assert.match(html, /<button type="button" class="button" id="field-refresh"/);
+  }
   // No Secret field is drawn: a failed update about the secret defers to the reason shown, never to a field or
   // Replace secret, whether a secret was saved before or not.
   const mismatch = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';

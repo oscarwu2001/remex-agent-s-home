@@ -1039,6 +1039,8 @@ test('a column titled as the timestamp with no date in it is passed over for the
     const s = F.summarise(rows(title), { now: NOW });
     assert.equal(s.timestampColumn, 'Visit day', title);
     assert.equal(s.unreadable.timestamps, 0, title);
+    // Taken instead of the titled one, it is only a guess: the user is asked to confirm it.
+    assert.deepEqual([col(s, 'Visit day').suggested, col(s, 'Visit day').needsChoice], [{ role: 'timestamp', confidence: 'low' }, true], title);
     const { why, list } = flagsChecked(rows(title));
     assert.equal(why, null, title);
     assert.deepEqual(list.filter((f) => f.kind === 'low').map((f) => f.count), [2], title);
@@ -1055,6 +1057,20 @@ test('a column titled as the timestamp with no date in it is passed over for the
   // Times of day with no other column of dates: the titled one is still taken, its cells counted.
   const alone = F.summarise([['Timestamp', 'Ease (1-5)'], ['1899-12-30T08:00:00.000Z', 4], [0.5, 5]], { now: NOW });
   assert.deepEqual([alone.timestampColumn, alone.unreadable.timestamps], ['Timestamp', 2]);
+});
+
+test('a titled timestamp column is passed over only when every answer in it is a time of day, never when it has dates or no answers', () => {
+  const visit = (k) => stamp(NOW - (2 - k) * DAY);
+  // Real dates with one time of day among them: taken by its title, the time counted, and a sure guess.
+  const one = [['Timestamp', 'Visit day', 'Ease (1-5)'], [stamp(NOW - 2 * DAY), visit(0), 4], ['1899-12-30T08:00:00.000Z', visit(1), 5]];
+  const s = F.summarise(one, { now: NOW });
+  assert.deepEqual([s.timestampColumn, s.unreadable.timestamps], ['Timestamp', 1]);
+  assert.deepEqual(col(s, 'Timestamp').suggested, { role: 'timestamp', confidence: 'high' });
+  // No answers in it at all, while the other columns have them: still taken by its title.
+  const empty = [['Timestamp', 'Visit day', 'Ease (1-5)'], ['', visit(0), 4], ['', visit(1), 5]];
+  const e = F.summarise(empty, { now: NOW });
+  assert.equal(e.timestampColumn, 'Timestamp');
+  assert.deepEqual(col(e, 'Timestamp').suggested, { role: 'timestamp', confidence: 'high' });
 });
 
 test('a column titled as the timestamp whose text is no date the app reads is still taken, its rows counted under Needs attention', () => {
