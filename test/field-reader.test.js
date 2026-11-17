@@ -46,6 +46,10 @@ test('a reader link gives its deployment id and the link rebuilt from it alone',
   assert.deepEqual(F.parseReaderLink(`  ${EXEC}/  `), READER);
   // A query or fragment typed into it is not kept, so a secret pasted there is never saved or sent.
   assert.deepEqual(F.parseReaderLink(`${EXEC}?secret=${SECRET}#x`), READER);
+  // A Google Workspace link names the domain: the request still goes to the plain link.
+  assert.deepEqual(F.parseReaderLink(`https://script.google.com/a/macros/example.org/s/${DEPLOY}/exec`), READER);
+  assert.match(caught(() => F.parseReaderLink(`https://script.google.com/a/macros/example.org/s/${DEPLOY}/dev`)).message, /\/dev/);
+  assert.match(caught(() => F.parseReaderLink(`https://script.google.com/a/macros/s/${DEPLOY}/exec`)).message, /not a reader web app/);
   assert.ok(!F.parseReaderLink(`${EXEC}?secret=${SECRET}`).url.includes(SECRET));
 });
 
@@ -89,9 +93,11 @@ test('the one hop is to script.googleusercontent.com over https, nowhere else', 
   assert.match(plain.message, /without https/);
   assert.equal(caught(() => F.readerHop('https://script.googleusercontent.com:444/macros/echo')).kind, 'blocked');
   assert.equal(caught(() => F.readerHop('https://x@script.googleusercontent.com/macros/echo')).kind, 'blocked');
+  // No address to go on to: waiting will not bring one, so it waits for the user.
   const none = caught(() => F.readerHop(undefined));
-  assert.equal(none.kind, 'answer'); // Google's odd answer: tried again in half an hour
-  assert.equal(caught(() => F.readerHop('   ')).kind, 'answer');
+  assert.equal(none.kind, 'reader');
+  assert.match(none.message, /Settings → Connections → Field feedback/);
+  assert.equal(caught(() => F.readerHop('   ')).kind, 'reader');
   assert.equal(caught(() => F.readerHop('/macros/echo?x=1')).kind, 'blocked');
   // Not open to Anyone: Google sends the call to its sign-in.
   const signIn = caught(() => F.readerHop('https://accounts.google.com/ServiceLogin?continue=x'));
@@ -112,13 +118,13 @@ function fakeReader(answers) {
   return { send, calls };
 }
 const ROWS = [['Saved (UTC)', 'Ease (1-5)'], ['2026-11-10T09:00:00.000Z', '4']];
-const OK = [200, { ok: true, tab: 'Demo Reports', values: ROWS }];
+const OK = [200, { ok: true, tab: 'Demo Reports', timeZone: 'Asia/Taipei', values: ROWS }];
 const MOVED = [302, '<html>moved</html>', { location: ECHO, contentType: 'text/html' }];
 
 test('fetching posts the secret, follows the one redirect with a plain GET and reads the rows', async () => {
   const r = fakeReader([MOVED, OK]);
   const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: r.send });
-  assert.deepEqual(got, { rows: ROWS, tab: { id: null, title: 'Demo Reports' }, timeZone: undefined });
+  assert.deepEqual(got, { rows: ROWS, tab: { id: null, title: 'Demo Reports' }, timeZone: 'Asia/Taipei' });
   assert.equal(r.calls.length, 2);
   assert.equal(r.calls[0].url, EXEC);
   assert.equal(r.calls[0].init.method, 'POST');
@@ -145,7 +151,7 @@ test('a second redirect, or one off the echo host, is refused before it is follo
   assert.equal((await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: away.send }))).kind, 'blocked');
   assert.equal(away.calls.length, 1); // never asked
   const bare = fakeReader([[302, '', {}], OK]);
-  assert.equal((await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: bare.send }))).kind, 'answer');
+  assert.equal((await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: bare.send }))).kind, 'reader');
   assert.equal(bare.calls.length, 1);
   // A link that is not the reader's is refused before anything is sent.
   const stray = fakeReader([OK]);
@@ -169,19 +175,76 @@ test("the reader's refusals and Google's pages become sentences that name the ne
   assert.equal(html.kind, 'access');
   assert.match(html.message, /Deploy → Manage deployments → Edit → Who has access → Anyone/);
   assert.equal((await fail([200, page, { contentType: 'application/octet-stream' }])).kind, 'access');
+  // An answer in the wrong shape will not mend itself: the user copies the script again.
+  const shape = /not in the shape the app reads.*Copy reader script/;
   const garbled = await fail([200, '{"ok":tru']);
-  assert.equal(garbled.kind, 'answer');
-  assert.match(garbled.message, /could not be read/);
+  assert.equal(garbled.kind, 'reader');
+  assert.match(garbled.message, shape);
   const empty = await fail([200, { ok: true, tab: 'Demo Reports' }]);
-  assert.equal(empty.kind, 'answer');
-  assert.match(empty.message, /without rows/);
-  assert.match((await fail([200, { ok: true, values: [['a'], 'b'] }])).message, /without rows/);
-  assert.match((await fail([200, { ok: true, values: [['a', { b: 1 }]] }])).message, /without rows/);
-  assert.equal((await fail([200, []])).kind, 'answer');
-  assert.equal((await fail([200, { values: ROWS }])).kind, 'answer');
+  assert.equal(empty.kind, 'reader');
+  assert.match(empty.message, shape);
+  assert.match((await fail([200, { ok: true, values: [['a'], 'b'] }])).message, shape);
+  assert.match((await fail([200, { ok: true, values: [['a', { b: 1 }]] }])).message, shape);
+  assert.match((await fail([200, { ok: true, values: [['a', ['b']]] }])).message, shape);
+  assert.equal((await fail([200, []])).kind, 'reader');
+  assert.equal((await fail([200, { values: ROWS }])).kind, 'reader');
   assert.equal((await fail([200, { ok: false, error: 'something new' }])).kind, 'reader');
-  // An empty tab is no rows, not an error.
-  assert.deepEqual((await F.fetchReaderRows({ link: READER, secret: SECRET, send: fakeReader([MOVED, [200, { ok: true, tab: 'T', values: [] }]]).send })).rows, []);
+  // getDataRange always has a row: no rows at all is a wrong-shape answer too.
+  assert.match((await fail([200, { ok: true, tab: 'T', timeZone: 'UTC', values: [] }])).message, shape);
+});
+
+test('an Apps Script error page is told from the sign-in page; its cleaned title goes to the log', async () => {
+  const fail = async (last) => caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: fakeReader([MOVED, last]).send }));
+  const crashed = await fail([200, '<!DOCTYPE html><html><head><title>Error</title></head><body><div>Script function not found: doPost</div></body></html>', { contentType: 'text/html' }]);
+  assert.equal(crashed.kind, 'reader');
+  assert.match(crashed.message, /reader script failed.*Executions/);
+  assert.doesNotMatch(crashed.message, /Who has access/);
+  assert.equal(crashed.code, 'html Error');
+  const title = ['TypeError: x &amp;', DEPLOY, '/', SECRET, '&lt;y&gt; and a much longer tail of words here'].join(' ');
+  const thrown = await fail([200, `<html><head><title>${title}</title></head><body>TypeError</body></html>`, { contentType: 'text/html' }]);
+  assert.equal(thrown.kind, 'reader');
+  // Letters, digits, spaces and : . - only, 60 at most, and never a long id or the secret.
+  assert.match(thrown.code, /^html [\p{L}\p{N} :.-]{0,60}$/u);
+  assert.ok(!thrown.code.includes(DEPLOY.slice(0, 12)) && !thrown.code.includes(SECRET.slice(0, 12)), thrown.code);
+  const signIn = await fail([200, '<html><head><title>Sign in - Google Accounts</title></head><body><form action="https://accounts.google.com/ServiceLogin"></form></body></html>', { contentType: 'text/html' }]);
+  assert.equal(signIn.kind, 'access');
+  assert.match(signIn.message, /Who has access → Anyone/);
+});
+
+test("the reader's raw values become the strings the key file's rows use, and its time zone is the sheet's", async () => {
+  const raw = [['Saved (UTC)', 'Ease (-3..3)', 'Seen', 'Note'], ['2026-11-10T09:00:00.000Z', -2, true, null], ['2026-11-11T09:00:00.000Z', 3, false, 'ok']];
+  const answer = (values, zone) => fakeReader([MOVED, [200, { ok: true, tab: 'T', ...(zone ? { timeZone: zone } : {}), values }]]).send;
+  const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(raw, 'Asia/Taipei') });
+  assert.deepEqual(got.rows, [['Saved (UTC)', 'Ease (-3..3)', 'Seen', 'Note'], ['2026-11-10T09:00:00.000Z', '-2', 'TRUE', ''], ['2026-11-11T09:00:00.000Z', '3', 'FALSE', 'ok']]);
+  assert.equal(got.timeZone, 'Asia/Taipei');
+  assert.equal(got.zoneMissing, undefined);
+  // The zone reaches the summary as the key file's does: a text date is read in it.
+  const typed = [['Day', 'Ease (1-5)'], ['2026-11-10 09:00', 4]];
+  const viaZone = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(typed, 'Asia/Taipei') });
+  const s = F.summariseCache(F.afterFetch(null, viaZone, { now: 1, started: 1, link: READER }), []);
+  assert.equal(s.newest, '2026-11-10T01:00:00.000Z'); // 09:00 in Taipei
+  assert.equal(s.timeZone, 'Asia/Taipei');
+  // An older reader names no zone: read in this computer's, and said under Needs attention.
+  const older = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(typed) });
+  assert.deepEqual([older.timeZone, older.zoneMissing], [undefined, true]);
+  const kept = JSON.parse(JSON.stringify(F.afterFetch(null, older, { now: 1, started: 1, link: READER })));
+  assert.equal(F.validCache(kept, READER).cache.zoneMissing, true);
+  const summary = F.summariseCache(kept, []);
+  assert.equal(summary.timeZone, 'local');
+  const lines = F.fieldProblems({ enabled: true, cache: kept, summary }).map((p) => p.label);
+  assert.ok(lines.some((l) => /reader did not say the sheet’s time zone.*this computer’s time zone/.test(l)), lines.join('\n'));
+  assert.match(F.validCache({ ...kept, zoneMissing: 'yes' }, READER).problem, /could not be read/);
+});
+
+test('an answer over 20 MB is refused while it is read, as one the app does not read', async () => {
+  assert.equal(F.READER_MAX_BYTES, 20 * 1024 * 1024);
+  assert.equal(F.tooLarge(F.READER_MAX_BYTES), false);
+  assert.equal(F.tooLarge(F.READER_MAX_BYTES + 1), true);
+  const big = Object.assign(new Error('The answer is over the limit'), { name: 'TooLargeError' });
+  const send = async () => ({ status: 200, contentType: 'application/json', text: async () => { throw big; } });
+  const err = await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send }));
+  assert.equal(err.kind, 'reader');
+  assert.match(err.message, /larger than 20 MB/);
 });
 
 test('network trouble and a busy or failing Google are passing troubles; a missing or closed reader waits for the user', async () => {
@@ -198,6 +261,12 @@ test('network trouble and a busy or failing Google are passing troubles; a missi
   assert.equal((await fail([[429, '']])).kind, 'busy');
   assert.equal((await fail([[404, '<html></html>', { contentType: 'text/html' }]])).kind, 'missing');
   assert.equal((await fail([[403, '']])).kind, 'access');
+  // Another refusal (400, 405…) will not pass by itself: it waits for the user.
+  for (const status of [400, 405, 410]) {
+    const other = await fail([[status, '']]);
+    assert.equal(other.kind, 'reader', String(status));
+    assert.match(other.message, /Settings → Connections → Field feedback/);
+  }
   // An error that names an address keeps it out of the log's code too.
   const named = await fail([new Error(`connect failed for ${EXEC}`)]);
   assert.ok(!named.code.includes(DEPLOY));
@@ -209,7 +278,11 @@ test('network trouble and a busy or failing Google are passing troubles; a missi
     cache: { fetchedAt: null, lastAttemptAt: tried, lastError: { kind: err.kind, message: err.message } },
   });
   for (const err of [offline, down]) assert.equal(plan(err).wakeAt, tried + F.RETRY_MS);
-  for (const err of [await fail([MOVED, [200, { ok: false, error: 'not allowed' }]]), await fail([[403, '']])]) {
+  const waiting = [
+    await fail([MOVED, [200, { ok: false, error: 'not allowed' }]]), await fail([[403, '']]), await fail([[405, '']]),
+    await fail([[302, '', {}]]), await fail([MOVED, [200, '{"ok":tru']]),
+  ];
+  for (const err of waiting) {
     assert.notEqual(plan(err).wakeAt, tried + F.RETRY_MS);
   }
 });
@@ -217,27 +290,60 @@ test('network trouble and a busy or failing Google are passing troubles; a missi
 // ---- the secret --------------------------------------------------------------------
 
 test('the secret is saved only where the system can protect it, never as plain text', () => {
-  const off = F.checkSecret(SECRET, { available: false });
+  const ready = { available: true, readerUrl: EXEC };
+  const off = F.checkSecret(SECRET, { ...ready, available: false });
   assert.equal(off.secret, undefined);
   assert.match(off.error, /never keeps it as plain text/);
   // Linux with no keyring: Electron's "basic_text" is no protection.
-  assert.match(F.checkSecret(SECRET, { available: true, backend: 'basic_text' }).error, /plain text/);
-  assert.deepEqual(F.checkSecret(`  ${SECRET}\n`, { available: true }), { secret: SECRET });
-  assert.deepEqual(F.checkSecret(SECRET, { available: true, backend: 'gnome_libsecret' }), { secret: SECRET });
-  const short = F.checkSecret('tooshort', { available: true });
+  assert.match(F.checkSecret(SECRET, { ...ready, backend: 'basic_text' }).error, /plain text/);
+  assert.deepEqual(F.checkSecret(`  ${SECRET}\n`, ready), { secret: SECRET, deploymentId: DEPLOY });
+  assert.deepEqual(F.checkSecret(SECRET, { ...ready, backend: 'gnome_libsecret' }), { secret: SECRET, deploymentId: DEPLOY });
+  const short = F.checkSecret('tooshort', ready);
   assert.match(short.error, /32 characters or more.*READER_SECRET/);
   assert.ok(!short.error.includes('tooshort'));
-  assert.match(F.checkSecret(`${SECRET.slice(0, 20)} ${SECRET.slice(20)}`, { available: true }).error, /no spaces/);
-  assert.match(F.checkSecret('', { available: true }).error, /^No secret yet/);
-  assert.match(F.checkSecret(undefined, { available: true }).error, /^No secret yet/);
+  assert.match(F.checkSecret(`${SECRET.slice(0, 20)} ${SECRET.slice(20)}`, ready).error, /no spaces/);
+  assert.match(F.checkSecret('', ready).error, /^No secret yet/);
+  assert.match(F.checkSecret(undefined, ready).error, /^No secret yet/);
+  // Replacing a saved one: empty is not "no secret yet".
+  assert.match(F.checkSecret('', { ...ready, saved: true }).error, /^Paste the new secret, or press Cancel to keep the saved one/);
+  // The secret belongs to a reader: none saved, none taken.
+  assert.match(F.checkSecret(SECRET, { available: true, readerUrl: '' }).error, /Save the reader link first/);
+  // What Settings is told before anything is typed.
+  assert.equal(F.secretStorage({ available: true }), null);
+  assert.match(F.secretStorage({ available: false }), /no protected storage/);
+  assert.match(F.secretStorage({ available: true, backend: 'basic_text' }), /no protected storage/);
 });
 
-test('a saved secret that is gone or locked waits for the user; one busy just now is tried again', () => {
+test('the saved secret belongs to one reader: another reader link drops it and asks again', () => {
+  const sealed = Buffer.from([1, 2, 3, 250]);
+  const text = F.sealSecret(DEPLOY, sealed);
+  assert.ok(!text.includes(SECRET));
+  assert.deepEqual(F.openSecret(text, DEPLOY), sealed);
+  assert.equal(F.secretFor(text), DEPLOY);
+  const other = caught(() => F.openSecret(text, OTHER_DEPLOY));
+  assert.equal(other.kind, 'setup');
+  assert.match(other.message, /another reader link.*Save this reader’s secret/);
+  const broken = caught(() => F.openSecret('{"version":1}', DEPLOY));
+  assert.equal(broken.kind, 'secret');
+  assert.equal(caught(() => F.openSecret('not json', DEPLOY)).kind, 'secret');
+  assert.equal(F.secretFor('not json'), null);
+  // A new link for another reader makes the saved secret stale; the same reader, the key file, or no link does not.
+  const reader = (url) => ({ enabled: true, source: 'reader', readerUrl: url });
+  assert.equal(F.secretStale(DEPLOY, reader(`https://script.google.com/macros/s/${OTHER_DEPLOY}/exec`)), true);
+  assert.equal(F.secretStale(DEPLOY, reader(EXEC)), false);
+  assert.equal(F.secretStale(DEPLOY, { ...reader(`https://script.google.com/macros/s/${OTHER_DEPLOY}/exec`), source: 'key', sheetUrl: 'x' }), false);
+  assert.equal(F.secretStale(null, reader(EXEC)), false);
+});
+
+test('a saved secret that is gone, locked or not the app’s to read waits for the user; one busy just now is tried again', () => {
   const gone = F.secretFileError(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
   const busy = F.secretFileError(Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }));
+  const denied = F.secretFileError(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+  const forbidden = F.secretFileError(Object.assign(new Error('EPERM: not permitted'), { code: 'EPERM' }));
   const locked = F.secretLocked();
-  seen.push(gone, busy, locked);
-  assert.deepEqual([gone.kind, busy.kind, locked.kind], ['setup', 'secretfile', 'secret']);
+  seen.push(gone, busy, denied, forbidden, locked);
+  assert.deepEqual([gone.kind, busy.kind, denied.kind, forbidden.kind, locked.kind], ['setup', 'secretfile', 'secret', 'secret', 'secret']);
+  assert.match(denied.message, /Save the secret again/);
   assert.match(locked.message, /Save the secret again/);
   const plan = (err) => F.planFetch({
     now: Date.UTC(2026, 10, 16, 9), settings: { enabled: true, source: 'reader', readerUrl: EXEC, secretSaved: true },
@@ -322,6 +428,32 @@ test('the cache is not reused across a switch of source or reader', () => {
   assert.deepEqual([failed.rows, failed.deploymentId], [null, DEPLOY]);
   const kept = F.afterFailure(fromReader, new F.FieldSurveyError('network', 'x'), { now: 2000, started: 1900, link: READER });
   assert.deepEqual(kept.rows, fromReader.rows);
+});
+
+test('the reader’s tab is part of what was read: a new TAB starts "new since" afresh', () => {
+  const rows = [['Saved (UTC)', 'Ease (1-5)'], ['2026-11-10T09:00:00.000Z', '4']];
+  const more = [...rows, ['2026-11-12T09:00:00.000Z', '5']];
+  const onA = F.afterFetch(null, { ...got(rows), tab: { id: null, title: 'Answers A' } }, { now: 1000, started: 900, link: READER });
+  // The same tab again with something new: "new since" moves.
+  const sameTab = F.afterFetch(onA, { ...got(more), tab: { id: null, title: 'Answers A' } }, { now: 2000, started: 1900, link: READER });
+  assert.deepEqual([sameTab.since, sameTab.sinceFetchedAt], ['2026-11-10T09:00:00.000Z', 1000]);
+  // Another tab: nothing carried over.
+  const onB = F.afterFetch(onA, { ...got(more), tab: { id: null, title: 'Answers B' } }, { now: 2000, started: 1900, link: READER });
+  assert.deepEqual([onB.since, onB.sinceFetchedAt, onB.tab.title], [null, null, 'Answers B']);
+});
+
+test('a read is asked for (a new secret, or a read that found its settings changed) is made at once', () => {
+  const now = Date.UTC(2026, 10, 16, 9);
+  const settings = { enabled: true, source: 'reader', readerUrl: EXEC, secretSaved: true };
+  // Read after this morning's slot: nothing due until Wednesday…
+  const fresh = { fetchedAt: now - 5 * 60_000, lastAttemptAt: now - 5 * 60_000, lastError: null };
+  assert.equal(F.planFetch({ now, settings, cache: fresh }).fetch, false);
+  // …unless a read was asked for.
+  assert.deepEqual(F.planFetch({ now, settings, cache: fresh, asked: true }), { fetch: true, wakeAt: null });
+  // Not while one runs, nor when off or not set up.
+  assert.equal(F.planFetch({ now, settings, cache: fresh, asked: true, busy: true }).fetch, false);
+  assert.equal(F.planFetch({ now, settings: { ...settings, enabled: false }, cache: fresh, asked: true }).fetch, false);
+  assert.equal(F.planFetch({ now, settings: { ...settings, secretSaved: false }, cache: fresh, asked: true }).fetch, false);
 });
 
 // ---- the hosts -------------------------------------------------------------------------

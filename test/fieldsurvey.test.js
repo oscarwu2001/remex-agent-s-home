@@ -1347,3 +1347,10 @@ test('an entry or record id is left out, not read as comments; a title that only
   assert.equal(s.commentCount, 3);
   assert.deepEqual(s.questions, []);
 });
+
+test('a cache kept under the version 4 rules is set aside quietly and read again', () => {
+  // Version 5 leaves out JSON and entry-id columns' answers too, and names the reader it came from.
+  const good = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
+  assert.equal(good.version, 5);
+  assert.deepEqual(F.validCache({ ...JSON.parse(JSON.stringify(good)), version: 4 }, LINK), { cache: null, problem: null });
+});

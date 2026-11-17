@@ -284,15 +284,24 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
 // link) is for the system log.
 
 const READER_HELP = 'In the reader script, Deploy → Manage deployments and copy the Web app link; it looks like https://script.google.com/macros/s/…/exec';
-const SECRET_HELP = 'Copy READER_SECRET from the reader script’s Project Settings → Script properties.';
+const SECRET_HELP = 'Copy READER_SECRET from the reader script’s Project Settings → Script properties';
+const SETTINGS = 'Settings → Connections → Field feedback';
 const ANYONE = 'In the reader script, Deploy → Manage deployments → Edit → Who has access → Anyone, then press Refresh now.';
 const NEW_VERSION = 'deploy it again as a new version (Deploy → Manage deployments → Edit → Version: New version)';
+const RELINK = `Copy the Web app link again (Deploy → Manage deployments) and paste it in ${SETTINGS}, then press Refresh now.`;
+// The most of an answer the app reads; a sheet's text is far below it.
+const READER_MAX_BYTES = 20 * 1024 * 1024;
+const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
 
 const readerError = (kind, message, code) => Object.assign(new FieldSurveyError(kind, message), { code });
+// An answer that is not the reader's shape: the reader script is not the
+// one the app ships (or Google said something odd). Waiting will not mend
+// it, so it waits for the user, pointing at Settings.
+const wrongShape = (code) => readerError('reader', `The reader’s answer is not in the shape the app reads. In ${SETTINGS}, press Copy reader script, paste it over the old one in the sheet’s Apps Script and ${NEW_VERSION}.`, code);
 
 // The web app's link -> { deploymentId, url }: url is the link rebuilt from
-// its id alone, so nothing else typed into it (a query, a fragment) is kept
-// or sent.
+// its id alone, so nothing else typed into it (a query, a fragment, a
+// Google Workspace domain) is kept or sent.
 function parseReaderLink(text) {
   const raw = String(text ?? '').trim();
   if (!raw) throw new RangeError(`No reader link yet. ${READER_HELP}`);
@@ -304,7 +313,8 @@ function parseReaderLink(text) {
   }
   if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(`That link is not an Apps Script web app. ${READER_HELP}`);
   if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(`That is the script editor’s link, not the web app’s. ${READER_HELP}`);
-  const m = /^\/macros\/s\/([^/]+)\/(exec|dev)\/?$/.exec(u.pathname);
+  // A Google Workspace link names its domain (/a/macros/<domain>/s/…).
+  const m = /^\/(?:a\/macros\/[^/]+|macros)\/s\/([^/]+)\/(exec|dev)\/?$/.exec(u.pathname);
   if (m?.[2] === 'dev') {
     throw new RangeError('That is the test link (it ends in /dev), which works only in your own signed-in browser. In the reader script, Deploy → Manage deployments and copy the Web app link that ends in /exec.');
   }
@@ -313,30 +323,85 @@ function parseReaderLink(text) {
   return { deploymentId: m[1], url: `https://${READER_HOST}/macros/s/${m[1]}/exec` };
 }
 
-// The secret as typed in Settings, checked before it is saved. available:
-// the system's own protection can encrypt it (Electron's safeStorage);
-// backend: which one on Linux, where 'basic_text' is no protection at all.
-// Without it the secret is refused, never kept as plain text. No message
-// repeats what was typed.
-function checkSecret(text, { available = false, backend } = {}) {
-  if (!available || backend === 'basic_text' || backend === 'unknown') {
-    return { error: 'Not saved: this computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.' };
+// Whether the secret can be kept here, before anything is typed: null, or
+// why not. available: the system's own protection can encrypt it
+// (Electron's safeStorage); backend: which one on Linux, where 'basic_text'
+// is no protection at all. Without it the secret is refused, never kept as
+// plain text.
+function secretStorage({ available = false, backend } = {}) {
+  if (available && backend !== 'basic_text' && backend !== 'unknown') return null;
+  return 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.';
+}
+
+// The secret as typed in Settings, checked before it is saved -> { secret,
+// deploymentId } or { error }. It belongs to the saved reader link
+// (readerUrl), so that link comes first. saved: one is saved already (the
+// field was opened to replace it). No message repeats what was typed.
+function checkSecret(text, { available = false, backend, saved = false, readerUrl } = {}) {
+  const storage = secretStorage({ available, backend });
+  if (storage) return { error: `Not saved: ${storage.charAt(0).toLowerCase()}${storage.slice(1)}` };
+  let link;
+  try {
+    link = parseReaderLink(readerUrl);
+  } catch {
+    return { error: 'Save the reader link first: the secret belongs to that reader.' };
   }
   const s = typeof text === 'string' ? text.trim() : '';
-  if (!s) return { error: `No secret yet. ${SECRET_HELP}` };
-  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the reader’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}` };
-  return { secret: s };
+  if (!s) return { error: saved ? 'Paste the new secret, or press Cancel to keep the saved one.' : `No secret yet. ${SECRET_HELP}.` };
+  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the reader’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}.` };
+  return { secret: s, deploymentId: link.deploymentId };
+}
+
+// The secret's file: the encrypted secret (`sealed`, by the system) with the
+// reader deployment it belongs to, which is not secret. A secret is never
+// sent to another reader: a new reader link drops it (secretStale) and a
+// read checks it (openSecret).
+const SECRET_FILE_VERSION = 1;
+function sealSecret(deploymentId, sealed) {
+  return `${JSON.stringify({ version: SECRET_FILE_VERSION, deploymentId, sealed: Buffer.from(sealed).toString('base64') })}\n`;
+}
+const secretRecord = (text) => {
+  try {
+    const r = JSON.parse(text);
+    return r && r.version === SECRET_FILE_VERSION && typeof r.deploymentId === 'string' && typeof r.sealed === 'string' && r.sealed ? r : null;
+  } catch {
+    return null; // not the app's secret file: the callers say so (openSecret) or treat it as none (secretFor)
+  }
+};
+// -> the encrypted secret for this reader. Throws FieldSurveyError.
+function openSecret(text, deploymentId) {
+  const r = secretRecord(text);
+  if (!r) throw readerError('secret', `The saved secret could not be read. Save the secret again in ${SETTINGS}.`, 'secret file not readable');
+  if (r.deploymentId !== deploymentId) {
+    throw readerError('setup', `The saved secret was for another reader link. Save this reader’s secret in ${SETTINGS}.`, 'secret for another reader');
+  }
+  return Buffer.from(r.sealed, 'base64');
+}
+// The reader the saved secret belongs to, or null.
+const secretFor = (text) => secretRecord(text)?.deploymentId ?? null;
+// Settings now name another reader than the saved secret's: drop it, and ask again.
+function secretStale(savedFor, settings) {
+  if (!savedFor || sourceOf(settings) !== 'reader') return false;
+  try {
+    return parseReaderLink(settings.readerUrl).deploymentId !== savedFor;
+  } catch {
+    return false; // no link that reads: nothing to send the secret to, and the read says why
+  }
 }
 
 // The saved secret could not be read -> why, and whether waiting helps: none
-// saved waits for the user; a file busy just now (a virus scan) passes. One
-// the system cannot decrypt any more (secretLocked) waits for a new secret.
+// saved, or a file the app is not allowed to open, waits for the user; a
+// file busy just now (a virus scan) passes. One the system cannot decrypt
+// any more (secretLocked) waits for a new secret.
 function secretFileError(err) {
-  if (err?.code === 'ENOENT') return readerError('setup', 'No reader secret is saved. Save it in Settings → Connections → Field feedback.', 'secret file missing');
+  if (err?.code === 'ENOENT') return readerError('setup', `No reader secret is saved. Save it in ${SETTINGS}.`, 'secret file missing');
+  if (err?.code === 'EACCES' || err?.code === 'EPERM') {
+    return readerError('secret', `This computer will not let the app open the saved secret’s file. Save the secret again in ${SETTINGS}.`, `secret file ${err.code}`);
+  }
   return readerError('secretfile', 'The saved secret could not be read just now; it tries again in half an hour.', `secret file ${err?.code || 'unreadable'}`);
 }
 function secretLocked() {
-  return readerError('secret', 'The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in Settings → Connections → Field feedback.', 'secret not decrypted');
+  return readerError('secret', `The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in ${SETTINGS}.`, 'secret not decrypted');
 }
 
 // The POST to the reader: the secret as JSON text in the body (Apps Script
@@ -355,7 +420,7 @@ const isRedirect = (status) => [301, 302, 303, 307, 308].includes(status);
 // means the web app is not open to Anyone.
 function readerHop(location) {
   if (typeof location !== 'string' || !location.trim()) {
-    throw readerError('answer', 'Google sent the reader’s answer on without saying where; press Refresh now.', 'redirect without location');
+    throw readerError('reader', `Google passed the reader’s call on without saying where to. ${RELINK}`, 'redirect without location');
   }
   let u;
   try {
@@ -381,45 +446,67 @@ function readerUnreachable(err) {
   return readerError('network', 'No network: the reader could not be reached; check the internet connection or proxy, then press Refresh now.', said);
 }
 
+// The reader sends the sheet's own values (getValues): text, numbers,
+// true/false, and dates as UTC times in ISO form. Each becomes the text the
+// sheet's rows are read as: a number in figures, TRUE or FALSE, an empty
+// cell as "". Anything else is not the reader's answer.
 const CELL = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+const cellText = (v) => (v === null ? '' : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : String(v));
 
-// The reader's last answer -> { rows, tab, timeZone }, in fetchRows' shape
-// (its display strings stand in for the sheet's values; it names no zone).
+// An HTML page instead of the answer: Google's sign-in (the web app is not
+// open to Anyone) or Apps Script's own error page (the script failed). Its
+// title, cleaned to letters, digits, spaces and ":.-" and without anything
+// long enough to be an id or the secret, is the log's code.
+const SIGN_IN = /accounts\.google\.com|ServiceLogin|<title>[^<]*\bsign[ -]?in\b/i;
+function pageTitle(text) {
+  const t = /<title[^>]*>([^<]*)<\/title>/i.exec(text)?.[1] ?? '';
+  return t.replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, ' ').replace(/[^\p{L}\p{N} :.-]/gu, '').replace(/[A-Za-z0-9-]{20,}/g, '')
+    .replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+function htmlReply(text) {
+  if (SIGN_IN.test(text)) return readerError('access', `Google showed its sign-in page instead of the reader’s answer. ${ANYONE}`, 'html sign-in');
+  return readerError('reader', `The reader script failed instead of answering. Open it (the sheet’s Extensions → Apps Script), look under Executions for what went wrong, then press Copy reader script in ${SETTINGS}, paste it over the old one and ${NEW_VERSION}.`, `html ${pageTitle(text)}`.trim());
+}
+
+// The reader's last answer -> { rows, tab, timeZone } in fetchRows' shape,
+// and zoneMissing when an older reader named no zone (its text dates are
+// then read in this computer's zone, and Needs attention says so).
 function readerReply(status, contentType, raw) {
   if (status === 429) throw readerError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.', 'http 429');
   if (status >= 500) throw readerError('google', 'Google’s Apps Script service had a problem; it tries again in half an hour.', `http ${status}`);
   if (status === 401 || status === 403) throw readerError('access', `Google did not let the reader answer. ${ANYONE}`, `http ${status}`);
   if (status === 404) {
-    throw readerError('missing', 'No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in Settings → Connections → Field feedback.', 'http 404');
+    throw readerError('missing', `No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in ${SETTINGS}.`, 'http 404');
   }
-  if (!(status >= 200 && status < 300)) throw readerError('google', 'Google answered the reader’s call in a way the app does not know; press Refresh now, and check the reader link if it happens again.', `http ${status}`);
+  // Any other refusal will not pass by itself.
+  if (!(status >= 200 && status < 300)) throw readerError('reader', `Google refused the reader’s call. ${RELINK}`, `http ${status}`);
   const text = typeof raw === 'string' ? raw : '';
-  // Not open to Anyone: Google shows its sign-in page, in HTML.
-  if (/text\/html/i.test(String(contentType ?? '')) || /^\s*</.test(text)) {
-    throw readerError('access', `Google showed a page instead of the reader’s answer, usually its sign-in page. ${ANYONE}`, 'html');
-  }
-  const unreadable = (code) => readerError('answer', `The reader’s answer could not be read. Press Refresh now; if it happens again, copy the reader script again and ${NEW_VERSION}.`, code);
+  if (/text\/html/i.test(String(contentType ?? '')) || /^\s*</.test(text)) throw htmlReply(text);
   let body;
   try {
     body = JSON.parse(text);
   } catch {
-    throw unreadable('not json');
+    throw wrongShape('not json');
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw unreadable('not an object');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw wrongShape('not an object');
   if (body.ok === false) {
     if (body.error === 'not allowed') {
-      throw readerError('secret', `The reader refused the secret: it does not match the reader’s. ${SECRET_HELP} Then save it in Settings → Connections → Field feedback.`, 'not allowed');
+      throw readerError('secret', `The reader refused the secret: it does not match the reader’s. ${SECRET_HELP}, then save it in ${SETTINGS}.`, 'not allowed');
     }
     if (body.error === 'tab not found') {
       throw readerError('tab', `The reader cannot find its tab: check that TAB at the top of the reader script is the tab’s name, then ${NEW_VERSION}.`, 'tab not found');
     }
-    throw readerError('reader', `The reader said no for a reason the app does not know. Copy the reader script again (Settings → Connections → Field feedback) and ${NEW_VERSION}.`, `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 60)}`);
+    throw readerError('reader', `The reader said no for a reason the app does not know. Copy the reader script again (${SETTINGS}) and ${NEW_VERSION}.`, `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 60)}`);
   }
-  if (body.ok !== true) throw unreadable('no ok');
-  if (!Array.isArray(body.values) || !body.values.every((r) => Array.isArray(r) && r.every(CELL))) {
-    throw readerError('answer', `The reader answered without rows. Press Refresh now; if it happens again, copy the reader script again and ${NEW_VERSION}.`, 'no values');
-  }
-  return { rows: body.values, tab: typeof body.tab === 'string' ? { id: null, title: body.tab } : null, timeZone: undefined };
+  if (body.ok !== true) throw wrongShape('no ok');
+  // getDataRange always has a row, even on an empty tab.
+  if (!Array.isArray(body.values) || !body.values.length) throw wrongShape('no values');
+  if (!body.values.every((r) => Array.isArray(r) && r.every(CELL))) throw wrongShape('cells not values');
+  const zone = typeof body.timeZone === 'string' && body.timeZone.trim() ? body.timeZone.trim() : undefined;
+  return {
+    rows: body.values.map((r) => r.map(cellText)), tab: typeof body.tab === 'string' ? { id: null, title: body.tab } : null, timeZone: zone,
+    ...(zone ? {} : { zoneMissing: true }),
+  };
 }
 
 // Posts the secret to the reader, follows Google's one redirect and reads
@@ -449,6 +536,10 @@ async function fetchReaderRows({ link, secret, send }) {
   try {
     raw = await res.text();
   } catch (err) {
+    // Cut off past READER_MAX_BYTES by the caller: not an answer to read.
+    if (err?.name === 'TooLargeError') {
+      throw readerError('reader', `The reader’s answer is larger than 20 MB, more than the app reads. Point TAB in the reader script at the answers’ tab alone, then ${NEW_VERSION}.`, 'answer over 20 MB');
+    }
     throw readerUnreachable(err);
   }
   return readerReply(res.status, res.contentType, raw);
@@ -829,11 +920,14 @@ const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 // Roles whose answers, or numbers made of them, the board shows.
 const SHOWN = new Set(['comment', 'choice', 'score', 'number']);
 
-function summarise(rows, { since = null, now = null, comments: keep = 8, timeZone, roles = [], redacted = [], hiddenAs = [] } = {}) {
+// zoneMissing: the reader named no zone (an older reader script), so its
+// text dates are read in this computer's; said under Needs attention.
+function summarise(rows, { since = null, now = null, comments: keep = 8, timeZone, roles = [], redacted = [], hiddenAs = [], zoneMissing = false } = {}) {
   const zone = usableZone(timeZone);
   const out = {
     responses: 0, blankRows: 0, timestampColumn: null, timeZone: zone ?? 'local',
     timeZoneUnknown: timeZone && !zone ? String(timeZone).slice(0, 60) : null,
+    ...(zoneMissing && !zone ? { timeZoneMissing: true } : {}),
     newest: null, oldest: null, since: isoOf(toMs(since)), newSince: null,
     // saved: the columns were saved at least once (a column not among them is new).
     checked: false, saved: Array.isArray(roles) && roles.length > 0, needsChoice: 0, newColumns: [], columns: [],
@@ -1069,9 +1163,10 @@ function nextRun(now, lastOk) {
 // the decisions are here, where they are tested.
 
 const RETRY_MS = 30 * 60_000;
-// 4: ignored columns keep no answers either, and hidden columns keep what
-// was suggested for them (3 kept an ignored column's answers; 2 a guess's).
-const CACHE_VERSION = 4;
+// 5: JSON and entry-id columns keep no answers either, and the cache names
+// the reader (and its tab) it came from (4 kept them; 3 kept an ignored
+// column's answers; 2 a guess's).
+const CACHE_VERSION = 5;
 
 // The cache is the source's: a reader's by its deployment id, a key-file
 // sheet's by its id and tab. Rows from one never stand for the other.
@@ -1096,11 +1191,14 @@ function sourceLink(settings) {
 }
 
 // settings: { enabled, source, sheetUrl, keyPath, readerUrl, secretSaved }
-// (secretSaved: the main process holds an encrypted secret). -> { fetch,
-// wakeAt }: fetch now, or look again at wakeAt (null: nothing to wait for).
-function planFetch({ now, settings, cache, busy = false }) {
+// (secretSaved: the main process holds an encrypted secret). asked: a read
+// was asked for (a new secret, or a read that found its settings changed
+// under it), so it is made now, slot or not. -> { fetch, wakeAt }: fetch
+// now, or look again at wakeAt (null: nothing to wait for).
+function planFetch({ now, settings, cache, busy = false, asked = false }) {
   const ready = sourceOf(settings) === 'reader' ? settings?.readerUrl && settings.secretSaved : settings?.sheetUrl && settings.keyPath;
   if (!settings?.enabled || !ready || busy) return { fetch: false, wakeAt: null };
+  if (asked) return { fetch: true, wakeAt: null };
   const { due, next, lastSlot } = nextRun(now, cache?.fetchedAt ?? null);
   const nextMs = next.getTime();
   if (!due) return { fetch: false, wakeAt: nextMs };
@@ -1134,12 +1232,14 @@ const hiddenAsIn = (summary, hide) => hide.filter((i) => summary.columns[i]).map
 function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const first = summarise(got.rows, { timeZone: got.timeZone, roles });
   const hide = toRedact(first);
-  const same = sameSheet(prev, link) && Array.isArray(prev.rows);
+  // A reader's tab is part of what was read: another TAB starts afresh.
+  const sameTab = !link.deploymentId || (prev?.tab?.title ?? null) === (got.tab?.title ?? null);
+  const same = sameSheet(prev, link) && Array.isArray(prev.rows) && sameTab;
   const before = same ? prev.newest ?? null : null;
   const changed = same && first.newest !== before;
   return {
     version: CACHE_VERSION, spreadsheetId: link.spreadsheetId ?? null, gid: link.gid ?? null, ...(link.deploymentId ? { deploymentId: link.deploymentId } : {}),
-    tab: got.tab ?? null, timeZone: got.timeZone ?? null,
+    tab: got.tab ?? null, timeZone: got.timeZone ?? null, ...(got.zoneMissing ? { zoneMissing: true } : {}),
     rows: redactRows(got.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
     since: changed ? before : same ? prev.since ?? null : null,
@@ -1176,7 +1276,9 @@ function reroleCache(cache, roles) {
 
 function summariseCache(cache, roles, { now = null } = {}) {
   if (!cache?.rows) return null;
-  return summarise(cache.rows, { since: cache.since ?? null, now, timeZone: cache.timeZone ?? undefined, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [] });
+  return summarise(cache.rows, {
+    since: cache.since ?? null, now, timeZone: cache.timeZone ?? undefined, zoneMissing: cache.zoneMissing === true, roles, redacted: cache.redacted ?? [], hiddenAs: cache.hiddenAs ?? [],
+  });
 }
 
 // The cache file as read -> { cache, problem }. A cache that is not this
@@ -1194,6 +1296,7 @@ function validCache(raw, link) {
   const ok = (raw.rows === null || (Array.isArray(raw.rows) && raw.rows.every(Array.isArray)))
     && num(raw.fetchedAt) && num(raw.lastAttemptAt) && num(raw.sinceFetchedAt)
     && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId) && str(raw.deploymentId)
+    && (raw.zoneMissing == null || typeof raw.zoneMissing === 'boolean')
     && (raw.gid == null || Number.isInteger(raw.gid))
     && Array.isArray(raw.redacted) && raw.redacted.every((i) => Number.isInteger(i) && i >= 0)
     && (raw.hiddenAs == null || (Array.isArray(raw.hiddenAs) && raw.hiddenAs.every((h) => h && Number.isInteger(h.index) && h.index >= 0
@@ -1407,6 +1510,9 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     const doubt = summary.doubtful?.length ?? 0;
     if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
     if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
+    if (summary.timeZoneMissing) {
+      add('the reader did not say the sheet’s time zone (an older reader script), so its times are read in this computer’s time zone; press Copy reader script in Settings → Connections → Field feedback and deploy it again as a new version', '', 'settings');
+    }
     const a = summary.ambiguousDates ?? 0;
     if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);
   }
@@ -1416,7 +1522,8 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, SOURCES, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  parseReaderLink, checkSecret, secretFileError, secretLocked, readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
+  READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretFileError, secretLocked,
+  readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };
