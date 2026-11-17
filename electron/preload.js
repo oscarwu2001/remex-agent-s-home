@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('agentsHome', {
   fieldChooseKey: () => ipcRenderer.invoke('home:field-choose-key'),
   fieldRefresh: () => ipcRenderer.invoke('home:field-refresh'),
   fieldCopyReader: () => ipcRenderer.invoke('home:field-copy-reader'),
+  fieldSaveSecret: (secret) => ipcRenderer.invoke('home:field-save-secret', secret),
+  fieldCopyScript: () => ipcRenderer.invoke('home:field-copy-script'),
   lineSet: (change) => ipcRenderer.invoke('home:line-set', change),
   lineChooseFolder: () => ipcRenderer.invoke('home:line-choose-folder'),
   lineAdd: (req) => ipcRenderer.invoke('home:line-add', req),

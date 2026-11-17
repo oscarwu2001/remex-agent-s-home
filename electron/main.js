@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, utilityProcess, net, session, Notification, dialog, clipboard, safeStorage } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -503,23 +503,30 @@ app.whenReady().then(() => {
 
   // ---- field feedback -------------------------------------------------------
   // The answers to the user's field survey, from a Google Sheet they shared
-  // with their own service account. Off until turned on in Settings; then
+  // with their own service account, or through the reader script attached
+  // to it (its link and secret). Off until turned on in Settings; then
   // fetched from here only, on Monday, Wednesday and Friday at 08:00 (and on
   // start when a slot was missed), after a passing failure, and on Refresh
   // now, only from the hosts named in src/core/fieldsurvey.js. The key file
   // stays where the user keeps it: only its path is saved, and the key is
-  // read for each fetch, never copied or logged. The rows are kept in the
+  // read for each fetch, never copied or logged. The reader's secret is kept
+  // encrypted by the system (safeStorage) in its own file, read for each
+  // fetch, never logged, never sent back to the window and deleted when the
+  // feature is turned off. The rows are kept in the
   // app's data folder without identifying answers, so the board has them
   // after a restart, and deleted when the feature is turned off. The
   // decisions (when to read, what to keep, what to report) are in
-  // fieldsurvey.js; this keeps the timers, the files, net.fetch and the IPC.
+  // fieldsurvey.js; this keeps the timers, the files, the requests and the IPC.
   const fieldFile = path.join(app.getPath('userData'), 'field-survey.json');
   const fieldCacheFile = path.join(app.getPath('userData'), 'field-survey-cache.json');
+  const fieldSecretFile = path.join(app.getPath('userData'), 'field-reader-secret.bin');
   const FIELD_CHECK_MS = 10 * 60_000; // how often to look whether a slot has come (a timer can miss one across sleep)
   const FIELD_TIMEOUT_MS = 20_000;
-  const FIELD_STALE = 'The link or key changed while reading; reading again.';
-  // { enabled, sheetUrl, keyPath, columns: the user's checked column roles }
+  const FIELD_STALE = 'The link, key or secret changed while reading; reading again.';
+  // { enabled, source, sheetUrl, keyPath, readerUrl, columns: the user's
+  // checked column roles }. source and readerUrl only once set.
   let field = { enabled: false, sheetUrl: '', keyPath: '', columns: [] };
+  let fieldSecretSaved = fs.existsSync(fieldSecretFile);
   let fieldCache = null;
   let fieldSummary = null;
   let fieldSummaryError = null;
@@ -535,15 +542,16 @@ app.whenReady().then(() => {
     fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
     fs.renameSync(tmp, file);
   };
-  // The saved link, or null: no link yet, or one that no longer reads (a
-  // read then says why, from parseSheetLink itself).
-  const fieldLink = () => (field.sheetUrl ? (() => {
+  // The saved link of the source in use, or null: no link yet, or one that
+  // no longer reads (a read then says why, from the link's parser itself).
+  const fieldLink = () => {
     try {
-      return fieldSurvey.parseSheetLink(field.sheetUrl);
+      return fieldSurvey.sourceLink(field);
     } catch {
       return null; // refreshField parses it again and reports the reason
     }
-  })() : null);
+  };
+  const fieldSource = () => fieldSurvey.sourceOf(field);
   try {
     const saved = JSON.parse(fs.readFileSync(fieldFile, 'utf8'));
     if (!saved || typeof saved !== 'object') throw new SyntaxError('not an object');
@@ -557,6 +565,8 @@ app.whenReady().then(() => {
       enabled: saved.enabled === true,
       sheetUrl: typeof saved.sheetUrl === 'string' ? saved.sheetUrl : '',
       keyPath: typeof saved.keyPath === 'string' ? saved.keyPath : '',
+      ...(fieldSurvey.SOURCES.includes(saved.source) ? { source: saved.source } : {}),
+      ...(typeof saved.readerUrl === 'string' && saved.readerUrl ? { readerUrl: saved.readerUrl } : {}),
       columns,
     };
   } catch (err) {
@@ -571,6 +581,17 @@ app.whenReady().then(() => {
       problem(`The saved field feedback could not be removed (${err.code || err.message})`, fieldCacheFile);
     }
   }
+  // Off keeps no secret. One that cannot be removed is said under Needs
+  // attention, and still counts as saved, as it is.
+  function dropFieldSecret() {
+    try {
+      fs.rmSync(fieldSecretFile, { force: true });
+    } catch (err) {
+      problem(`The saved reader secret could not be removed (${err.code || 'error'}); remove it from the app's data folder`, fieldSecretFile);
+    }
+    fieldSecretSaved = fs.existsSync(fieldSecretFile);
+  }
+  if (!field.enabled && fieldSecretSaved) dropFieldSecret();
   {
     let raw = null;
     try {
@@ -638,32 +659,121 @@ app.whenReady().then(() => {
     fieldSurvey.checkUrl(url);
     return net.fetch(url, { ...init, signal: AbortSignal.timeout(FIELD_TIMEOUT_MS) });
   }
+  // The reader's secret, decrypted for one read. Never logged or returned to
+  // the window; the caller drops it with the request.
+  function readFieldSecret() {
+    let data;
+    try {
+      data = fs.readFileSync(fieldSecretFile);
+    } catch (err) {
+      throw fieldSurvey.secretFileError(err); // none saved: wait for the user; busy just now: try again later
+    }
+    try {
+      return safeStorage.decryptString(data);
+    } catch {
+      throw fieldSurvey.secretLocked(); // the system's key changed: only a new secret helps
+    }
+  }
+  // The reader's requests: Electron's own network stack (the system proxy
+  // applies), no cookies or sign-in of the app's, and never a redirect
+  // followed here. net.fetch cannot hand back a redirect's address (with
+  // redirect 'manual' it only fails), so this uses net.request, whose
+  // 'redirect' event gives it: the request stops there and
+  // fieldsurvey.readerHop decides the one hop. -> { status, location,
+  // contentType, text() }, as fetchReaderRows expects. The timeout covers
+  // the answer's body too.
+  function askReader(url, init) {
+    fieldSurvey.checkUrl(url);
+    return new Promise((resolve, reject) => {
+      const req = net.request({ url, method: init.method, redirect: 'manual', credentials: 'omit', useSessionCookies: false });
+      for (const [name, value] of Object.entries(init.headers ?? {})) req.setHeader(name, value);
+      let answered = false;
+      let failBody = null;
+      const timer = setTimeout(() => {
+        const err = Object.assign(new Error('The reader did not answer in time'), { name: 'TimeoutError' });
+        if (!answered) {
+          answered = true;
+          reject(err);
+        } else failBody?.(err);
+        req.abort();
+      }, FIELD_TIMEOUT_MS);
+      req.on('redirect', (status, _method, location) => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(timer);
+        resolve({ status, location, contentType: null, text: async () => '' });
+        req.abort(); // not followed: the next address is checked before it is asked
+      });
+      req.on('response', (res) => {
+        if (answered) return;
+        answered = true;
+        const chunks = [];
+        const body = new Promise((ok, fail) => {
+          failBody = fail;
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            clearTimeout(timer);
+            ok(Buffer.concat(chunks).toString('utf8'));
+          });
+          res.on('aborted', () => fail(new Error('The answer was cut off')));
+          res.on('error', (err) => fail(err));
+        });
+        // text() awaits it; this only keeps a body nobody reads (an answer
+        // already refused by its status) from being an unhandled rejection.
+        body.catch(() => {});
+        const type = res.headers['content-type'];
+        resolve({ status: res.statusCode, location: undefined, contentType: Array.isArray(type) ? type[0] : type ?? null, text: () => body });
+      });
+      req.on('error', (err) => {
+        clearTimeout(timer);
+        if (!answered) {
+          answered = true;
+          reject(err);
+        } else failBody?.(err); // after a redirect was taken, the request's own abort lands here, and changes nothing
+      });
+      req.end(init.body);
+    });
+  }
   function refreshField() {
     if (fieldRun) return fieldRun;
     const generation = fieldGeneration;
     const started = Date.now();
+    const source = fieldSource();
     fieldRun = (async () => {
       let link = null;
       try {
         try {
-          link = fieldSurvey.parseSheetLink(field.sheetUrl);
+          link = fieldSurvey.sourceLink(field);
         } catch (err) {
           throw new fieldSurvey.FieldSurveyError('setup', err.message);
         }
-        const key = readFieldKey();
-        const got = await fieldSurvey.fetchRows({ link, key, fetch: askGoogle, now: started });
+        let got;
+        let key = null;
+        if (source === 'reader') {
+          got = await fieldSurvey.fetchReaderRows({ link, secret: readFieldSecret(), send: askReader });
+        } else {
+          key = readFieldKey();
+          got = await fieldSurvey.fetchRows({ link, key, fetch: askGoogle, now: started });
+        }
         if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
         fieldCache = fieldSurvey.afterFetch(fieldCache, got, { now: Date.now(), started, link, roles: field.columns });
-        fieldKey = { clientEmail: key.clientEmail, error: null };
+        if (key) fieldKey = { clientEmail: key.clientEmail, error: null };
       } catch (err) {
         if (generation !== fieldGeneration) return { ok: false, error: FIELD_STALE };
         if (!(err instanceof fieldSurvey.FieldSurveyError)) {
           syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
+        } else if (err.code) {
+          // The reader's code for the trouble (an HTTP status, the reader's
+          // own word): never the secret or the link (fieldsurvey.js, tested).
+          syslog?.write('errors', 'field-feedback', { route: source, kind: err.kind, code: err.code });
         }
         fieldCache = fieldSurvey.afterFailure(fieldCache, err, { now: Date.now(), started, link });
         const kind = fieldCache.lastError.kind;
         // A key file that could not be read just now keeps the address it had.
-        if (kind === 'key' || kind === 'keyfile') fieldKey = { clientEmail: kind === 'keyfile' ? fieldKey.clientEmail : null, error: fieldCache.lastError.message };
+        if (source === 'key' && (kind === 'key' || kind === 'keyfile')) {
+          fieldKey = { clientEmail: kind === 'keyfile' ? fieldKey.clientEmail : null, error: fieldCache.lastError.message };
+        }
+        if (kind === 'setup' && source === 'reader') fieldSecretSaved = fs.existsSync(fieldSecretFile);
       }
       saveFieldCache();
       summariseField();
@@ -674,9 +784,11 @@ app.whenReady().then(() => {
     });
     return fieldRun;
   }
+  // What planFetch needs: the settings, and whether a secret is saved.
+  const fieldPlanSettings = () => ({ ...field, secretSaved: fieldSecretSaved });
   function fieldTick() {
     clearTimeout(fieldTimer);
-    const plan = fieldSurvey.planFetch({ now: Date.now(), settings: field, cache: fieldCache, busy: Boolean(fieldRun) });
+    const plan = fieldSurvey.planFetch({ now: Date.now(), settings: fieldPlanSettings(), cache: fieldCache, busy: Boolean(fieldRun) });
     if (plan.fetch) {
       refreshField();
       return;
@@ -705,9 +817,12 @@ app.whenReady().then(() => {
     const turnedOff = field.enabled && !res.settings.enabled;
     field = res.settings;
     if (res.sheetChanged || turnedOff) {
-      // Another sheet starts afresh; off keeps nothing.
+      // Another sheet or reader starts afresh; off keeps nothing, the
+      // reader's secret included.
       fieldGeneration += 1;
       dropFieldCache();
+      if (turnedOff) dropFieldSecret();
+      if (change && 'source' in change) checkFieldKey();
     } else if (change && 'columns' in change && fieldCache) {
       // A column now marked identifying loses its answers from the cache too.
       fieldCache = fieldSurvey.reroleCache(fieldCache, field.columns);
@@ -748,6 +863,46 @@ app.whenReady().then(() => {
     fieldTick();
     return { ok: true };
   });
+  // The reader's secret, from the Secret field: checked (fieldsurvey.js
+  // checkSecret), encrypted by the system and written to its own file. With
+  // no protected storage it is refused, never kept as plain text. The reply
+  // says only whether it was saved; the window never gets it back.
+  ipcMain.handle('home:field-save-secret', (_event, text) => {
+    if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
+    const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined;
+    const checked = fieldSurvey.checkSecret(text, { available: safeStorage.isEncryptionAvailable(), backend });
+    if (checked.error) return { ok: false, error: checked.error };
+    const tmp = `${fieldSecretFile}.${process.pid}.tmp`;
+    try {
+      const sealed = safeStorage.encryptString(checked.secret);
+      fs.mkdirSync(path.dirname(fieldSecretFile), { recursive: true });
+      fs.writeFileSync(tmp, sealed, { mode: 0o600 });
+      fs.renameSync(tmp, fieldSecretFile);
+    } catch (err) {
+      fs.rmSync(tmp, { force: true });
+      syslog?.write('errors', 'field-feedback', { route: 'reader', code: `secret not saved ${err?.code || 'error'}` });
+      return { ok: false, error: 'The secret could not be saved; see the system log, then try again.' };
+    }
+    fieldSecretSaved = true;
+    fieldGeneration += 1;
+    // A new secret may be the fix for the last refusal: try again without waiting.
+    if (fieldCache?.lastError) fieldCache = { ...fieldCache, lastAttemptAt: null };
+    fieldTick();
+    return { ok: true };
+  });
+  // The reader script the user pastes into the sheet's Apps Script editor,
+  // as shipped with the app (docs/field-feedback-reader.gs, in the build).
+  ipcMain.handle('home:field-copy-script', () => {
+    let code;
+    try {
+      code = fs.readFileSync(path.join(app.getAppPath(), 'docs', 'field-feedback-reader.gs'), 'utf8');
+    } catch (err) {
+      syslog?.write('errors', 'field-feedback', { route: 'reader', code: `script not read ${err?.code || 'error'}` });
+      return { ok: false, error: 'The reader script that comes with the app could not be read; see the system log. It is also in the README.' };
+    }
+    clipboard.writeText(code);
+    return { ok: true };
+  });
   ipcMain.handle('home:field-refresh', () => {
     if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
     return refreshField();
@@ -763,18 +918,24 @@ app.whenReady().then(() => {
   // after a passing trouble comes sooner than the next Mon/Wed/Fri 08:00).
   function nextFieldRead() {
     const now = Date.now();
-    const plan = fieldSurvey.planFetch({ now, settings: field, cache: fieldCache, busy: Boolean(fieldRun) });
+    const plan = fieldSurvey.planFetch({ now, settings: fieldPlanSettings(), cache: fieldCache, busy: Boolean(fieldRun) });
     return plan.fetch ? now : plan.wakeAt;
   }
+  // The key file's trouble matters only while the key file is in use.
+  const fieldKeyError = () => (fieldSource() === 'key' ? fieldKey.error : null);
   function fieldState() {
     const c = fieldCache ?? {};
     return {
       enabled: field.enabled,
-      // A URL and a file name: the board shows them only with privacy off.
+      source: fieldSource(),
+      // URLs and a file name: the board shows them only with privacy off.
       sheetUrl: field.sheetUrl,
+      readerUrl: field.readerUrl ?? '',
+      // Whether a secret is saved, never the secret.
+      secretSaved: fieldSecretSaved,
       keyName: field.keyPath ? path.basename(field.keyPath) : '',
       clientEmail: fieldKey.clientEmail,
-      keyError: fieldKey.error,
+      keyError: fieldKeyError(),
       busy: Boolean(fieldRun),
       fetchedAt: c.fetchedAt ?? null,
       lastAttemptAt: c.lastAttemptAt ?? null,
@@ -789,11 +950,11 @@ app.whenReady().then(() => {
       summaryError: field.enabled ? fieldSummaryError : null,
       // What needs a look (src/core/fieldsurvey.js fieldFlags); the board words them.
       // { why, earlier, list }: why is set when the window could not be compared.
-      flags: field.enabled ? fieldSurvey.fieldFlags({ summary: fieldSummary, lastError: fieldCache?.lastError ?? null, keyError: fieldKey.error }) : null,
+      flags: field.enabled ? fieldSurvey.fieldFlags({ summary: fieldSummary, lastError: fieldCache?.lastError ?? null, keyError: fieldKeyError() }) : null,
     };
   }
   function fieldProblems() {
-    const out = fieldSurvey.fieldProblems({ enabled: field.enabled, cache: fieldCache, summary: fieldSummary, summaryError: fieldSummaryError, keyError: fieldKey.error })
+    const out = fieldSurvey.fieldProblems({ enabled: field.enabled, cache: fieldCache, summary: fieldSummary, summaryError: fieldSummaryError, keyError: fieldKeyError() })
       .map((p) => ({ ...p, count: 1 }));
     // Each new set of problems goes to the system log once (labels only).
     const text = out.map((p) => p.label).join(' | ');

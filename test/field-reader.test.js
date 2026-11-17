@@ -232,6 +232,21 @@ test('the secret is saved only where the system can protect it, never as plain t
   assert.match(F.checkSecret(undefined, { available: true }).error, /^No secret yet/);
 });
 
+test('a saved secret that is gone or locked waits for the user; one busy just now is tried again', () => {
+  const gone = F.secretFileError(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
+  const busy = F.secretFileError(Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }));
+  const locked = F.secretLocked();
+  seen.push(gone, busy, locked);
+  assert.deepEqual([gone.kind, busy.kind, locked.kind], ['setup', 'secretfile', 'secret']);
+  assert.match(locked.message, /Save the secret again/);
+  const plan = (err) => F.planFetch({
+    now: Date.UTC(2026, 10, 16, 9), settings: { enabled: true, source: 'reader', readerUrl: EXEC, secretSaved: true },
+    cache: { fetchedAt: null, lastAttemptAt: Date.UTC(2026, 10, 16, 8, 50), lastError: { kind: err.kind, message: err.message } },
+  });
+  assert.equal(plan(busy).wakeAt, Date.UTC(2026, 10, 16, 8, 50) + F.RETRY_MS);
+  assert.notEqual(plan(locked).wakeAt, Date.UTC(2026, 10, 16, 8, 50) + F.RETRY_MS);
+});
+
 // ---- settings and the cache's identity -----------------------------------------------
 
 const SHEET = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-demo/edit#gid=777';

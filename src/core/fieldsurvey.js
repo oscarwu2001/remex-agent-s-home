@@ -41,7 +41,7 @@ class FieldSurveyError extends Error {
 // Failures that may pass by themselves, so the schedule tries again after
 // RETRY_MS. Every other refusal waits for the next slot, a new link or key,
 // or Refresh now: trying again sooner would only fail again.
-const TRANSIENT = new Set(['network', 'busy', 'google', 'answer', 'keyfile']);
+const TRANSIENT = new Set(['network', 'busy', 'google', 'answer', 'keyfile', 'secretfile']);
 
 // ---- the sheet link -------------------------------------------------------------
 
@@ -326,6 +326,17 @@ function checkSecret(text, { available = false, backend } = {}) {
   if (!s) return { error: `No secret yet. ${SECRET_HELP}` };
   if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the reader’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}` };
   return { secret: s };
+}
+
+// The saved secret could not be read -> why, and whether waiting helps: none
+// saved waits for the user; a file busy just now (a virus scan) passes. One
+// the system cannot decrypt any more (secretLocked) waits for a new secret.
+function secretFileError(err) {
+  if (err?.code === 'ENOENT') return readerError('setup', 'No reader secret is saved. Save it in Settings → Connections → Field feedback.', 'secret file missing');
+  return readerError('secretfile', 'The saved secret could not be read just now; it tries again in half an hour.', `secret file ${err?.code || 'unreadable'}`);
+}
+function secretLocked() {
+  return readerError('secret', 'The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in Settings → Connections → Field feedback.', 'secret not decrypted');
 }
 
 // The POST to the reader: the secret as JSON text in the body (Apps Script
@@ -1405,7 +1416,7 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
 module.exports = {
   HOSTS, TOKEN_URL, SCOPE, ROLES, RETRY_MS, CACHE_VERSION, SOURCES, FieldSurveyError,
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
-  parseReaderLink, checkSecret, readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
+  parseReaderLink, checkSecret, secretFileError, secretLocked, readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
 };
