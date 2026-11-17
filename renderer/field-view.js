@@ -407,7 +407,8 @@ const linkValue = (saved, draft, privacy) => (draft != null ? draft : privacy ? 
 // The reader route: the set-up step and Copy reader script, its web app
 // link, its secret. The secret never comes back from the main process:
 // once saved, only "Secret saved" and Replace secret. -> { html, open: a
-// field's Save is the filled button, shown: which fields are open }.
+// field's Save is the filled button, shown: which fields are open, and
+// noStorage when no Secret field can be drawn at all }.
 function readerSettings(f, { privacy, state }) {
   const script = `<ol class="field-steps">
       <li>Press Copy reader script, paste it into the sheet’s Extensions → Apps Script, and set TAB at the top to your answers’ tab.</li>
@@ -436,24 +437,25 @@ function readerSettings(f, { privacy, state }) {
     secret = entryForm({
       id: 'field-secret', label: 'Secret', error: state.secretError, button: 'Save secret', filled: Boolean(f.readerUrl) && !linkOpen,
       input: 'type="password" autocomplete="new-password" spellcheck="false" placeholder="READER_SECRET"', cancel: f.secretSaved ? 'cancel-secret' : '',
-      cancelLabel: 'Cancel secret change',
+      cancelLabel: 'Cancel secret change', ownRow: true,
       hint: state.secretNote ? esc(state.secretNote) : 'Kept encrypted with this computer’s own protection, and never shown again.',
     });
   } else {
     secret = `<p class="field-set"><span>Secret saved.</span>
         <button type="button" class="link-btn" id="field-secret-replace" data-field="replace-secret">Replace secret</button></p>`;
   }
-  return { html: `${script}${link}${secret}`, open: linkOpen || (secretOpen && !f.secretStorage), shown: { secretOpen, linkOpen } };
+  return { html: `${script}${link}${secret}`, open: linkOpen || (secretOpen && !f.secretStorage), shown: { secretOpen: secretOpen && !f.secretStorage, linkOpen, noStorage: Boolean(f.secretStorage) } };
 }
 
 // A message from the main process as Settings shows it: errorHere and
 // keyErrorHere name the control in view there, where the board's name the
 // Settings path. They hold one wording per way the Secret and link fields
 // can be drawn, open ('1') or folded behind Replace secret and Change link
-// ('0'), secret first (fieldsurvey.js settingsWords); this picks the one
+// ('0'), and for the secret not drawn at all without protected storage
+// ('n'), secret first (fieldsurvey.js settingsWords); this picks the one
 // drawn. A snapshot without them shows the message as it is. After "Last
 // update failed:" it reads on in lower case, a name excepted.
-const inView = (words, message, { secretOpen, linkOpen }) => (words && typeof words === 'object' && words[`${secretOpen ? 1 : 0}${linkOpen ? 1 : 0}`]) || message;
+const inView = (words, message, { secretOpen, linkOpen, noStorage = false }) => (words && typeof words === 'object' && words[`${noStorage ? 'n' : secretOpen ? 1 : 0}${linkOpen ? 1 : 0}`]) || message;
 const NAMES = /^(?:Google|Apps Script|READER_SECRET|TAB|Windows|LINE)\b/;
 const readOn = (m) => (NAMES.test(m) ? m : `${m.charAt(0).toLowerCase()}${m.slice(1)}`);
 

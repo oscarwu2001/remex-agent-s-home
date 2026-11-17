@@ -619,10 +619,10 @@ test('Settings: how to connect, the set-up step, then the reader link and the se
   assert.match(steps[1], /run makeSecret once/i);
   assert.match(steps[2], /\(Execute as: Me; Who has access: Anyone\).*copy the Web app link into Reader link/);
   assert.match(steps[3], /copy READER_SECRET from Project Settings → Script properties into Secret/i);
-  // A link field is full width in every state, so its whole example shows: Save goes on its own row under it,
-  // with no Cancel before anything is saved. The secret's Save stays beside its field until one is saved.
+  // Every field is full width in every state, so a link's whole example shows: Save goes on its own row under it,
+  // with no Cancel before anything is saved.
   assert.match(html, /<div class="add-row"><input id="field-reader-link"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button><\/div>/);
-  assert.match(html, /<div class="add-row"><input id="field-secret"[^>]*>\s*<button class="link-btn" type="submit">Save secret<\/button><\/div>/);
+  assert.match(html, /<div class="add-row"><input id="field-secret"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="link-btn" type="submit">Save secret<\/button><\/div>/);
   const keyFirst = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true });
   assert.match(keyFirst, /<div class="add-row"><input id="field-link"[^>]*placeholder="https:\/\/docs\.google\.com\/spreadsheets\/d\/…"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button><\/div>/);
   assert.doesNotMatch(keyFirst, /data-field="cancel-link"/);
@@ -713,6 +713,23 @@ test('with no protected storage, How to connect says so: the reader cannot be ch
   const onReader = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE }), { privacy: true });
   assert.doesNotMatch(onReader, /type="password"|Kept encrypted/);
   assert.match(onReader, /no protected storage/);
+  // No Secret field is drawn: a failed update about the secret defers to the reason shown, never to a field or
+  // Replace secret, whether a secret was saved before or not.
+  const mismatch = 'The reader refused the secret: it does not match the reader’s. Copy READER_SECRET from the reader script’s Project Settings → Script properties, then save it in Settings → Connections → Field feedback.';
+  for (const secretSaved of [false, true]) {
+    const html = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretSaved, secretStorage: NO_STORE, error: mismatch, errorHere: F.settingsWords(mismatch) }), { privacy: true });
+    assert.match(html, /Last update failed: .*, then save it once this computer can keep it \(see How to connect\)\.<\/p>/, String(secretSaved));
+    assert.doesNotMatch(html.match(/Last update failed[^<]*/)[0], /under Secret|Replace secret/);
+  }
+  // The link's own wording still follows its field.
+  const gone = 'No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in Settings → Connections → Field feedback.';
+  const linkHtml = fieldSettingsHtml(readerField({ readerUrl: EXEC, secretStorage: NO_STORE, error: gone, errorHere: F.settingsWords(gone) }), { privacy: true });
+  assert.match(linkHtml, /press Change link and paste it\.<\/p>/);
+  // The core's own wording for a reader with no protected storage, for each secret message.
+  const none = { secretOpen: false, noStorage: true };
+  assert.match(F.inSettings(F.secretLocked().message, none), /Save the secret again once this computer can keep it \(see How to connect\)\.$/);
+  assert.match(F.inSettings(F.secretFileError(Object.assign(new Error('x'), { code: 'ENOENT' })).message, none), /Save it once this computer can keep it \(see How to connect\)\.$/);
+  assert.match(F.inSettings(caught(() => F.openSecret(F.sealSecret(OTHER_DEPLOY, 'c2VhbGVk'), DEPLOY)).message, none), /Save this reader’s secret once this computer can keep it \(see How to connect\)\.$/);
 });
 
 test('switching with checked columns asks first, in place; the reply to each button sits by it', async () => {
@@ -840,7 +857,8 @@ test('in Settings a reader message names the control in view (the field when ope
   for (const [board, open, folded] of cases) {
     assert.match(board, /Settings → Connections → Field feedback/, board);
     const words = F.settingsWords(board);
-    assert.deepEqual(Object.keys(words).sort(), ['00', '01', '10', '11']);
+    // Secret open (1), folded (0) or not drawn for want of protected storage (n); link open (1) or folded (0).
+    assert.deepEqual(Object.keys(words).sort(), ['00', '01', '10', '11', 'n0', 'n1']);
     assert.match(words['11'], open);
     assert.match(F.inSettings(board), open);
     // Folded: the secret's messages under the key's first digit, the link's under its second.

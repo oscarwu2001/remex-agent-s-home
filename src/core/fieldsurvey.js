@@ -297,10 +297,15 @@ const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
 // says "in Settings → Connections → Field feedback", Settings names the
 // control in view there. shown: { secretOpen, linkOpen } whether the
 // Secret field and the link field (Reader link or Sheet link) are open, or
-// folded behind Replace secret and Change link; keyChosen: a key file is
-// chosen, so its button reads Choose another…. Every message naming that
-// path has its phrase here (tested); the board keeps the path.
+// folded behind Replace secret and Change link; noStorage: this computer
+// cannot keep a secret, so no Secret field or Replace secret is drawn and
+// the secret's messages defer to the reason How to connect shows;
+// keyChosen: a key file is chosen, so its button reads Choose another….
+// Every message naming that path has its phrase here (tested); the board
+// keeps the path.
 const keyButton = (v) => (v.keyChosen ? 'Choose another…' : 'Choose key file…');
+const NO_STORE_YET = 'once this computer can keep it (see How to connect)';
+const secretWords = (v, open, folded, none) => (v.noStorage ? none : v.secretOpen ? open : folded);
 const IN_SETTINGS = [
   [`In ${SETTINGS}, press Copy reader script,`, () => 'Press Copy reader script,'],
   [`press Copy reader script in ${SETTINGS},`, () => 'press Copy reader script,'],
@@ -310,25 +315,26 @@ const IN_SETTINGS = [
   [`Choose the key file in ${SETTINGS}.`, (v) => `Choose the key file with ${keyButton(v)}`],
   [`then paste it again in ${SETTINGS}`, (v) => (v.linkOpen ? 'then paste it again under Sheet link' : 'then press Change link and paste it again')],
   [` and paste it in ${SETTINGS}`, (v) => (v.linkOpen ? ' and paste it under Reader link' : ', press Change link and paste it')],
-  [`then save it in ${SETTINGS}`, (v) => (v.secretOpen ? 'then save it under Secret' : 'then press Replace secret and save the new one')],
-  [`Save it in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save it under Secret' : 'Press Replace secret and save it')],
-  [`Save the secret again in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save the secret again under Secret' : 'Press Replace secret and save it again')],
-  [`Save this reader’s secret in ${SETTINGS}`, (v) => (v.secretOpen ? 'Save this reader’s secret under Secret' : 'Press Replace secret and save this reader’s secret')],
+  [`then save it in ${SETTINGS}`, (v) => secretWords(v, 'then save it under Secret', 'then press Replace secret and save the new one', `then save it ${NO_STORE_YET}`)],
+  [`Save it in ${SETTINGS}`, (v) => secretWords(v, 'Save it under Secret', 'Press Replace secret and save it', `Save it ${NO_STORE_YET}`)],
+  [`Save the secret again in ${SETTINGS}`, (v) => secretWords(v, 'Save the secret again under Secret', 'Press Replace secret and save it again', `Save the secret again ${NO_STORE_YET}`)],
+  [`Save this reader’s secret in ${SETTINGS}`, (v) => secretWords(v, 'Save this reader’s secret under Secret', 'Press Replace secret and save this reader’s secret', `Save this reader’s secret ${NO_STORE_YET}`)],
 ];
-function inSettings(message, { secretOpen = true, linkOpen = true, keyChosen = false } = {}) {
-  const shown = { secretOpen, linkOpen, keyChosen };
+function inSettings(message, { secretOpen = true, linkOpen = true, noStorage = false, keyChosen = false } = {}) {
+  const shown = { secretOpen: secretOpen && !noStorage, linkOpen, noStorage, keyChosen };
   let m = message == null ? '' : String(message);
   for (const [board, here] of IN_SETTINGS) m = m.split(board).join(here(shown));
   return m;
 }
-// Every way Settings can draw a message, keyed by whether the Secret field
-// and the link field are open ('1') or folded ('0'), secret first: the
-// window picks the one it draws. null for no message.
+// Every way Settings can draw a message, keyed by the Secret field, open
+// ('1'), folded ('0') or not drawn for want of protected storage ('n'),
+// then the link field, open ('1') or folded ('0'): the window picks the one
+// it draws. null for no message.
 function settingsWords(message, { keyChosen = false } = {}) {
   if (message == null) return null;
   const out = {};
-  for (const s of ['0', '1']) {
-    for (const l of ['0', '1']) out[`${s}${l}`] = inSettings(message, { secretOpen: s === '1', linkOpen: l === '1', keyChosen });
+  for (const s of ['0', '1', 'n']) {
+    for (const l of ['0', '1']) out[`${s}${l}`] = inSettings(message, { secretOpen: s === '1', noStorage: s === 'n', linkOpen: l === '1', keyChosen });
   }
   return out;
 }
