@@ -370,18 +370,21 @@ function sourceChoice(f, source, state) {
 // One labelled field with its Save (button: its words), its error tied to it
 // (aria-invalid, aria-describedby) after a Save it refused. Opened over a
 // saved value, it has Cancel (cancel: its action; cancelLabel: what it
-// cancels, for screen readers), and Save and Cancel go on their own row
-// under the field, so the field keeps its width.
-function entryForm({ id, label, input, value = null, error, hint = '', button = 'Save', filled = true, cancel = '', cancelLabel = '' }) {
+// cancels, for screen readers). Save, and Cancel when offered, go on their
+// own row under the field when there is a Cancel, and always for a link
+// (ownRow), so a link field is full width in every state and its whole
+// example shows.
+function entryForm({ id, label, input, value = null, error, hint = '', button = 'Save', filled = true, cancel = '', cancelLabel = '', ownRow = false }) {
   const err = error ? `<p class="form-error" id="${id}-err" role="alert">${esc(error)}</p>` : '';
   const hintP = hint ? `<p class="hint" id="${id}-hint">${hint}</p>` : '';
   const described = [error ? `${id}-err` : '', hint ? `${id}-hint` : ''].filter(Boolean).join(' ');
   const field = `<input id="${id}" ${input}${value != null ? ` value="${esc(value)}"` : ''}${error ? ' aria-invalid="true"' : ''}${described ? ` aria-describedby="${described}"` : ''}>`;
   const save = `<button class="${filled ? 'button' : 'link-btn'}" type="submit">${button}</button>`;
-  const row = cancel
+  const cancelBtn = cancel ? `
+        <button type="button" class="link-btn" data-field="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button>` : '';
+  const row = cancel || ownRow
     ? `<div class="add-row">${field}</div>
-      <div class="form-actions field-entry-actions">${save}
-        <button type="button" class="link-btn" data-field="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button></div>`
+      <div class="form-actions field-entry-actions">${save}${cancelBtn}</div>`
     : `<div class="add-row">${field}
         ${save}</div>`;
   return `<form class="field-entry" id="${id}-form" novalidate>
@@ -421,7 +424,7 @@ function readerSettings(f, { privacy, state }) {
     ? entryForm({
       id: 'field-reader-link', label: 'Reader link', error: state.readerError, value: typed, button: 'Save link',
       input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Ends in /exec"', cancel: f.readerUrl ? 'cancel-reader' : '',
-      cancelLabel: 'Cancel link change',
+      cancelLabel: 'Cancel link change', ownRow: true,
     })
     : `<p class="field-set"><span>${privacy ? 'A reader link is saved.' : `Reader: <span class="field-path">${esc(f.readerUrl)}</span>`}</span>
         <button type="button" class="link-btn" id="field-reader-change" data-field="change-reader">Change link</button></p>`;
@@ -490,7 +493,7 @@ export function fieldSettingsHtml(f, { privacy = true, online = true, state = {}
     ? entryForm({
       id: 'field-link', label: 'Sheet link', error: state.linkError, value: typed, button: 'Save link',
       input: 'type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…"', cancel: f.sheetUrl ? 'cancel-link' : '',
-      cancelLabel: 'Cancel link change',
+      cancelLabel: 'Cancel link change', ownRow: true,
     })
     : `<p class="field-set"><span>${privacy ? 'A sheet link is saved.' : `Sheet: <span class="field-path">${esc(f.sheetUrl)}</span>`}</span>
         <button type="button" class="link-btn" id="field-change" data-field="change-link">Change link</button></p>`;

@@ -619,8 +619,13 @@ test('Settings: how to connect, the set-up step, then the reader link and the se
   assert.match(steps[1], /run makeSecret once/i);
   assert.match(steps[2], /\(Execute as: Me; Who has access: Anyone\).*copy the Web app link into Reader link/);
   assert.match(steps[3], /copy READER_SECRET from Project Settings → Script properties into Secret/i);
-  // Before anything is saved, each Save sits beside its field.
-  assert.match(html, /<div class="add-row"><input id="field-reader-link"[^>]*>\s*<button class="button" type="submit">Save link<\/button><\/div>/);
+  // A link field is full width in every state, so its whole example shows: Save goes on its own row under it,
+  // with no Cancel before anything is saved. The secret's Save stays beside its field until one is saved.
+  assert.match(html, /<div class="add-row"><input id="field-reader-link"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button><\/div>/);
+  assert.match(html, /<div class="add-row"><input id="field-secret"[^>]*>\s*<button class="link-btn" type="submit">Save secret<\/button><\/div>/);
+  const keyFirst = fieldSettingsHtml({ enabled: true, source: 'key', sheetUrl: '', keyName: '' }, { privacy: true });
+  assert.match(keyFirst, /<div class="add-row"><input id="field-link"[^>]*placeholder="https:\/\/docs\.google\.com\/spreadsheets\/d\/…"[^>]*><\/div>\s*<div class="form-actions field-entry-actions"><button class="button" type="submit">Save link<\/button><\/div>/);
+  assert.doesNotMatch(keyFirst, /data-field="cancel-link"/);
   assert.doesNotMatch(html, /README/);
   assert.match(html, /data-field="copy-script">Copy reader script</);
   assert.match(html, /<label class="field-entry-label" for="field-reader-link">Reader link<\/label>/);
