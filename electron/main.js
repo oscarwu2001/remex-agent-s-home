@@ -612,6 +612,17 @@ app.whenReady().then(() => {
   }
   if (!field.enabled && fieldSecretSaved) dropFieldSecret();
   {
+    // An earlier build kept the secret in field-reader-secret.bin, tied to
+    // no reader. It is never read: it goes at start, and the reader asks for
+    // its secret again. force: one already gone is no error.
+    const legacy = path.join(app.getPath('userData'), 'field-reader-secret.bin');
+    try {
+      fs.rmSync(legacy, { force: true });
+    } catch (err) {
+      problem(`An old saved reader secret could not be removed (${err.code || 'error'}); remove field-reader-secret.bin from the app's data folder`, legacy);
+    }
+  }
+  {
     let raw = null;
     try {
       raw = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
@@ -623,10 +634,16 @@ app.whenReady().then(() => {
     }
     const checked = fieldSurvey.validCache(raw, fieldLink());
     if (checked.problem) problem(checked.problem, fieldCacheFile);
-    if (checked.cache && field.enabled) fieldCache = checked.cache;
-    // Not this sheet's, not whole, an older format, or the feature is off:
-    // nothing of it is kept.
-    else if (raw != null) dropFieldCache();
+    if (checked.cache && field.enabled) {
+      fieldCache = checked.cache;
+      // An older format's "new since", carried without its rows: written in
+      // its place now, so the old rows leave the disk before any read.
+      if (checked.carried) saveFieldCache();
+    } else if (raw != null) {
+      // Not this sheet's, not whole, an older format, or the feature is off:
+      // nothing of it is kept.
+      dropFieldCache();
+    }
   }
   function summariseField() {
     try {
@@ -867,13 +884,19 @@ app.whenReady().then(() => {
     field = res.settings;
     // A secret is never sent to another reader than its own: a link to
     // another reader drops it, and the reply says why.
-    const secretDropped = fieldSecretSaved && fieldSurvey.secretStale(fieldSecretFor, field);
+    const secretStale = fieldSecretSaved && fieldSurvey.secretStale(fieldSecretFor, field);
+    // Whether the old reader's secret is really gone, after the attempt (one
+    // that could not be removed is said under Needs attention instead).
+    let secretRemoved = false;
     if (res.sheetChanged || turnedOff) {
       // Another sheet or reader starts afresh; off keeps nothing, the
       // reader's secret included.
       fieldGeneration += 1;
       dropFieldCache();
-      if (turnedOff || secretDropped) dropFieldSecret();
+      if (turnedOff || secretStale) {
+        dropFieldSecret();
+        secretRemoved = !fieldSecretSaved;
+      }
       if (change && 'source' in change) checkFieldKey();
     } else if (change && 'columns' in change && fieldCache) {
       // A column now marked identifying loses its answers from the cache too.
@@ -887,7 +910,7 @@ app.whenReady().then(() => {
     const note = change && 'columns' in change ? fieldSurvey.columnsReply(fieldSummary) : res.note;
     return {
       ok: true, ...(note ? { note } : {}),
-      ...(secretDropped && !turnedOff ? { secretNote: 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' } : {}),
+      ...(secretStale && secretRemoved && !turnedOff ? { secretNote: 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' } : {}),
     };
   });
   ipcMain.handle('home:field-choose-key', async () => {
@@ -1008,6 +1031,9 @@ app.whenReady().then(() => {
       keyName: field.keyPath ? path.basename(field.keyPath) : '',
       clientEmail: fieldKey.clientEmail,
       keyError: fieldKeyError(),
+      // The same two as Settings words them, naming its controls (the board keeps the Settings path).
+      keyErrorHere: fieldKeyError() ? fieldSurvey.inSettings(fieldKeyError()) : null,
+      errorHere: c.lastError ? fieldSurvey.inSettings(c.lastError.message) : null,
       busy: Boolean(fieldRun),
       fetchedAt: c.fetchedAt ?? null,
       lastAttemptAt: c.lastAttemptAt ?? null,
