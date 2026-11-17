@@ -250,37 +250,55 @@ that live in the sheet itself. It only reads, and answers only a request that
 carries its secret. The app posts the secret (never in the link) to the
 reader's web app link at `script.google.com`, and fetches the answer from
 the one place Google hands it over, `script.googleusercontent.com`; it
-follows no other redirect. The secret is kept encrypted with your computer's
-own protection (Windows' data protection, the macOS keychain, or a Linux
-keyring; without one the app refuses to save it), never shown again and never
-written to a log.
+follows no other redirect, and reads at most 20 MB of answer. The secret is
+kept encrypted with your computer's own protection (Windows' data
+protection, the macOS keychain, or a Linux keyring; without one the app
+refuses to save it, and Settings says so before you choose the reader),
+together with the reader link it belongs to: it is never sent to another
+reader, and pasting another reader's link removes it. It is never shown
+again and never written to a log.
+
+The reader sends the sheet's own values, with dates as UTC times, and the
+sheet's time zone for dates typed as text. An older reader script that sends
+no time zone still works: its times are read in this computer's time zone,
+and **Needs attention** asks you to copy the script again.
 
 1. Open the response sheet and choose **Extensions → Apps Script**.
 2. In Agent's Home, open **Settings → Connections → Field feedback (Google
    Sheet)**, turn on **Show field feedback**, choose **Apps Script reader
    (link and secret)** and press **Copy reader script**. Paste it into the
-   editor in place of what is there. If your answers are on a tab with
-   another name, change `TAB` at the top to that tab's name. Save.
-3. Choose **makeSecret** in the editor's function list and press **Run**
-   (allow it when Google asks). It saves a new secret under **Project
-   Settings → Script properties** as `READER_SECRET`.
+   editor in place of what is there, set `TAB` at the top to the name of the
+   tab your answers go to (it reads `Form Responses 1` until you change it),
+   and save.
+3. Choose **makeSecret** in the editor's function list and press **Run**.
+   Google asks you to allow the script; the permission it asks for should
+   mention only "spreadsheets that this application has been installed in"
+   (the script's `@OnlyCurrentDoc` line limits it to this one sheet). If it
+   asks for all your spreadsheets, check that the `/** @OnlyCurrentDoc */`
+   line is at the top, on its own. `makeSecret` saves a new secret under
+   **Project Settings → Script properties** as `READER_SECRET`.
 4. **Deploy → New deployment → Select type → Web app**. Set **Execute as:
    Me** and **Who has access: Anyone**, then **Deploy**, and copy the **Web
    app** link: it ends in `/exec` (the `/dev` test link only works in your
-   own signed-in browser). "Anyone" means anyone with the link may call it;
-   without the secret it answers only "not allowed".
-5. In the app, paste the link under **Reader link** and press **Save**. Copy
-   `READER_SECRET` from **Project Settings → Script properties**, paste it
-   under **Secret** and press **Save**. Settings then shows only **Secret
-   saved**, with **Replace** to change it. The first update follows.
+   own signed-in browser). A Google Workspace link, with
+   `/a/macros/<your domain>/` in it, works too. "Anyone" means anyone with
+   the link may call it; without the secret it answers only "not allowed".
+5. In the app, paste the link under **Reader link** and press **Save link**.
+   Copy `READER_SECRET` from **Project Settings → Script properties**, paste
+   it under **Secret** and press **Save secret**. Settings then shows only
+   **Secret saved**, with **Replace secret** to change it. The first update
+   follows at once.
 6. Check the columns, as in step 7 below.
 
 If the update fails, the error says what to do: a secret that does not match
-(copy `READER_SECRET` again), a tab the reader cannot find (check `TAB`), or
+(copy `READER_SECRET` again), a tab the reader cannot find (check `TAB`),
 Google showing its sign-in page instead of the answers (the deployment is not
 set to **Anyone**: **Deploy → Manage deployments → Edit → Who has access →
-Anyone**). After changing the script, deploy it as a new version (**Deploy →
-Manage deployments → Edit → Version: New version**); the link stays the same.
+Anyone**), or the script failing (open it and look under **Executions**).
+After changing the script, deploy it as a new version (**Deploy → Manage
+deployments → Edit → Version: New version**); the link stays the same.
+Switching **How to connect** starts afresh: with columns already checked,
+Settings asks first, because the checked columns and the answers kept go.
 The error's code goes to the system log, never the secret or the link.
 
 ### With a service account key file
@@ -333,8 +351,13 @@ keep no answers either. A column you checked (comment, choice, score or
 number) whose answers turn into emails or phone numbers is kept off the
 board, its answers are not stored, and it is flagged until you choose
 Identifying or Ignore for it. A column whose answers are all JSON (data a web
-app keeps for itself) and an entry's own id ("Record ID") are ignored; a sales
-representative, a facility or site and a distributor are identifying. A
+app keeps for itself) and an entry's own id ("Record ID") are ignored (one or
+two JSON answers only as a guess you confirm). Columns titled for a sales
+representative ("Sales rep", "Sales representative", "Representative name",
+"Sales agent"), a facility or site ("Facility", "Site", "Site / facility") or
+a distributor ("Distributor", "Distributor name"), and their Chinese titles
+業務代表, 業務員 and 經銷商, are identifying; a wider title such as "Agent" or
+"Dealer" is not, so check such a column yourself. A
 column of when the entry was saved ("… saved (UTC)", "Submitted (UTC)") is
 taken as when answered, before one of when it was last updated. A column added to the form later, and columns
 waiting for a choice, are flagged under **Needs attention** until you check
@@ -646,7 +669,7 @@ but never writes there. There are three exceptions, and each happens only when y
   `script.googleusercontent.com`; with a key file it sends Google only a
   sign-in request signed with your key, the sheet's id and its tab name.
   Never anything from your sessions. The reader's secret is kept encrypted
-  (`field-reader-secret.bin`) and the answers it read are kept in the app's data folder
+  (`field-reader-secret.json`) and the answers it read are kept in the app's data folder
   (`field-survey-cache.json`) without the identifying columns, so the board
   shows them after a restart; turning the feature off deletes both.
 - **Update and restart** pulls the newest code with git. **Hide file names, commands, survey answers and LINE chats** is on by default. With
