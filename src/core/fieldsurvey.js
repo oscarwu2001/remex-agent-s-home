@@ -293,6 +293,30 @@ const RELINK = `Copy the Web app link again (Deploy → Manage deployments) and 
 const READER_MAX_BYTES = 20 * 1024 * 1024;
 const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
 
+// A message as Settings shows it, beside the controls: where the board
+// says "in Settings → Connections → Field feedback", Settings names the
+// control to use there. Every message naming that path has its phrase here
+// (tested); the board keeps the path.
+const IN_SETTINGS = [
+  [`In ${SETTINGS}, press Copy reader script,`, 'Press Copy reader script,'],
+  [`press Copy reader script in ${SETTINGS},`, 'press Copy reader script,'],
+  [`Copy the reader script again (${SETTINGS}) and`, 'Press Copy reader script, paste it over the old one and'],
+  [`(copy it in ${SETTINGS})`, '(copy it with Copy reader address)'],
+  [`choose it again in ${SETTINGS}.`, 'choose it again with Choose another…'],
+  [`Choose the key file in ${SETTINGS}.`, 'Choose the key file with Choose key file…'],
+  [`paste it again in ${SETTINGS}`, 'paste it again under Sheet link'],
+  [`paste it in ${SETTINGS}`, 'paste it under Reader link'],
+  [`save it in ${SETTINGS}`, 'save it under Secret'],
+  [`Save it in ${SETTINGS}`, 'Save it under Secret'],
+  [`Save the secret again in ${SETTINGS}`, 'Save the secret again under Secret'],
+  [`Save this reader’s secret in ${SETTINGS}`, 'Save this reader’s secret under Secret'],
+];
+function inSettings(message) {
+  let m = message == null ? '' : String(message);
+  for (const [board, here] of IN_SETTINGS) m = m.split(board).join(here);
+  return m;
+}
+
 const readerError = (kind, message, code) => Object.assign(new FieldSurveyError(kind, message), { code });
 // An answer that is not the reader's shape: the reader script is not the
 // one the app ships (or Google said something odd). Waiting will not mend
@@ -330,7 +354,7 @@ function parseReaderLink(text) {
 // plain text.
 function secretStorage({ available = false, backend } = {}) {
   if (available && backend !== 'basic_text' && backend !== 'unknown') return null;
-  return 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring and try again.';
+  return 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring, then restart Agent’s Home.';
 }
 
 // The secret as typed in Settings, checked before it is saved -> { secret,
@@ -447,21 +471,33 @@ function readerUnreachable(err) {
 }
 
 // The reader sends the sheet's own values (getValues): text, numbers,
-// true/false, and dates as UTC times in ISO form. Each becomes the text the
-// sheet's rows are read as: a number in figures, TRUE or FALSE, an empty
-// cell as "". Anything else is not the reader's answer.
+// true/false, and dates as UTC times in ISO form. They stay as they are,
+// as the key file's rows have them (numbers as numbers, so a column of
+// long numbers is guessed the same both ways); only an empty cell (null)
+// becomes "". Anything else is not the reader's answer.
 const CELL = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
-const cellText = (v) => (v === null ? '' : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : String(v));
+const cellText = (v) => (v === null ? '' : v);
+// The longest time zone name kept; a real one is far shorter.
+const ZONE_MAX = 64;
 
 // An HTML page instead of the answer: Google's sign-in (the web app is not
 // open to Anyone) or Apps Script's own error page (the script failed). Its
-// title, cleaned to letters, digits, spaces and ":.-" and without anything
-// long enough to be an id or the secret, is the log's code.
+// title's whole words of plain letters (A to Z), 40 characters at most, are
+// the log's code: an address, a number, a name in another script or
+// anything long enough to be an id or the secret is left out ("other" when
+// nothing is left).
 const SIGN_IN = /accounts\.google\.com|ServiceLogin|<title>[^<]*\bsign[ -]?in\b/i;
+const TITLE_MAX = 40;
 function pageTitle(text) {
   const t = /<title[^>]*>([^<]*)<\/title>/i.exec(text)?.[1] ?? '';
-  return t.replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, ' ').replace(/[^\p{L}\p{N} :.-]/gu, '').replace(/[A-Za-z0-9-]{20,}/g, '')
-    .replace(/\s+/g, ' ').trim().slice(0, 60);
+  const words = t.replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, ' ').split(/\s+/)
+    .map((w) => w.replace(/^[("'[]+|[)"'\]:;,.!?]+$/g, '')).filter((w) => /^[A-Za-z]{1,19}$/.test(w));
+  let out = '';
+  for (const w of words) {
+    if (`${out} ${w}`.trim().length > TITLE_MAX) break;
+    out = `${out} ${w}`.trim();
+  }
+  return out || 'other';
 }
 function htmlReply(text) {
   if (SIGN_IN.test(text)) return readerError('access', `Google showed its sign-in page instead of the reader’s answer. ${ANYONE}`, 'html sign-in');
@@ -502,7 +538,9 @@ function readerReply(status, contentType, raw) {
   // getDataRange always has a row, even on an empty tab.
   if (!Array.isArray(body.values) || !body.values.length) throw wrongShape('no values');
   if (!body.values.every((r) => Array.isArray(r) && r.every(CELL))) throw wrongShape('cells not values');
-  const zone = typeof body.timeZone === 'string' && body.timeZone.trim() ? body.timeZone.trim() : undefined;
+  // A name longer than any zone's is taken as none (and said, as an older reader's).
+  const named = typeof body.timeZone === 'string' ? body.timeZone.trim() : '';
+  const zone = named && named.length <= ZONE_MAX ? named : undefined;
   return {
     rows: body.values.map((r) => r.map(cellText)), tab: typeof body.tab === 'string' ? { id: null, title: body.tab } : null, timeZone: zone,
     ...(zone ? {} : { zoneMissing: true }),
@@ -568,6 +606,11 @@ const WEAK_TIME = /^(date|time|date ?time|日期|時間|时间)$/i;
 // first saved the row, as it states, before a column of when the entry was
 // last changed ("Last saved", "Updated", "Modified"), which is not taken.
 const SAVED_TIME = /^(?:(?!(?:last|updated|modified|changed|edited)\b)\p{L}+ )?(?:saved|submitted|received|created)(?: at)? \((?:utc|gmt)\)$/iu;
+// A title that states its times are UTC ("Hub saved (UTC)", "Timestamp
+// UTC", "Saved at (GMT)"), not an offset from it ("GMT+8"): its dates with
+// no zone of their own (typed text, or a date the sheet keeps as a wall
+// clock) are UTC, whatever the sheet's zone.
+const UTC_TITLE = /\b(?:UTC|GMT)\b(?!\s*[+−-]\s*\d)/i;
 
 // Identifying by the header only when the header is a short label ("Name",
 // "Email address", "Patient ID", "電話"), never by a word inside a question
@@ -615,6 +658,8 @@ const NAME_WORD = /^(?:\p{Lu}[\p{Ll}'’-]+|\p{Lu}\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|P
 const SURNAMES = '陳陈林黃黄張张李王吳吴劉刘蔡楊杨許许鄭郑謝谢郭洪曾邱廖賴赖周徐蘇苏葉叶莊庄呂吕江何蕭萧羅罗高潘簡简朱鍾钟彭游詹胡施沈余趙赵盧卢梁顏颜柯孫孙魏翁戴范宋方鄧邓杜傅侯曹溫温薛丁馬马蔣蒋唐卓藍蓝馮冯姚石董紀纪歐欧程連连古汪湯汤姜田康鄒邹白涂尤巫韓韩龔龚嚴严袁黎金阮陸陆倪夏童邵';
 const SERIAL_MIN = 25_569; // 1970-01-01 in spreadsheet days
 const SERIAL_MAX = 73_051; // 2100-01-01
+const ISO_MIN = 0; // 1970-01-01, as SERIAL_MIN
+const ISO_MAX = Date.UTC(2100, 0, 1); // as SERIAL_MAX
 const MS_DAY = 86_400_000;
 const HIDDEN = '[hidden]'; // stands in, in the cache, for an identifying answer
 const isEmpty = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -657,7 +702,12 @@ function dateOf(v, { timeZone, dayFirst = false } = {}) {
   }
   if (typeof v !== 'string') return NaN;
   const t = v.trim();
-  if (ZONED_ISO.test(t)) return Date.parse(t);
+  if (ZONED_ISO.test(t)) {
+    // The same years as a serial day: a time of day alone reaches the
+    // reader as 1899-12-30, and is not a date.
+    const ms = Date.parse(t);
+    return ms >= ISO_MIN && ms < ISO_MAX ? ms : NaN;
+  }
   const m = DATE_RE.exec(t);
   if (!m) return NaN;
   const [a, b, c] = [m[1], m[2], m[3]].map(Number);
@@ -989,8 +1039,9 @@ function summarise(rows, { since = null, now = null, comments: keep = 8, timeZon
   } else if (tsCol >= 0) {
     out.timestampColumn = headers[tsCol];
     const dayFirst = dayFirstColumn(columns[tsCol]);
+    const tsZone = UTC_TITLE.test(headers[tsCol]) ? 'UTC' : zone;
     data.forEach((r, k) => {
-      const ms = dateOf(r[tsCol], { timeZone: zone, dayFirst });
+      const ms = dateOf(r[tsCol], { timeZone: tsZone, dayFirst });
       if (Number.isFinite(ms)) times[k] = ms;
       else out.unreadable.timestamps += 1;
     });
@@ -1248,7 +1299,8 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
   const hide = toRedact(first);
   // A reader's tab is part of what was read: another TAB starts afresh.
   const sameTab = !link.deploymentId || (prev?.tab?.title ?? null) === (got.tab?.title ?? null);
-  const same = sameSheet(prev, link) && Array.isArray(prev.rows) && sameTab;
+  // Its rows, or only where "new since" stood (carried over from an older format).
+  const same = sameSheet(prev, link) && sameTab && (Array.isArray(prev.rows) || Number.isFinite(prev.carriedAt));
   const before = same ? prev.newest ?? null : null;
   const changed = same && first.newest !== before;
   return {
@@ -1257,7 +1309,24 @@ function afterFetch(prev, got, { now, started, link, roles = [] }) {
     rows: redactRows(got.rows, hide), redacted: hide, hiddenAs: hiddenAsIn(first, hide),
     fetchedAt: now, lastAttemptAt: started, lastError: null, newest: first.newest,
     since: changed ? before : same ? prev.since ?? null : null,
-    sinceFetchedAt: changed ? prev.fetchedAt : same ? prev.sinceFetchedAt ?? null : null,
+    sinceFetchedAt: changed ? prev.fetchedAt ?? prev.carriedAt : same ? prev.sinceFetchedAt ?? null : null,
+  };
+}
+
+// A version 4 cache of this sheet -> what of it a version 5 one keeps, or
+// null. Its rows go (version 5 keeps fewer answers; the read at once that
+// follows, with no rows to show, brings them back), and only where "new
+// since" stood stays: its newest answer, its since, and when it was read
+// (carriedAt; fetchedAt is null, so the sheet is read at once).
+function carryV4(raw, link) {
+  const num = (v) => v == null || Number.isFinite(v);
+  const str = (v) => v == null || typeof v === 'string';
+  if (!link || link.deploymentId || !sameSheet(raw, link)) return null;
+  if (!(Number.isFinite(raw.fetchedAt) && num(raw.sinceFetchedAt) && str(raw.newest) && str(raw.since))) return null;
+  return {
+    version: CACHE_VERSION, spreadsheetId: link.spreadsheetId, gid: link.gid ?? null, rows: null, redacted: [], hiddenAs: [],
+    fetchedAt: null, lastAttemptAt: null, lastError: null, carriedAt: raw.fetchedAt,
+    newest: raw.newest ?? null, since: raw.since ?? null, sinceFetchedAt: raw.sinceFetchedAt ?? null,
   };
 }
 
@@ -1295,20 +1364,27 @@ function summariseCache(cache, roles, { now = null } = {}) {
   });
 }
 
-// The cache file as read -> { cache, problem }. A cache that is not this
-// sheet's, or not in the shape written, is set aside (the caller deletes it)
-// and the sheet read again; an older format is set aside without a word,
-// since the next read rebuilds it the same.
+// The cache file as read -> { cache, problem, carried }. A cache that is
+// not this sheet's, or not in the shape written, is set aside (the caller
+// deletes it) and the sheet read again; an older format is set aside
+// without a word, since the next read rebuilds it the same, except that
+// version 4's "new since" is carried (carried: the caller writes the cache
+// returned in its place).
 function validCache(raw, link) {
   if (raw == null) return { cache: null, problem: null };
   const bad = { cache: null, problem: 'The saved field feedback could not be read; the sheet is read again.' };
   if (typeof raw !== 'object' || Array.isArray(raw)) return bad;
+  if (raw.version === 4) {
+    // carried: the caller writes it in the old one's place at once.
+    const cache = carryV4(raw, link);
+    return cache ? { cache, problem: null, carried: true } : { cache: null, problem: null };
+  }
   if (raw.version !== CACHE_VERSION) return { cache: null, problem: null };
   const num = (v) => v == null || Number.isFinite(v);
   const str = (v) => v == null || typeof v === 'string';
   const e = raw.lastError;
   const ok = (raw.rows === null || (Array.isArray(raw.rows) && raw.rows.every(Array.isArray)))
-    && num(raw.fetchedAt) && num(raw.lastAttemptAt) && num(raw.sinceFetchedAt)
+    && num(raw.fetchedAt) && num(raw.lastAttemptAt) && num(raw.sinceFetchedAt) && num(raw.carriedAt)
     && str(raw.newest) && str(raw.since) && str(raw.timeZone) && str(raw.spreadsheetId) && str(raw.deploymentId)
     && (raw.zoneMissing == null || typeof raw.zoneMissing === 'boolean')
     && (raw.gid == null || Number.isInteger(raw.gid))
@@ -1539,5 +1615,5 @@ module.exports = {
   READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretFileError, secretLocked,
   readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
-  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems,
+  planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, changeSettings, fieldProblems, inSettings,
 };

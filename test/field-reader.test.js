@@ -203,19 +203,29 @@ test('an Apps Script error page is told from the sign-in page; its cleaned title
   const title = ['TypeError: x &amp;', DEPLOY, '/', SECRET, '&lt;y&gt; and a much longer tail of words here'].join(' ');
   const thrown = await fail([200, `<html><head><title>${title}</title></head><body>TypeError</body></html>`, { contentType: 'text/html' }]);
   assert.equal(thrown.kind, 'reader');
-  // Letters, digits, spaces and : . - only, 60 at most, and never a long id or the secret.
-  assert.match(thrown.code, /^html [\p{L}\p{N} :.-]{0,60}$/u);
+  // Whole words of plain letters only, 40 at most, and never a long id or the secret.
+  assert.match(thrown.code, /^html [A-Za-z ]{1,40}$/);
   assert.ok(!thrown.code.includes(DEPLOY.slice(0, 12)) && !thrown.code.includes(SECRET.slice(0, 12)), thrown.code);
+  // A name, an address or a number in the title is not a word of it.
+  const titled = async (t) => (await fail([200, `<html><head><title>${t}</title></head><body>x</body></html>`, { contentType: 'text/html' }])).code;
+  const email = await titled('Error for john.smith@example.org');
+  assert.equal(email, 'html Error for');
+  const cjk = await titled('錯誤 王小明 0912345678');
+  assert.equal(cjk, 'html other');
+  for (const part of ['john', 'smith', 'example', '王小明', '0912345678']) {
+    assert.ok(!email.includes(part) && !cjk.includes(part), `${part} in ${email} / ${cjk}`);
+  }
   const signIn = await fail([200, '<html><head><title>Sign in - Google Accounts</title></head><body><form action="https://accounts.google.com/ServiceLogin"></form></body></html>', { contentType: 'text/html' }]);
   assert.equal(signIn.kind, 'access');
   assert.match(signIn.message, /Who has access → Anyone/);
 });
 
-test("the reader's raw values become the strings the key file's rows use, and its time zone is the sheet's", async () => {
+const answer = (values, zone) => fakeReader([MOVED, [200, { ok: true, tab: 'T', ...(zone ? { timeZone: zone } : {}), values }]]).send;
+
+test("the reader's raw values stay as the key file's rows have them (numbers and true/false), an empty cell empty, and its time zone is the sheet's", async () => {
   const raw = [['Saved (UTC)', 'Ease (-3..3)', 'Seen', 'Note'], ['2026-11-10T09:00:00.000Z', -2, true, null], ['2026-11-11T09:00:00.000Z', 3, false, 'ok']];
-  const answer = (values, zone) => fakeReader([MOVED, [200, { ok: true, tab: 'T', ...(zone ? { timeZone: zone } : {}), values }]]).send;
   const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(raw, 'Asia/Taipei') });
-  assert.deepEqual(got.rows, [['Saved (UTC)', 'Ease (-3..3)', 'Seen', 'Note'], ['2026-11-10T09:00:00.000Z', '-2', 'TRUE', ''], ['2026-11-11T09:00:00.000Z', '3', 'FALSE', 'ok']]);
+  assert.deepEqual(got.rows, [['Saved (UTC)', 'Ease (-3..3)', 'Seen', 'Note'], ['2026-11-10T09:00:00.000Z', -2, true, ''], ['2026-11-11T09:00:00.000Z', 3, false, 'ok']]);
   assert.equal(got.timeZone, 'Asia/Taipei');
   assert.equal(got.zoneMissing, undefined);
   // The zone reaches the summary as the key file's does: a text date is read in it.
@@ -234,6 +244,59 @@ test("the reader's raw values become the strings the key file's rows use, and it
   const lines = F.fieldProblems({ enabled: true, cache: kept, summary }).map((p) => p.label);
   assert.ok(lines.some((l) => /reader did not say the sheet’s time zone.*this computer’s time zone/.test(l)), lines.join('\n'));
   assert.match(F.validCache({ ...kept, zoneMissing: 'yes' }, READER).problem, /could not be read/);
+});
+
+test('a column of long whole numbers is guessed the same through the reader as through the key file', async () => {
+  // Eight digits: the key file sends numbers, and so does the reader; neither reads them as phone numbers typed in.
+  const rows = [['Saved (UTC)', 'Ref', 'Ease (1-5)'], ['2026-11-10T09:00:00.000Z', 12345678, 4], ['2026-11-11T09:00:00.000Z', 23456789, 5],
+    ['2026-11-12T09:00:00.000Z', 34567890, 3]];
+  const viaReader = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(rows, 'UTC') });
+  const ref = (r) => F.summarise(r, { timeZone: 'UTC' }).columns.find((c) => c.header === 'Ref').suggested;
+  assert.deepEqual(ref(viaReader.rows), ref(rows));
+  assert.deepEqual(ref(rows), { role: 'identifying', reason: 'numbers', confidence: 'low' });
+});
+
+test('a timestamp column whose title says UTC or GMT reads its dates without a zone as UTC, whatever the sheet’s zone', async () => {
+  const newest = async (header, cell) => {
+    const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer([[header, 'Ease (1-5)'], [cell, 4]], 'Asia/Taipei') });
+    return F.summariseCache(F.afterFetch(null, got, { now: 1, started: 1, link: READER }), []).newest;
+  };
+  assert.equal(await newest('Hub saved (UTC)', '2026-11-10 09:00:00'), '2026-11-10T09:00:00.000Z');
+  assert.equal(await newest('Saved at (GMT)', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
+  assert.equal(await newest('Timestamp UTC', '2026-11-10 09:00'), '2026-11-10T09:00:00.000Z');
+  // A date the sheet holds as a date (ISO with its Z) is already a moment: it stays as it is.
+  assert.equal(await newest('Hub saved (UTC)', '2026-11-10T09:00:00.000Z'), '2026-11-10T09:00:00.000Z');
+  // A title naming no zone, or another one, is read in the sheet's zone.
+  assert.equal(await newest('Timestamp', '2026-11-10 09:00'), '2026-11-10T01:00:00.000Z');
+  assert.equal(await newest('Saved at (GMT+8)', '2026-11-10 09:00'), '2026-11-10T01:00:00.000Z');
+  // The key file's serial dates are wall-clock dates too: under a UTC title they are UTC.
+  const serial = 25_569 + Date.UTC(2026, 10, 10, 9) / 86_400_000;
+  assert.equal(F.summarise([['Saved (UTC)', 'Ease (1-5)'], [serial, 4]], { timeZone: 'Asia/Taipei' }).newest, '2026-11-10T09:00:00.000Z');
+});
+
+test('a time of day alone (the reader sends it on 1899-12-30) is not a date, so its column is never the timestamp', async () => {
+  const rows = [['Start time', 'Visit day', 'Ease (1-5)'],
+    ['1899-12-30T01:00:00.000Z', '2026-11-10T09:00:00.000Z', 4], ['1899-12-30T02:30:00.000Z', '2026-11-11T09:00:00.000Z', 5]];
+  const got = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(rows, 'UTC') });
+  const s = F.summarise(got.rows, { timeZone: 'UTC' });
+  assert.equal(s.timestampColumn, 'Visit day');
+  assert.equal(s.newest, '2026-11-11T09:00:00.000Z');
+  // Times alone with nothing else: no timestamp at all, rather than one in 1899.
+  const only = F.summarise([['Time', 'Ease (1-5)'], ['1899-12-30T01:00:00.000Z', 4], ['1899-12-30T02:00:00.000Z', 5]], { timeZone: 'UTC' });
+  assert.deepEqual([only.timestampColumn, only.newest], [null, null]);
+  assert.ok(!Number.isFinite(F.dateOf('1969-12-31T23:59:59.000Z')));
+  assert.equal(F.dateOf('1970-01-01T00:00:00.000Z'), 0);
+});
+
+test('a time zone longer than any real one is taken as none, and Needs attention says so', async () => {
+  const typed = [['Day', 'Ease (1-5)'], ['2026-11-10 09:00', 4]];
+  const long = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(typed, `Asia/${'x'.repeat(60)}`) });
+  assert.deepEqual([long.timeZone, long.zoneMissing], [undefined, true]);
+  const atCap = await F.fetchReaderRows({ link: READER, secret: SECRET, send: answer(typed, `America/${'Y'.repeat(56)}`) });
+  assert.equal(atCap.timeZone.length, 64);
+  const kept = F.afterFetch(null, long, { now: 1, started: 1, link: READER });
+  const lines = F.fieldProblems({ enabled: true, cache: kept, summary: F.summariseCache(kept, []) }).map((p) => p.label);
+  assert.ok(lines.some((l) => /reader did not say the sheet’s time zone/.test(l)), lines.join('\n'));
 });
 
 test('an answer over 20 MB is refused while it is read, as one the app does not read', async () => {
@@ -312,6 +375,19 @@ test('the secret is saved only where the system can protect it, never as plain t
   assert.equal(F.secretStorage({ available: true }), null);
   assert.match(F.secretStorage({ available: false }), /no protected storage/);
   assert.match(F.secretStorage({ available: true, backend: 'basic_text' }), /no protected storage/);
+  // A keyring set up later is used only once the app starts again.
+  assert.match(F.secretStorage({ available: true, backend: 'basic_text' }), /set up a keyring, then restart Agent’s Home\.$/);
+});
+
+test('the reader script that ships asks only for its own sheet, sends its values and zone, and refuses a short secret', () => {
+  const lines = fs.readFileSync(path.join(__dirname, '..', 'docs', 'field-feedback-reader.gs'), 'utf8').split(/\r?\n/);
+  // Alone on the first line, or Apps Script asks for every spreadsheet the user has.
+  assert.equal(lines[0], '/** @OnlyCurrentDoc */');
+  const code = lines.filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.match(code, /\.getValues\(\)/);
+  assert.doesNotMatch(code, /getDisplayValues/);
+  assert.match(code, /\.getSpreadsheetTimeZone\(\)/);
+  assert.match(code, /secret\.length < 32\b/);
 });
 
 test('the saved secret belongs to one reader: another reader link drops it and asks again', () => {
@@ -624,6 +700,28 @@ test('a scale around 0 reads "on −3 to 3" on the board, its meter from its low
   assert.match(fieldColumnsHtml(f, { privacy: true }), /Score, −3 to 3/);
 });
 
+test('in Settings a reader message names the control to use (Secret, Reader link, Copy reader script); the board keeps the path', async () => {
+  const fail = async (last) => (await caughtAsync(F.fetchReaderRows({ link: READER, secret: SECRET, send: fakeReader([MOVED, last]).send }))).message;
+  const cases = [
+    [await fail([200, { ok: false, error: 'not allowed' }]), /, then save it under Secret\.$/],
+    [await fail([200, { ok: false, error: 'something new' }]), /does not know\. Press Copy reader script, paste it over the old one and deploy it again/],
+    [await fail([200, 'not json at all']), /^The reader’s answer is not in the shape the app reads\. Press Copy reader script, paste it over the old one/],
+    [await fail([200, '<html><head><title>Error</title></head></html>', { contentType: 'text/html' }]), /then press Copy reader script, paste it over the old one/],
+    [await fail([404, '']), /copy the Web app link and paste it under Reader link\.$/],
+    [await fail([400, '']), /paste it under Reader link, then press Refresh now\.$/],
+    [F.secretFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, /^No reader secret is saved\. Save it under Secret\.$/],
+    [F.secretFileError(Object.assign(new Error('EACCES'), { code: 'EACCES' })).message, /Save the secret again under Secret\.$/],
+    [F.secretLocked().message, /Save the secret again under Secret\.$/],
+    [caught(() => F.openSecret(F.sealSecret(OTHER_DEPLOY, 'c2VhbGVk'), DEPLOY)).message, /^The saved secret was for another reader link\. Save this reader’s secret under Secret\.$/],
+  ];
+  for (const [board, here] of cases) {
+    assert.match(board, /Settings → Connections → Field feedback/, board);
+    assert.match(F.inSettings(board), here);
+    // The app's own Settings path is gone (Apps Script's "Project Settings → Script properties" is not the app's).
+    assert.doesNotMatch(F.inSettings(board), /(?<!Project )Settings →|\bbelow\b/);
+  }
+});
+
 // Last: every error the tests above saw.
 test('no error message, detail or log code carries the secret or the link, and messages carry no raw codes', () => {
   assert.ok(seen.length >= 30, `only ${seen.length} errors seen`);
@@ -634,6 +732,8 @@ test('no error message, detail or log code carries the secret or the link, and m
       assert.ok(!String(part).includes(DEPLOY), `the link in: ${part}`);
     }
     assert.doesNotMatch(err.message, /\b(?:http \d{3}|\d{3}\)|not allowed|tab not found|net::)/, err.message);
+    // As Settings shows it, it names a control there, never the Settings path.
+    assert.doesNotMatch(F.inSettings(err.message), /Settings → Connections/, err.message);
     if (err.code) assert.ok(!err.message.includes(err.code), `the code "${err.code}" in: ${err.message}`);
   }
 });

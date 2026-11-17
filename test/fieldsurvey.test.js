@@ -211,6 +211,33 @@ test("Google's refusals become plain sentences with what to try", async () => {
   assert.match((await fail({ values: [503, {}] })).message, /\(503\).*tries again/);
 });
 
+test('in Settings a key file message names the control to use; the board keeps the Settings path', async () => {
+  const key = F.readKey(keyJson());
+  const refused = async (meta) => {
+    try {
+      await F.fetchRows({ link, key, fetch: fakeGoogle({ token: OK_TOKEN, meta: [meta, { error: { code: meta } }] }).fetch });
+    } catch (err) {
+      return err.message;
+    }
+    assert.fail('expected a refusal');
+  };
+  const PATH = /Settings → Connections → Field feedback/;
+  const cases = [
+    [await refused(403), 'Share the sheet with the key’s reader address (copy it with Copy reader address) as Viewer, then press Refresh now.'],
+    [await refused(404), 'No sheet was found at this link. Open it in your browser to check it, then paste it again under Sheet link.'],
+    [F.keyFileError(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).message, 'The key file is no longer where it was chosen; choose it again with Choose another…'],
+    // The main process's own, before any key is chosen.
+    ['Choose the key file in Settings → Connections → Field feedback.', 'Choose the key file with Choose key file…'],
+  ];
+  for (const [board, here] of cases) {
+    assert.match(board, PATH);
+    assert.equal(F.inSettings(board), here);
+  }
+  // A message naming no Settings path reads the same, and nothing is not a message.
+  assert.equal(F.inSettings('Google’s answer could not be read. Press Refresh now.'), 'Google’s answer could not be read. Press Refresh now.');
+  assert.equal(F.inSettings(null), '');
+});
+
 // ---- summarising ------------------------------------------------------------------------
 
 const ENGLISH = [
@@ -1371,9 +1398,34 @@ test('an entry or record id is left out, not read as comments; a title that only
   assert.deepEqual(s.questions, []);
 });
 
-test('a cache kept under the version 4 rules is set aside quietly and read again', () => {
-  // Version 5 leaves out JSON and entry-id columns' answers too, and names the reader it came from.
+test('a cache kept under the version 4 rules keeps only where "new since" stood, and the sheet is read again at once', () => {
+  // Version 5 leaves out JSON and entry-id columns' answers too, and names the reader it came from: the old rows go.
   const good = F.afterFetch(null, got(R1), { now: 1000, started: 900, link: LINK });
   assert.equal(good.version, 5);
-  assert.deepEqual(F.validCache({ ...JSON.parse(JSON.stringify(good)), version: 4 }, LINK), { cache: null, problem: null });
+  const v4 = { ...JSON.parse(JSON.stringify(good)), version: 4, since: '2026-11-09T09:00:00.000Z', sinceFetchedAt: 500 };
+  const { cache, problem, carried } = F.validCache(v4, LINK);
+  assert.deepEqual([problem, carried, cache.version, cache.rows, cache.fetchedAt], [null, true, 5, null, null]);
+  assert.deepEqual([cache.since, cache.sinceFetchedAt, cache.newest], ['2026-11-09T09:00:00.000Z', 500, good.newest]);
+  assert.ok(!JSON.stringify(cache).includes('@example.com'), 'no answer of the old rows is kept');
+  // No rows: the next look reads at once, slot or not.
+  const now = Date.UTC(2026, 10, 16, 12);
+  assert.deepEqual(F.planFetch({ now, settings: { enabled: true, sheetUrl: 'x', keyPath: 'k' }, cache }), { fetch: true, wakeAt: null });
+  // Written at start in its place, it reads back as a version 5 cache.
+  const written = JSON.parse(JSON.stringify(cache));
+  assert.deepEqual(F.validCache(written, LINK), { cache: written, problem: null });
+  // The first read after it: nothing new keeps "new since" where it stood…
+  const same = F.afterFetch(written, got(R1), { now: 3000, started: 2900, link: LINK });
+  assert.deepEqual([same.since, same.sinceFetchedAt, same.carriedAt], ['2026-11-09T09:00:00.000Z', 500, undefined]);
+  // …and something new moves it to the newest of the last version 4 read, as of that read.
+  const more = F.afterFetch(written, got([...R1, ['2026-11-12T09:00:00Z', 'c@example.com', 3]]), { now: 3000, started: 2900, link: LINK });
+  assert.deepEqual([more.since, more.sinceFetchedAt], [good.newest, 1000]);
+  // A failed read in between keeps it for the next.
+  const failed = JSON.parse(JSON.stringify(F.afterFailure(written, new F.FieldSurveyError('network', 'x'), { now: 3000, started: 2900, link: LINK })));
+  assert.equal(F.validCache(failed, LINK).cache.since, '2026-11-09T09:00:00.000Z');
+  assert.deepEqual(F.afterFetch(failed, got(R1), { now: 4000, started: 3900, link: LINK }).since, '2026-11-09T09:00:00.000Z');
+  // Another sheet's, one not in the shape written, or an older one still: set aside quietly.
+  assert.deepEqual(F.validCache(v4, { spreadsheetId: 'another-sheet', gid: 777 }), { cache: null, problem: null });
+  assert.deepEqual(F.validCache({ ...v4, sinceFetchedAt: 'soon' }, LINK), { cache: null, problem: null });
+  assert.deepEqual(F.validCache({ ...v4, version: 3 }, LINK), { cache: null, problem: null });
+  assert.match(F.validCache({ ...written, carriedAt: 'then' }, LINK).problem, /could not be read/);
 });
