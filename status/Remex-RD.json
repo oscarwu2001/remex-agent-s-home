@@ -3,7 +3,7 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1794967202167,
+ "at": 1794970802177,
  "every": 3600000,
  "sessions": [],
  "repos": [
@@ -57,13 +57,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 292,
+    "memUsed": 300,
     "memTotal": 16380,
     "temp": 35
    }
   ],
-  "cpu": 18,
-  "memUsed": 9534,
+  "cpu": 6,
+  "memUsed": 9409,
   "memTotal": 48916
  }
 }
