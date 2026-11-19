@@ -1461,12 +1461,13 @@ app.whenReady().then(() => {
   }
   // Where a file that would not go is (s.name '.': the folder itself could not be listed).
   const stuckWhere = (file, stuck) => stuck.map((s) => (s.name === '.' ? `${path.dirname(file)} (could not be listed: ${s.code})` : `${path.join(path.dirname(file), s.name)} (${s.code})`)).join(', ');
+  // The secret and any half-written copy of it -> those that would not go (removeSecret).
   function dropBotSecret() {
-    // The secret and any half-written copy of it.
     const stuck = lineBot.removeSecret({ file: botSecretFile });
-    if (stuck.length) problem('LINE chats: the relay’s saved secret could not all be removed; close any app using the app’s data folder and remove it from there', stuckWhere(botSecretFile, stuck));
+    if (stuck.length) problem(lineBot.secretLeftWords(stuck, path.basename(botSecretFile)), stuckWhere(botSecretFile, stuck));
     botSecretSaved = fs.existsSync(botSecretFile);
     if (!botSecretSaved) botSecretFor = null;
+    return stuck;
   }
   // The keeper took an off read from a file (the store is gone): the secret
   // goes with it. Copies that would not go are the keeper's to say.
@@ -1589,10 +1590,8 @@ app.whenReady().then(() => {
   const pruneLineNow = () => pruneLinePrompts(line.enabled ? undefined : 0);
   pruneLineNow();
   setInterval(pruneLineNow, LINE_PRUNE_MS);
-  // -> { ok, stop } (turning it off removed a relay set-up: the words on
-  // stopping LINE sending to it), or { ok: false, error } when the bot's
-  // data could not be removed: then nothing is changed. Throws when the
-  // settings file can't be written.
+  // -> { ok, ...offReply } (turning it off: what the bot's off did, botOff).
+  // Throws when the settings file can't be written: then nothing is changed.
   function saveLine(next) {
     const turnedOff = line.enabled && !next.enabled;
     const turnedOn = !line.enabled && next.enabled;
@@ -1607,7 +1606,7 @@ app.whenReady().then(() => {
       pruneLinePrompts(0);
     }
     scanLine();
-    return { ok: true, stop: off.stop, ...(off.secretLeft ? { secretLeft: true } : {}) };
+    return { ok: true, ...offReply(off) };
   }
 
   // ---- the LINE bot part: collecting ----
@@ -1640,21 +1639,28 @@ app.whenReady().then(() => {
     }
   }
   // Collect from my LINE bot off (or LINE chats off), by the user: the store
-  // (its ticks and link with it), then the secret. Taken only once the store
-  // is gone; else nothing changes. -> { ok, stop: a relay was set up (a
-  // link, a secret, or a store it can't read) } or { ok: false, error }.
-  // writeLine: LINE chats' own off, written first (it throws: nothing else
-  // changes); the bot's off then finishes later if it can't now. ->
-  // { ok, stop, secretLeft? } or, for the bot's own switch, { ok: false, error }.
+  // (its ticks and link with it), then the secret. The bot's own switch:
+  // taken only once the store is gone, else nothing changes -> { ok: false,
+  // error }. writeLine: LINE chats' own off, written first (it throws:
+  // nothing else changes); the bot's off then finishes later if it can't
+  // now. -> { ok, stop: a relay was set up (a link, a secret, or a store it
+  // can't read), unfinished? (the off is not finished, BotKeeper.unfinished:
+  // nothing of the bot's was deleted), left? (taken, but what would not go,
+  // linebot.offLeft) }.
   function botOff(writeLine = null) {
     const stop = Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck;
     const res = writeLine ? botKeeper.offWithLine(writeLine) : botKeeper.remove();
     if (!res.drop) {
-      lineLog('bot store not removed', { code: botKeeper.problems().find((p) => p.what === 'unremoved')?.detail ?? res.code });
+      lineLog('bot store not removed', { code: res.code });
       if (!writeLine) return { ok: false, error: res.error };
-    } else dropBotSecret();
+    }
+    const left = res.drop ? lineBot.offLeft({ storeProblems: botKeeper.problems(), secretStuck: dropBotSecret(), secretBase: path.basename(botSecretFile) }) : [];
     [botError, botTriedAt, botCollectedAt, botMore] = [null, null, null, false];
-    return { ok: true, stop, ...(res.drop && botSecretSaved ? { secretLeft: true } : {}) };
+    return { ok: true, stop, ...(res.drop ? {} : { unfinished: botKeeper.unfinished }), ...(left.length ? { left } : {}) };
+  }
+  // What an off did, as the window's reply carries it.
+  function offReply(off) {
+    return { ...(off.stop ? { stop: true } : {}), ...(off.unfinished ? { unfinished: off.unfinished } : {}), ...(off.left ? { left: off.left } : {}) };
   }
   // One collection (BotKeeper.collect): each answer merged into the store as
   // it is then and written before the call that lets the relay forget it.
@@ -1734,7 +1740,7 @@ app.whenReady().then(() => {
         const off = botOff();
         if (!off.ok) return off;
         scanLine();
-        return { ok: true, ...(off.stop ? { stop: true } : {}), ...(off.secretLeft ? { secretLeft: true } : {}) };
+        return { ok: true, ...offReply(off) };
       }
       res = botKeeper.turnOn();
       if (res.ok) botAgain();
@@ -1817,6 +1823,12 @@ app.whenReady().then(() => {
     const allowed = Object.fromEntries(Object.entries(change ?? {}).filter(([k]) => ['enabled', 'names', 'keywords', 'tick', 'mark', 'unmark'].includes(k)));
     const res = lineChat.changeSettings(line, allowed);
     if (res.error) return { ok: false, error: res.error };
+    // On, while the bot's earlier off is not finished: tried once more, else refused (LINE chats stays off).
+    if (res.settings.enabled && !line.enabled) {
+      const may = botKeeper.lineOn();
+      if (may.drop) dropBotSecret();
+      if (!may.ok) return { ok: false, error: may.error };
+    }
     let saved;
     try {
       saved = saveLine(res.settings);
@@ -1824,8 +1836,8 @@ app.whenReady().then(() => {
       lineLog('settings not saved', err);
       return { ok: false, error: LINE_SAVE_ERROR };
     }
-    if (!saved.ok) return saved;
-    return { ok: true, ...(res.note ? { note: res.note } : {}), ...(saved.stop ? { stop: true } : {}), ...(saved.secretLeft ? { secretLeft: true } : {}) };
+    // Turned off: what the bot's off did (botOff), never refused.
+    return { ok: true, ...(res.note ? { note: res.note } : {}), ...offReply(saved) };
   });
   ipcMain.handle('home:line-choose-folder', async () => {
     const res = await dialog.showOpenDialog(win, {
@@ -1956,7 +1968,7 @@ app.whenReady().then(() => {
   });
   function lineState() {
     // Off: only whether a relay link is set (never the link), for the words on how to stop LINE sending to it.
-    if (!line.enabled) return { enabled: false, bot: { on: false, linkSet: Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck } };
+    if (!line.enabled) return { enabled: false, bot: { on: false, linkSet: Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck, unfinished: botKeeper.unfinished } };
     const byChat = new Map();
     for (const f of lineScan?.files ?? []) {
       const c = byChat.get(f.chat) ?? { chat: f.chat, files: 0, read: line.read.includes(f.chat), problems: 0 };
@@ -1985,7 +1997,7 @@ app.whenReady().then(() => {
       bot: lineBot.botView({
         settings: { on: botKeeper.on, link: botKeeper.settings.link, read: botKeeper.settings.read }, stuck: botKeeper.stuck, store: botKeeper.store, secretSaved: botSecretSaved, storage: botStorage, error: botError, collectedAt: botCollectedAt, busy: Boolean(botRun),
         nextAt: botReady() ? lineBot.nextCollect({ ready: true, lastTryAt: botTriedAt, error: botError, more: botMore }) : null,
-        notCollecting: botWhyNot(),
+        notCollecting: botWhyNot(), unfinished: botKeeper.unfinished,
       }),
       windowDays: lineChat.WINDOW_DAYS,
       // Chat names, senders and words: shown only with privacy off.

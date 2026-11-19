@@ -15,7 +15,7 @@ import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
-import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts } from './line-view.js';
+import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -1375,7 +1375,7 @@ function render(force = false) {
   $('problem-list').innerHTML = problems
     // A fix button keeps its focus across redraws by its data-key.
     // LINE chats' fix opens its Settings (data-settings); the others are field feedback's.
-    .map((p, i) => `<li>${escapeXml(p.label)}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix === 'line' ? ` <button type="button" class="link-btn" data-settings="line-settings-h" data-key="problem-fix-${i}">Open Settings</button>` : p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
+    .map((p, i) => `<li>${keepFileNames(escapeXml(p.label))}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix === 'line' ? ` <button type="button" class="link-btn" data-settings="line-settings-h" data-key="problem-fix-${i}">Open Settings</button>` : p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
@@ -3284,7 +3284,7 @@ $('line-settings').addEventListener('change', async (e) => {
     const res = await bridge.lineBotSet({ on: e.target.checked }).catch(lineNoAnswer);
     Object.assign(lineBotUi, {
       linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', tickError: '', refreshError: '',
-      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot', stopped: Boolean(res.stop), secretLeft: Boolean(res.secretLeft),
+      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '',
     });
     renderLineSettings();
     setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3379,7 +3379,7 @@ $('opt-line').addEventListener('change', async (e) => {
   // Said under the switch, even while LINE chats stays off.
   lineSettingsUi.switchError = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
-  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', stopped: Boolean(res.stop), secretLeft: Boolean(res.secretLeft), ...(res.ok ? { error: '' } : {}) });
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '', ...(res.ok ? { error: '' } : {}) });
   Object.assign(lineBotUi, {
     linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', tickError: '', refreshError: '', pendingOn: null,
   });

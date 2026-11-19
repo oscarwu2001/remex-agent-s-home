@@ -209,8 +209,9 @@ function relayReply(body) {
     if (body.error === 'busy') throw fail('busy', `The relay was busy keeping new messages. ${AGAIN}`, 'relay busy');
     if (body.error === 'settings') throw fail('google', `The relay could not read its Script properties; see its Executions in Apps Script. ${AGAIN}`, 'relay settings');
     if (body.error === 'not counted') {
-      const what = body.step === 'removal' ? `remove its events older than ${WINDOW_DAYS} days from its Inbox tab` : `count its events older than ${WINDOW_DAYS} days`;
-      throw fail('google', `The relay could not ${what} just now, so it is holding back newer ones until it can (they are not lost); if it keeps happening, the relay’s Executions in Apps Script show why. ${AGAIN}`, `relay not counted ${body.step === 'removal' ? 'removal' : 'count'}`);
+      const step = ['read', 'removal'].includes(body.step) ? body.step : 'count';
+      const what = { read: `read its events older than ${WINDOW_DAYS} days from its Inbox tab`, removal: `remove its events older than ${WINDOW_DAYS} days from its Inbox tab`, count: `count its events older than ${WINDOW_DAYS} days` }[step];
+      throw fail('google', `The relay could not ${what} just now, so it is holding back newer ones until it can (they are not lost); if it keeps happening, the relay’s Executions in Apps Script show why. ${AGAIN}`, `relay not counted ${step}`);
     }
     if (body.error === 'cursor ahead') {
       if (typeof body.relay !== 'string' || !RELAY_ID.test(body.relay)) throw wrongShape('cursor ahead without relay');
@@ -378,6 +379,8 @@ function readStore(text) {
   const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter((n) => keepIf(obj(n) && NOTES.includes(n.what) && isCount(n.n) && Number.isFinite(n.at)));
   const np = obj(raw.nameProblem);
   const st = obj(raw.settings);
+  if (raw.ownRefused != null && !obj(raw.ownRefused)) damaged += 1;
+  if (raw.rebuilt != null && !REBUILT.includes(raw.rebuilt)) damaged += 1;
   let settings = null;
   if (raw.version === STORE_VERSION) {
     if (st && Array.isArray(st.read) && typeof st.link === 'string') {
@@ -397,7 +400,7 @@ function readStore(text) {
       settings,
       secretId: typeof raw.secretId === 'string' && raw.secretId ? raw.secretId : null,
       relayVersion: isCount(raw.relayVersion) ? raw.relayVersion : null,
-      ownRefused: Object.fromEntries(Object.entries(obj(raw.ownRefused) ?? {}).filter(([, n]) => isCount(n))),
+      ownRefused: Object.fromEntries(Object.entries(obj(raw.ownRefused) ?? {}).filter(([k, n]) => keepIf((RELAY_ID.test(k) || OWN_LINK.test(k)) && isCount(n)))),
       rebuilt: REBUILT.includes(raw.rebuilt) ? raw.rebuilt : null,
     },
     invalid: false,
@@ -414,6 +417,10 @@ const cursorFor = (store, deploymentId, secretId = null) => (store.relay && stor
 // whose own id it is takes it as the cursor, so what the app saved is
 // neither sent again nor counted as missed; any other ignores it.
 const claimFor = (store) => (store.relay ? { relay: store.relay, saved: store.cursor } : {});
+// Whose wrong-secret count the app's own refused call at this link raised:
+// the relay last seen there, or, before any answer from it, the link.
+const OWN_LINK = /^link:[\w-]+$/;
+const ownKey = (store, deploymentId) => (store.relay && store.link === deploymentId ? store.relay : `link:${deploymentId}`);
 
 // Unticking drops a group's kept messages and senders' names; its name,
 // last-seen time and count stay.
@@ -488,10 +495,11 @@ function takeReply(store, reply, { link, upTo = 0, secretId = null, now }) {
   // never heard from: its counts are where it starts.
   const base = next.baselines?.[reply.relay] ?? (next.counts?.relay === reply.relay ? next.counts : null);
   // The app's own calls refused since its last answer raised the wrong-secret count: not someone else's.
-  // Only the app's own calls at this link: another relay's count is its own, and kept for it.
-  const own = next.ownRefused?.[link] ?? 0;
+  // Only those that went to this relay (ownKey): another relay's count is its own, and kept for it.
+  const mine = [reply.relay, `link:${link}`];
+  const own = mine.reduce((n, k) => n + (next.ownRefused?.[k] ?? 0), 0);
   if (base) for (const k of COUNTERS) note(k, reply.counts[k] - (base[k] ?? 0) - (k === 'denied' ? own : 0));
-  if (own) next.ownRefused = Object.fromEntries(Object.entries(next.ownRefused).filter(([l]) => l !== link));
+  if (own) next.ownRefused = Object.fromEntries(Object.entries(next.ownRefused).filter(([k]) => !mine.includes(k)));
   next.relayVersion = reply.version ?? 0;
   next.counts = { relay: reply.relay, link, ...reply.counts };
   const known = Object.entries({ ...(next.baselines ?? {}), [reply.relay]: { ...reply.counts, at: now } }).sort((a, b) => b[1].at - a[1].at).slice(0, BASELINES);
@@ -631,7 +639,7 @@ const STUCK_WHY = {
   unreadable: 'the bot’s saved data can’t be read just now; close any app using the app’s data folder. The app reads it again within a minute',
   invalid: 'the bot’s saved data is not in a shape the app reads. To start afresh, turn Collect from my LINE bot off and on again; that deletes its saved messages, relay link and secret',
   unwritten: 'the bot’s saved data was read but could not be brought up to this version of the app; close any app using the app’s data folder. The app tries again within a minute',
-  unremoved: 'an earlier off is not finished: the bot’s saved data could not be removed; close any app using the app’s data folder. The app tries again within a minute',
+  unremoved: 'turning the bot off is not finished, because the bot’s saved data could not be removed; close any app using the app’s data folder. The app tries again within a minute',
 };
 function notCollecting({ on, stuck = false, link, secretSaved, storage }) {
   if (!on) return null;
@@ -729,12 +737,14 @@ function standInCount(store, ticked) {
 // settings: { on, link, read }; stuck: its store can't be read yet;
 // error: the last collection's failure, with `at`; storage: why no secret
 // can be kept here, or null; notCollecting: why it is on and not
-// collecting (notCollecting()), or null.
-function botView({ settings, store, stuck = false, secretSaved = false, storage = null, error = null, collectedAt = null, busy = false, nextAt = null, notCollecting: why = null }) {
+// collecting (notCollecting()), or null; unfinished: the user's off is not
+// finished (BotKeeper.unfinished), or null.
+function botView({ settings, store, stuck = false, secretSaved = false, storage = null, error = null, collectedAt = null, busy = false, nextAt = null, notCollecting: why = null, unfinished = null }) {
   const ticked = new Set(settings.read);
   return {
     on: settings.on,
     stuck,
+    unfinished,
     link: settings.link,
     secretSaved,
     secretStorage: storage,
@@ -781,16 +791,20 @@ const NAME_WORDS = (code, standIns) => {
 const writeWhy = (code) => (['EBUSY', 'EPERM', 'EACCES'].includes(code) ? 'another program has it open'
   : code === 'ENOSPC' ? 'the disk is full' : 'the system log has the reason');
 const CLOSE = 'close any app using the app’s data folder';
-// Where the app's data folder is, without the user's name, for what to delete by hand.
-const DATA_DIR = '%APPDATA%\\Agents Home';
+// Where the app's data folder is (Electron's userData), without the user's name, for what to delete by hand.
+function dataDir(platform = process.platform) {
+  return platform === 'win32' ? '%APPDATA%\\Agents Home' : platform === 'darwin' ? '~/Library/Application Support/Agents Home' : '~/.config/Agents Home';
+}
+const DATA_DIR = dataDir();
 // A trouble with the store's files, in words (BotKeeper's problems()); on:
 // whether the part is on, so the app tries again by itself.
 const STORE_WORDS = {
   unreadable: () => `the bot’s saved data can’t be read just now, so nothing is collected or changed; ${CLOSE}. The app reads it again within a minute`,
   invalid: () => `the bot’s saved data is not in a shape the app reads, so nothing is collected or changed, and its messages stay in its file until you turn ${SWITCH} off. To start afresh, turn it off and on again in ${SETTINGS}; that deletes its saved messages, relay link and secret`,
   unwritten: () => `the bot’s saved data was read but could not be brought up to this version of the app, so nothing is collected or changed; ${CLOSE}. The app tries again within a minute`,
-  unremoved: () => `turning the bot off is not finished: the bot’s saved data could not be removed; ${CLOSE}. The app tries again within a minute`,
+  unremoved: () => STUCK_WHY.unremoved,
   legacyLeft: () => `the bot’s settings file from before the update (line-bot.json) could not be removed; ${CLOSE} and delete it from ${DATA_DIR}`,
+  legacyUnread: () => `the bot’s settings file from before the update (line-bot.json) could not be read, so its ticks and relay link were not kept and ${SWITCH} is off; to use the bot, turn it on in ${SETTINGS} and paste the relay link and secret`,
   damaged: (sp) => `${sp.count} of the bot’s saved entries could not be read and were left out; the rest are kept`,
   unlisted: (sp, on) => (on ? `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; collecting goes on. The app tries again within a minute`
     : `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp files from ${DATA_DIR}`),
@@ -805,9 +819,8 @@ const STUCK = new Set(['unreadable', 'invalid', 'unwritten', 'unremoved']);
 const REBUILT = ['update', 'damaged', 'ticks'];
 function REBUILT_WORDS(store) {
   const why = { update: 'after the update, the bot’s ticks and relay link from before were not found', damaged: 'the bot’s ticks and relay link could not be read', ticks: 'the bot’s ticks did not match the messages it kept' }[store.rebuilt];
-  const how = store.rebuilt === 'ticks' ? 'so they were rebuilt from the groups it kept messages for' : store.settings?.link
-    ? 'so they were rebuilt from the groups it kept messages for and from the saved secret or the last collection'
-    : 'so the ticks were rebuilt from the groups it kept messages for; paste the relay link under Relay link';
+  if (store.rebuilt !== 'ticks' && !store.settings?.link) return `${why}, so the ticks were rebuilt from the groups it kept messages for; check the ticks and paste the relay link in ${SETTINGS}`;
+  const how = store.rebuilt === 'ticks' ? 'so they were rebuilt from the groups it kept messages for' : 'so they were rebuilt from the groups it kept messages for and from the saved secret or the last collection';
   return `${why}, ${how}; check them in ${SETTINGS}`;
 }
 const AGAIN_SCRIPT = `if it keeps happening, press Copy relay script in ${SETTINGS}, paste it over the relay’s script and deploy it as a new version`;
@@ -822,7 +835,7 @@ const NEW_DEPLOYMENT = `in the relay script, Deploy → New deployment; put its 
 function botProblems({ on, store, error = null, notCollecting: why = null, storeProblems = [], ticked = new Set(store?.settings?.read ?? []), now }) {
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
-  for (const sp of storeProblems) if (STORE_WORDS[sp.what]) add(STORE_WORDS[sp.what](sp, on), sp.detail ?? '', sp.what === 'invalid' ? 'line' : null);
+  for (const sp of storeProblems) if (STORE_WORDS[sp.what]) add(STORE_WORDS[sp.what](sp, on), sp.detail ?? '', ['invalid', 'legacyUnread'].includes(sp.what) ? 'line' : null);
   // Kept in the store until the user changes a tick or the link.
   if (store?.rebuilt) add(REBUILT_WORDS(store), '', 'line');
   if (!on) return out;
@@ -901,6 +914,13 @@ function pruned(store, now) {
 }
 // The groups a store kept text or senders for: they were ticked when it was written.
 const keptGroups = (store) => Object.keys(store.groups).filter((id) => store.groups[id].members || store.messages.some((m) => m.chat === id));
+// Ticks moved from 67909b5's settings for groups its store had not seen:
+// kept as groups with nothing kept yet, so they name a known group.
+function withTicked(store) {
+  const missing = store.settings.read.filter((id) => !Object.hasOwn(store.groups, id));
+  if (!missing.length) return store;
+  return { ...store, groups: { ...store.groups, ...Object.fromEntries(missing.map((id) => [id, { kind: 'group', name: null, namedMs: 0, lastMs: 0, count: 0 }])) } };
+}
 // The relay link rebuilt from a deployment id, or '' when it is not one.
 function linkOf(deploymentId) {
   if (!deploymentId) return '';
@@ -917,6 +937,11 @@ const notOff = (err, name) => (HELD.includes(err?.code)
   ? `Not turned off: the bot’s file ${name} could not be removed (another program has it open). Close any app using the app’s data folder and try again.`
   : `Not turned off: the bot’s file ${name} could not be removed; the system log has the reason. Try again.`);
 const PRUNE_SAY = 2; // failed prunes in a row before it is said
+// LINE chats turned on while the bot's off is not finished, by why (BotKeeper.unfinished).
+const ON_WAITS = {
+  held: `LINE chats can’t be turned on until the bot’s earlier off is finished: another program has its file open; ${CLOSE} and try again.`,
+  failed: 'LINE chats can’t be turned on until the bot’s earlier off is finished: its file could not be removed (the system log has the reason); try again in a minute.',
+};
 
 class BotKeeper {
   // file: the store; legacyFile: 67909b5's settings file (line-bot.json),
@@ -935,6 +960,7 @@ class BotKeeper {
     this.legacy = undefined; // the older settings file as read: null (none), or { on, read, link } or { unreadable }
     this.epoch = 0; // turned off or on: a collection from before merges nothing
     this.pruneFails = 0;
+    this.offWhy = null; // why the last off is not finished: 'held' or 'failed'
     this.found = []; // { what, detail, count } for botProblems
   }
 
@@ -946,6 +972,11 @@ class BotKeeper {
   }
   get stuck() {
     return STUCK.has(this.state);
+  }
+  // The user's off, not finished: 'held' (another program has the file
+  // open) or 'failed' (the system log has why); else null.
+  get unfinished() {
+    return this.state === 'unremoved' ? this.offWhy : null;
   }
   // The user's ticks and link; none while the store is not read.
   get settings() {
@@ -1105,6 +1136,7 @@ class BotKeeper {
     if (store && !store.settings) {
       const known = read.version !== STORE_VERSION && old && !old.unreadable;
       store = { ...store, settings: known ? { read: old.read, link: old.link } : { read: keptGroups(store), link: linkOf(store.link ?? secretFor) } };
+      if (known) store = withTicked(store);
       if (!known) rebuilt = read.version === STORE_VERSION ? 'damaged' : 'update';
     } else if (store && read.version === STORE_VERSION) {
       // Kept text means ticked: a tick that names no group goes, and a group
@@ -1114,7 +1146,7 @@ class BotKeeper {
         store = { ...store, settings: { ...store.settings, read: ticks } };
         rebuilt = 'ticks';
       }
-    } else if (!store && old?.on) store = { ...emptyStore(), settings: { read: old.read, link: old.link } };
+    } else if (!store && old?.on) store = withTicked({ ...emptyStore(), settings: { read: old.read, link: old.link } });
     else if (!store && old?.unreadable && secretFor) {
       // A secret is kept only while the part is on: it was on.
       store = { ...emptyStore(), settings: { read: [], link: linkOf(secretFor) } };
@@ -1122,6 +1154,8 @@ class BotKeeper {
     }
     if (rebuilt) store = { ...store, rebuilt };
     if (!store) {
+      // The older file was not settings and nothing else says the part was on: off, said.
+      if (old?.unreadable) this.note({ what: 'legacyUnread', detail: this.legacyFile });
       this.become('off');
       this.dropLegacy();
       this.tidy();
@@ -1149,23 +1183,35 @@ class BotKeeper {
     return { drop: false };
   }
   // An off the user made (read from a file at start, or LINE chats') that
-  // must finish: taken once the files are gone, else 'unremoved', tried
-  // again every half minute whatever the switches show. -> { drop }.
+  // must finish: taken once the files are gone, else 'unremoved'
+  // (unfinished says why), tried again every half minute whatever the
+  // switches show. -> { drop: true }, or { drop: false, code } (the file and
+  // its error code, for the system log).
   offAtLoad() {
     return this.retryOff();
   }
   retryOff() {
     const res = this.remove();
     if (res.ok) return { drop: true };
+    this.offWhy = HELD.some((c) => res.code.endsWith(` ${c}`)) ? 'held' : 'failed';
     this.become('unremoved', { what: 'unremoved', detail: `${this.dir} (${res.code})` });
-    return { drop: false };
+    return { drop: false, code: res.code };
   }
   // LINE chats turned off: its own settings are written first (write();
   // when it throws nothing else changes), then this part's off follows,
-  // finished later if it can't be now. -> { drop }.
+  // finished later if it can't be now. -> as retryOff().
   offWithLine(write) {
     write();
     return this.retryOff();
+  }
+  // LINE chats turned on: while an off is not finished it is tried once
+  // more, and LINE chats is refused if it still can't be, so its file keeps
+  // saying off and the next start finishes it. -> { ok, drop? (the off
+  // finished now: the caller removes the secret) } or { ok: false, error }.
+  lineOn() {
+    if (this.state !== 'unremoved') return { ok: true };
+    if (this.retryOff().drop) return { ok: true, drop: true };
+    return { ok: false, error: ON_WAITS[this.offWhy] ?? ON_WAITS.failed };
   }
 
   // Text past KEEP_MS removed, on disk first: a write that fails is tried
@@ -1200,6 +1246,7 @@ class BotKeeper {
   // On: a store with nothing in it yet. Already on (stuck too): nothing to do.
   turnOn() {
     if (this.on) return { ok: true };
+    this.forget('legacyUnread');
     const store = emptyStore();
     try {
       this.write(store);
@@ -1266,7 +1313,8 @@ class BotKeeper {
     // wrong secret, so that much of its next rise is not someone else's.
     if (res.error?.kind === 'secret' && current()) {
       const own = this.store.ownRefused ?? {};
-      this.apply({ ...this.store, ownRefused: { ...own, [link.deploymentId]: (own[link.deploymentId] ?? 0) + 1 } }); // not written: the next rise is said whole, an overcount at worst
+      const key = ownKey(this.store, link.deploymentId);
+      this.apply({ ...this.store, ownRefused: { ...own, [key]: (own[key] ?? 0) + 1 } }); // not written: the next rise is said whole, an overcount at worst
     }
     return { ...(res.error ? { error: res.error } : {}), ...(res.more ? { more: true } : {}) };
   }
@@ -1299,6 +1347,27 @@ class BotKeeper {
   }
 }
 
+// What an off that was taken left behind, from the keeper's problems() and
+// removeSecret()'s list (secretBase: the secret file's name): 'secret',
+// 'secretCopy' (a half-written copy of it), 'storeCopy' (one of the
+// store's), 'unlisted' (the folder could not be listed: copies may be left).
+function offLeft({ storeProblems = [], secretStuck = [], secretBase }) {
+  const has = (what) => storeProblems.some((p) => p.what === what);
+  return [
+    ...(secretStuck.some((s) => s.name === secretBase) ? ['secret'] : []),
+    ...(secretStuck.some((s) => s.name !== secretBase && s.name !== '.') ? ['secretCopy'] : []),
+    ...(has('leftover') ? ['storeCopy'] : []),
+    ...(has('unlisted') || secretStuck.some((s) => s.name === '.') ? ['unlisted'] : []),
+  ];
+}
+// The secret (or a copy of it) that would not go, for Needs attention:
+// what to delete and where, in the label, so privacy mode still shows it.
+function secretLeftWords(secretStuck, secretBase) {
+  if (secretStuck.some((s) => s.name === secretBase)) return `LINE chats: the bot’s secret could not be deleted; ${CLOSE} and delete ${secretBase} (and any ${secretBase}.*.tmp) from ${DATA_DIR}`;
+  if (secretStuck.some((s) => s.name !== '.')) return `LINE chats: a half-written copy of the bot’s secret could not be deleted; ${CLOSE} and delete ${secretBase}.*.tmp from ${DATA_DIR}`;
+  return `LINE chats: the app’s data folder could not be listed, so half-written copies of the bot’s secret may be left there; ${CLOSE} and delete any ${secretBase}.*.tmp from ${DATA_DIR}`;
+}
+
 // Removes the relay's saved secret and any half-written copy of it ->
 // [{ name, code }] of those that would not go ('.': the folder could not be listed).
 function removeSecret({ file, fsys = fs }) {
@@ -1328,5 +1397,5 @@ module.exports = {
   parseRelayLink, secretStorage, checkSecret, sealSecret, secretFor, openSecret, secretFileError, secretLocked,
   relayReply, readEvent, emptyStore, readStore, cursorFor, applyTicks, takeReply, collect, nextCollect, notCollecting,
   botChats, botGroups, botView, botProblems, inSettings, settingsWords, wall, BotKeeper, keptGroups, removeSecret,
-  secretIdOf, RELAY_VERSION, UNREAD,
+  secretIdOf, RELAY_VERSION, UNREAD, offLeft, secretLeftWords, dataDir,
 };

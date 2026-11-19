@@ -209,10 +209,26 @@ export function dropLineDrafts(state) {
   return Object.assign(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '', names: null, keywords: null, stopped: false });
 }
 
-// What an off deleted, said first once it is taken, under the switch that took it.
-const offWords = (state) => `<p class="hint" role="status">${state.secretLeft
-  ? 'Turned off: the app deleted the bot’s relay link and kept messages; its secret could not be deleted (see Needs attention).'
-  : 'Turned off: the app deleted the bot’s relay link, secret and kept messages.'}</p>`;
+// What an off deleted, said first once it is taken, under the switch that
+// took it; what would not go (state.left, linebot.offLeft) as an error.
+const LEFT = {
+  secret: 'its secret could not be deleted',
+  secretCopy: 'a half-written copy of its secret could not be deleted',
+  storeCopy: 'a half-written copy of its kept messages could not be deleted',
+  unlisted: 'the app’s data folder could not be listed, so half-written copies may be left there',
+};
+function offWords(state) {
+  const left = (state.left ?? []).filter((k) => LEFT[k]);
+  const deleted = ['relay link', left.includes('secret') || left.includes('secretCopy') ? '' : 'secret', left.includes('storeCopy') ? '' : 'kept messages'].filter(Boolean);
+  const list = deleted.length > 2 ? `${deleted.slice(0, -1).join(', ')} and ${deleted.at(-1)}` : deleted.join(' and ');
+  if (!left.length) return `<p class="hint" role="status">Turned off: the app deleted the bot’s ${list}.</p>`;
+  return `<p class="form-error" role="alert">Turned off: the app deleted the bot’s ${list}; ${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
+}
+// The user's off, not finished (BotKeeper.unfinished: 'held' or 'failed'):
+// nothing of the bot's was deleted yet. lineOff: said under LINE chats' switch.
+const notFinished = (why, lineOff) => `<p class="form-error" role="status">${lineOff ? 'LINE chats is off. ' : ''}Turning the bot off is not finished: its kept messages, relay link and secret are still on this computer because ${why === 'failed'
+  ? 'its file could not be removed (the system log has the reason). The app tries again within a minute'
+  : 'another program has its file open. Close any app using the app’s data folder; the app finishes within a minute of the file being freed'} (see Needs attention).</p>`;
 // Off stops the app collecting, not LINE sending to the relay.
 const STOP_WORDS = '<p class="hint" role="status">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history (it can hold past messages).</p>';
 
@@ -238,15 +254,19 @@ const readOn = (m) => (NAMES.test(m) ? m : `${m.charAt(0).toLowerCase()}${m.slic
 // secretEditing, secretError, secretNote, scriptNote, scriptError, note,
 // error (the switch's), tickError, refreshError }. Each error sits under
 // what caused it.
-const ERR = (text) => (text ? `<p class="form-error" role="alert">${esc(text)}</p>` : '');
+const ERR = (text) => (text ? `<p class="form-error" role="alert">${keepFileNames(esc(text))}</p>` : '');
 const STORAGE_NOTE = 'see the note under Collect from my LINE bot';
 
 function botSettingsHtml(b, { privacy, state, now, demo, online }) {
-  const on = Boolean(b?.on);
+  // An off not finished is off to the user: nothing to change until it is.
+  const unfinished = b?.unfinished;
+  const on = Boolean(b?.on) && !unfinished;
   const noStore = on && b.secretStorage ? String(b.secretStorage) : '';
   const head = `<h5 class="line-part-h" id="line-bot-h">Your LINE bot</h5>
     <p class="hint">For groups only: a LINE Official Account bot you invite to a group passes on what is said there, after it joins, through a relay of yours (a Google Sheet and a script). It cannot see one-to-one chats.</p>
-    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}${noStore && !b.stuck ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
+    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online || unfinished ? ' disabled' : ''}${noStore && !b.stuck ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
+  if (unfinished) return `${head}
+    ${notFinished(unfinished, false)}`;
   if (!on) {
     // Off stops the app collecting, not LINE sending to the relay: said
     // once the switch removed a relay link (state.stopped), until Settings closes.
@@ -316,6 +336,8 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
     <p class="hint">${standInWords(b)} See Needs attention.</p>`
     : groups.some((g) => !g.named) && !b.named && !b.nameProblem ? `
     <p class="hint">The relay sends no names (no LINE_TOKEN in its Script properties): groups and senders show as stand-ins, so your own promises there can’t be found and your own messages may show as mentions. Put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on.</p>`
+    : b.standIns && b.nameProblem ? `
+    <p class="hint">Some senders show as stand-ins; see Needs attention.</p>`
     : b.standIns ? `
     <p class="hint">Some senders show as stand-ins because LINE gave no name for them, so your own promises there can’t be found and your own messages may show as mentions.</p>` : ''}`;
   }
@@ -332,8 +354,13 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   if (!l?.demo && !online) return '<p class="hint">The desktop app reads the folder; this preview cannot.</p>';
   // Under the "Read my LINE chats" switch, on or off: why turning it on or off failed.
   const switchErr = ERR(state.switchError);
-  // Off, with a relay link set or just removed: how to stop LINE sending to it, as the bot's own switch says.
-  if (!l?.enabled) return `${switchErr}${state.stopped ? offWords(state) : ''}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
+  // Off, with a relay link set or just removed: how to stop LINE sending to
+  // it, as the bot's own switch says. The bot's off not finished is said
+  // from the snapshot, so it stays said after Settings is reopened.
+  if (!l?.enabled) {
+    const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : state.stopped && !state.unfinished ? offWords(state) : '';
+    return `${switchErr}${said}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
+  }
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
   const folder = l.folder
     ? `<p class="field-set"><span>${privacy ? 'A folder is chosen.' : `Folder: <span class="field-path">${esc(l.folder)}</span>`}</span>
@@ -376,6 +403,12 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
     ? `<p class="hint">Turn off ${PRIVACY_SWITCH} to choose chats${groups ? ' and groups' : ''} and to change your names and keywords. <button type="button" class="link-btn inline" data-line="privacy" data-key="line-settings-privacy">Privacy settings</button></p>` : '';
   const shared = reading ? `${wordsHead}${words}` : '';
   return `${switchErr}${sample}${hidden}${exportsPart}${botPart}${shared}${statusP}`;
+}
+
+// File names in words (line-bot-store.json.*.tmp) kept whole on one line,
+// not broken at their hyphens. html: already escaped.
+export function keepFileNames(html) {
+  return String(html).replace(/\b[a-z]+(?:-[a-z]+)+\.json(?:\.\*\.tmp)?/g, (name) => `<span class="file-name">${name}</span>`);
 }
 
 // The closed Connections group's words for LINE: on or off, and counts only.

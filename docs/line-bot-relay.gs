@@ -253,7 +253,7 @@ function toApp_(e, props) {
     removeTop_(sheet, 2, drop, rows.length);
     rows = rows.slice(drop);
     // Then rows past KEEP_DAYS, and the count of those the app never saved.
-    let failedStep = ''; // which step of ageOut_ failed: 'record' (to Gone) or 'removal' (from the Inbox)
+    let failedStep = ''; // which step of ageOut_ failed: 'read' (the Inbox), 'record' (to Gone) or 'removal' (from the Inbox)
     try {
       ageOut_(sheet);
     } catch (err) {
@@ -546,9 +546,15 @@ function fold_(props) {
 // Gone tab first (if that fails, the rows wait); the app's next call counts
 // those it never saved (countGone_). -> how many went.
 function ageOut_(sheet) {
-  const last = sheet.getLastRow();
-  if (last < 2) return 0;
-  const rows = sheet.getRange(2, 1, Math.min(BATCH, last - 1), 2).getValues();
+  let last;
+  let rows;
+  try {
+    last = sheet.getLastRow();
+    if (last < 2) return 0;
+    rows = sheet.getRange(2, 1, Math.min(BATCH, last - 1), 2).getValues();
+  } catch (err) {
+    throw Object.assign(err, { step: 'read' });
+  }
   const cutoff = Date.now() - KEEP_DAYS * 86400000;
   let drop = 0;
   while (drop < rows.length && new Date(rows[drop][1]).getTime() < cutoff) drop++;

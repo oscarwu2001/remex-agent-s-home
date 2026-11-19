@@ -742,3 +742,22 @@ test('a “not counted” that repeats because the Inbox removal keeps failing n
   assert.deepEqual(reply, { ok: false, error: 'not counted', step: 'removal' });
   assert.throws(() => B.relayReply(reply), (e) => /The relay could not remove its events older than 14 days from its Inbox tab just now, so it is holding back newer ones until it can \(they are not lost\)/.test(e.message));
 });
+
+// ---- review round 7 ------------------------------------------------------------------------
+
+test('a “not counted” because the Inbox could not be read for its old rows names that step', () => {
+  const env = appsScript();
+  env.line({ events: Array.from({ length: 600 }, (_, i) => text(`old${i}`)) });
+  ageRows(env, 15);
+  // Only ageOut_'s read of the Inbox fails, every time.
+  const failing = (sheet) => {
+    if (sheet.name !== 'Inbox' || !/ageOut_/.test(new Error().stack)) return false;
+    env.hooks.read = failing;
+    throw new Error('Service Spreadsheets failed');
+  };
+  env.hooks.read = failing;
+  env.line({ events: [text('new')] });
+  const reply = env.app(0);
+  assert.deepEqual(reply, { ok: false, error: 'not counted', step: 'read' });
+  assert.throws(() => B.relayReply(reply), (e) => /The relay could not read its events older than 14 days from its Inbox tab just now/.test(e.message) && e.code === 'relay not counted read');
+});
