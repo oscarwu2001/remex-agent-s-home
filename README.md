@@ -515,7 +515,7 @@ in the sheet's Inbox tab only until the app has collected it, then deletes
 it; anything not collected within 14 days is deleted anyway, at the next
 call from LINE or the app; those the app never saved are counted as
 *missed* at its next call. The app collects when
-it starts, every 5 minutes while the bot part is on, and on **Refresh
+it starts, every 5 minutes while **Collect from my LINE bot** is on, and on **Refresh
 now**. No tunnel or server runs on your computer.
 
 1. You need a LINE Official Account with its Messaging API turned on (in
@@ -541,7 +541,7 @@ now**. No tunnel or server runs on your computer.
    such protection it is refused, never kept as plain text.
 7. Invite the bot to your groups. It is a visible member there, and it sees
    only what is sent after it joins. Each group the relay brings in is
-   listed under the bot part with a tick, off at first: only ticked groups
+   listed under Your LINE bot with a tick, off at first: only ticked groups
    keep their messages (for 14 days, in the app's data folder), from when
    you tick them. A group not ticked keeps only its name, when it was last
    seen and a count.
@@ -559,12 +559,17 @@ can't be found and your own messages may show as mentions of you. Even
 with names on, LINE gives none for some senders; they show as stand-ins
 too. The board, Settings and **Needs attention** say which while it lasts. A message the sender
 unsends is removed. What the app sends to the relay is the secret and the
-number of the last event it has saved, nothing else; it never sends
-anything to LINE. Under **Needs attention** it says when the relay refused
-calls (a wrong key in LINE's webhook link, or someone else calling the
-relay), when calls had a wrong secret (someone other than this app), when
+number of the last event it has saved; after a new secret or relay link it
+sends 0 instead, with the relay's own id and how far it saved, which only
+that relay takes as the number, so nothing the app saved is counted as
+missed. It never sends anything to LINE. Under **Needs attention** it says
+when the relay refused calls (a wrong key in LINE's webhook link, or
+someone else calling the relay; if the key is right and the count keeps
+rising, make a new deployment as below), when calls had a wrong secret
+(someone other than this app; the app's own refused calls are left out),
+when events may have arrived while the relay could not read its key, when
 events were missed, lost by the relay (busy, or the sheet failed) or unreadable, when name lookups fail (a refused token means names
-are off), when the bot part is on but not collecting and why, when the
+are off), when **Collect from my LINE bot** is on but not collecting and why, when the
 relay is an older version (with how to update it), and when collecting
 fails, with what to do next; a count is "at least" when calls came too fast
 for the relay to keep them all. The relay's own **status**
@@ -577,8 +582,10 @@ stays the same. An older relay still works with the app, which says once
 that it can be updated. Version 3 keeps only the events the app reads,
 ignores names a caller makes up, removes old rows on LINE's calls too
 (their numbers wait in a **Gone** tab, so the app is told exactly which it
-never saved), counts events it could not keep (*lost*), and counts calls
-with a wrong key, none, or a wrong secret in a **Tally** tab with its keys
+never saved, and it sends nothing newer until they are counted), counts
+events it could not keep (*lost*) and events that came while it could not
+read its key, and counts calls with a wrong key, none, or a wrong secret
+in a **Tally** tab with its keys
 kept in the script's cache, so a flood of such calls cannot use up the
 script's daily quota for its properties. A key you edit
 by hand under Script properties takes up to 10 minutes to be used (run
@@ -589,17 +596,22 @@ deployment**), put its link in LINE's webhook (with `?k=`) and in **Relay
 link**, then archive the old deployment (**Deploy → Manage deployments →
 Archive**): an old deployment answers until it is archived.
 
-The bot's ticks and its relay link are kept with its saved messages, in the
-app's data folder; its settings file says only whether it is on (an older
-one's ticks and link move over by themselves). Turning the bot part off, or
-LINE chats off, deletes the saved secret, the kept messages, the ticks and
-the cursor; the relay link stays. A settings file the app cannot read
-deletes nothing: the bot part then collects nothing and **Needs attention**
-says so until you turn it on again, with its ticks and link as they were. Saved messages the app cannot read just now (another
-program has the file open) are left as they are and read again before
-anything is collected or written; a file that is not in a shape the app
-reads is kept aside for at most 14 days. Turning the bot part off does not
-stop LINE sending to your relay: in the LINE Developers console also turn
+Everything the bot keeps is in one file in the app's data folder: its
+ticks, its relay link, how far it has collected and the kept messages. The
+file being there is **Collect from my LINE bot** being on. A change you make
+(a tick, the link) is kept only once it is written; if it cannot be, the
+app says "Not saved" with why, changes nothing, and you try again.
+Turning **Collect from my LINE bot** off, or LINE chats off, deletes that
+file and the saved secret, the ticks and the relay link with them. An
+older version's settings file (`line-bot.json`) is read once, its ticks and
+link moved into the store, then removed; if it cannot be read, nothing is
+deleted: the ticks are rebuilt from the groups with kept messages and the
+link from the saved secret or the last collection, and **Needs attention**
+says so. While the bot's file cannot be read (another program has it
+open), or is not in a shape the app reads, nothing is collected, changed or
+deleted, and **Needs attention** says so: the app reads it again every half
+minute, and turning the switch off and on starts afresh. Turning
+**Collect from my LINE bot** off does not stop LINE sending to your relay: in the LINE Developers console also turn
 **Use webhook** off, or remove the bot from its groups. Google Sheets keeps
 a version history that can hold past messages: delete the relay's sheet,
 then empty Drive's trash, which clears it.
