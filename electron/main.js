@@ -1506,8 +1506,8 @@ app.whenReady().then(() => {
   if (botStart.later) botFinishedLater();
   else botDropped(botStart);
   // A secret, or a half-written copy of one, with the part off is what an
-  // earlier off left: it goes now, or is said.
-  if (!botKeeper.on) dropBotSecret();
+  // earlier off left: it goes now, or is said (an off taken just now swept it already).
+  if (!botKeeper.on && !botStart.drop) dropBotSecret();
   function scanLine() {
     if (!line.enabled) {
       [lineScan, lineFiles, lineChats, lineItems, lineScanError, lineScannedAt] = [null, new Map(), [], [], null, null];
@@ -1850,7 +1850,8 @@ app.whenReady().then(() => {
     const why = botWhyNot();
     if (why) return { ok: false, error: `Not collecting: ${lineBot.inSettings(why)}.`, collected: false };
     const res = await collectBot();
-    return res.error === BOT_STALE ? collectBot() : res;
+    // Stale: collected again only while LINE chats and the bot are still on (not after an off).
+    return res.error === BOT_STALE && botReady() ? collectBot() : res;
   });
   // The relay script, as shipped with the app (docs/line-bot-relay.gs, in the build).
   ipcMain.handle('home:line-bot-copy-script', () => {
