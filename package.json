@@ -33,6 +33,7 @@
       "renderer/**",
       "office-pack/**",
       "docs/field-feedback-reader.gs",
+      "docs/line-bot-relay.gs",
       "package.json"
     ],
     "win": {
