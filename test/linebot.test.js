@@ -780,6 +780,9 @@ test('the bot part on but not collecting says why and what to do, in Needs atten
     assert.ok(said.some((l) => /^LINE chats: your LINE bot is on but not collecting: /.test(l) && words.test(l)), said.join('\n'));
     const view = B.botView({ settings: { on: true, link: state.link, read: [] }, store: B.emptyStore(), secretSaved: state.secretSaved, storage: state.storage, notCollecting: reason });
     assert.match(view.notCollecting, words);
+    // In Settings it names the field, not the path to Settings.
+    assert.ok(!view.notCollectingHere.includes('Settings → Connections'), view.notCollectingHere);
+    assert.match(view.notCollectingHere, words);
   }
   assert.equal(B.notCollecting({ on: true, link: EXEC, secretSaved: true, storage: null }), null);
   assert.equal(B.notCollecting({ on: false, link: '', secretSaved: false, storage: null }), null);

@@ -106,6 +106,8 @@ const IN_SETTINGS = [
   [`Save the secret again in ${SETTINGS}`, (v) => secretWords(v, 'Save the secret again under Secret', 'Press Replace secret and save it again', `Save the secret again ${NO_STORE_YET}`)],
   [`Save this relay’s secret in ${SETTINGS}`, (v) => secretWords(v, 'Save this relay’s secret under Secret', 'Press Replace secret and save this relay’s secret', `Save this relay’s secret ${NO_STORE_YET}`)],
   [`Save it in ${SETTINGS}`, (v) => secretWords(v, 'Save it under Secret', 'Press Replace secret and save it', `Save it ${NO_STORE_YET}`)],
+  // Whatever else names the path names a control in view already ("under Relay link").
+  [` in ${SETTINGS}`, () => ''],
 ];
 function inSettings(message, { secretOpen = true, linkOpen = true, noStorage = false } = {}) {
   const shown = { secretOpen: secretOpen && !noStorage, linkOpen, noStorage };
@@ -697,6 +699,7 @@ function botView({ settings, store, secretSaved = false, storage = null, error =
     error: error ? { message: error.message, kind: error.kind, at: error.at ?? null } : null,
     errorHere: settingsWords(error?.message ?? null),
     notCollecting: why,
+    notCollectingHere: why ? inSettings(why) : null,
     // Whether the relay has sent any names (it does only with LINE_TOKEN).
     named: store.namedMs > 0,
     standIns: standInCount(store, ticked) > 0,
