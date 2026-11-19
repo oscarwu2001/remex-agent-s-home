@@ -647,3 +647,26 @@ test('the words name the switch the user sees, never “the bot part”', async 
   ];
   for (const html of states) assert.doesNotMatch(html, /bot part/i);
 });
+
+// ---- review round 5 ---------------------------------------------------------------------------
+
+test('a taken off says what it deleted, then how to stop LINE sending, as status; LINE chats off carries it; a refused off says only why', async () => {
+  const { lineSettingsHtml } = await view();
+  const off = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true } });
+  assert.match(off, /<p class="hint" role="status">Turned off: the app deleted its relay link, secret and the messages it kept\.<\/p><p class="hint" role="status">Stopped using the bot\?/);
+  const lineOff = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, bot: { stopped: true } });
+  assert.match(lineOff, /Turned off: the app deleted its relay link, secret and the messages it kept\.[\s\S]*turn off Use webhook/);
+  const error = 'Not turned off: the bot’s file could not be removed (another program has it open). Close any app using the app’s data folder and try again.';
+  const refused = lineSettingsHtml(line({ bot: botPart() }), { privacy: true, online: true, now: NOW, bot: { error } });
+  assert.match(refused, /id="opt-line-bot" checked[^>]*> <span>Collect from my LINE bot \(goes online, to my relay only\)<\/span><\/label><p class="form-error" role="alert">Not turned off: the bot’s file could not be removed/);
+  assert.doesNotMatch(refused, /Turned off:|Stopped using the bot/);
+});
+
+test('a stuck store: the switch names no storage note that is not drawn, and Settings names the kind', async () => {
+  const { lineSettingsHtml } = await view();
+  const why = 'the bot’s saved data is not in a shape the app reads. To start afresh, turn Collect from my LINE bot off and on again; that deletes its saved messages, relay link and secret';
+  const html = lineSettingsHtml(line({ bot: botPart({ stuck: true, link: '', secretStorage: 'no keyring', notCollecting: why, notCollectingHere: why }) }), { privacy: false, online: true, now: NOW });
+  assert.doesNotMatch(html, /aria-describedby="line-bot-storage"/);
+  assert.match(html, /Not collecting: the bot’s saved data is not in a shape the app reads\. To start afresh, turn Collect from my LINE bot off and on again; that deletes its saved messages, relay link and secret\./);
+  assert.doesNotMatch(html, /nothing is collected/);
+});

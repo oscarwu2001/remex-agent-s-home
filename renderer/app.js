@@ -3007,6 +3007,8 @@ function renderLineSettings() {
     names: lineSettingsUi.names != null ? [lineSettingsUi.names] : l.names,
     keywords: lineSettingsUi.keywords != null ? [lineSettingsUi.keywords] : l.keywords,
   } : l;
+  // A field in focus that the "can't be read" line replaces: focus goes to the switch.
+  if (l?.bot?.stuck && document.activeElement?.id?.startsWith('line-bot-')) lineBotUi.focusAfter = 'opt-line-bot';
   paint($('line-settings'), lineSettingsHtml(shown, { privacy: prefs.private, online, state: lineSettingsUi, bot: lineBotUi }));
   // After a Save, focus goes to what replaced the field, once it is drawn.
   if (lineBotUi.focusAfter && $(lineBotUi.focusAfter)) {
@@ -3015,11 +3017,16 @@ function renderLineSettings() {
   }
 }
 // A relay link typed but not saved goes (privacy mode turned on, or
-// Settings closed), drawn afresh with focus already off the fields.
-function forgetLineBotDrafts() {
+// Settings closed), drawn afresh with focus already off the fields. The
+// words on stopping LINE sending to the relay hold nothing private: they
+// stay until Settings closes.
+function forgetLineBotDrafts({ closing = false } = {}) {
+  const stopped = [lineBotUi.stopped, lineSettingsUi.stopped];
   dropLineBotDrafts(lineBotUi);
   dropLineDrafts(lineSettingsUi);
-  $('line-settings').dataset.sig = '';
+  if (!closing) [lineBotUi.stopped, lineSettingsUi.stopped] = stopped;
+  // No signature, so even an empty section is drawn again.
+  delete $('line-settings').dataset.sig;
   renderLineSettings();
 }
 // The bot part's buttons. Its outcome (collecting, then when, or why it
@@ -3610,7 +3617,7 @@ function setSettings(open) {
     $('settings-open').focus();
     // A link typed but not saved is not kept past Settings.
     forgetFieldDrafts();
-    forgetLineBotDrafts();
+    forgetLineBotDrafts({ closing: true });
   }
 }
 $('settings-open').addEventListener('click', () => setSettings($('settings').hidden));

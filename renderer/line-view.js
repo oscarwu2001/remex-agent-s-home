@@ -209,8 +209,10 @@ export function dropLineDrafts(state) {
   return Object.assign(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '', names: null, keywords: null, stopped: false });
 }
 
+// What an off deleted, said first once it is taken.
+const OFF_WORDS = '<p class="hint" role="status">Turned off: the app deleted its relay link, secret and the messages it kept.</p>';
 // Off stops the app collecting, not LINE sending to the relay.
-const STOP_WORDS = '<p class="hint">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history (it can hold past messages).</p>';
+const STOP_WORDS = '<p class="hint" role="status">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history (it can hold past messages).</p>';
 
 export function dropLineBotDrafts(state) {
   return Object.assign(state, {
@@ -242,12 +244,12 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   const noStore = on && b.secretStorage ? String(b.secretStorage) : '';
   const head = `<h5 class="line-part-h" id="line-bot-h">Your LINE bot</h5>
     <p class="hint">For groups only: a LINE Official Account bot you invite to a group passes on what is said there, after it joins, through a relay of yours (a Google Sheet and a script). It cannot see one-to-one chats.</p>
-    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}${noStore ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
+    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}${noStore && !b.stuck ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
   if (!on) {
     // Off stops the app collecting, not LINE sending to the relay: said
     // once the switch removed a relay link (state.stopped), until Settings closes.
     const stop = state.stopped ? `
-    ${STOP_WORDS}` : '';
+    ${OFF_WORDS}${STOP_WORDS}` : '';
     return `${head}${stop}`;
   }
   // Its saved data can't be read: nothing here can change until it can, but the switch can turn it off.
@@ -329,7 +331,9 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   // Under the "Read my LINE chats" switch, on or off: why turning it on or off failed.
   const switchErr = ERR(state.switchError);
   // Off, with a relay link set or just removed: how to stop LINE sending to it, as the bot's own switch says.
-  if (!l?.enabled) return `${switchErr}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
+  // The bot's own switch turned off just before is said here too.
+  const stopped = state.stopped || botState.stopped;
+  if (!l?.enabled) return `${switchErr}${stopped ? OFF_WORDS : ''}${l?.bot?.linkSet || stopped ? STOP_WORDS : ''}`;
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
   const folder = l.folder
     ? `<p class="field-set"><span>${privacy ? 'A folder is chosen.' : `Folder: <span class="field-path">${esc(l.folder)}</span>`}</span>
