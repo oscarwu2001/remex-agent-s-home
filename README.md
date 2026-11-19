@@ -605,9 +605,11 @@ file being there is **Collect from my LINE bot** being on. A change you make
 app says "Not saved" with why, changes nothing, and you try again.
 Turning **Collect from my LINE bot** off, or LINE chats off, deletes that
 file and the saved secret, the ticks and the relay link with them, and
-says so; if the file cannot be removed (another program has it open),
-nothing is turned off or deleted and the switch says why: close that
-program and try again. The settings file of the version before
+says so. If the file cannot be removed (another program has it open), the
+bot's own switch turns nothing off and says why: close that program and
+try again; LINE chats' switch still turns LINE chats off, and the bot's off
+is finished within a minute of the file being freed (**Needs attention**
+says it is not finished until then). The settings file of the version before
 (`line-bot.json`) is moved into the store, then removed; while it cannot be
 read just now the app waits for it, and if it is not settings, or the
 store's own ticks cannot be read, nothing is deleted: the ticks are rebuilt
