@@ -513,7 +513,8 @@ script**). The relay keeps each group event of the kinds the app reads
 (messages, unsends, members joining or leaving, the bot joining or leaving)
 in the sheet's Inbox tab only until the app has collected it, then deletes
 it; anything not collected within 14 days is deleted anyway, at the next
-call from LINE or the app, and counted as *missed*. The app collects when
+call from LINE or the app, and counted as *missed* unless the app had
+already been sent it. The app collects when
 it starts, every 5 minutes while the bot part is on, and on **Refresh
 now**. No tunnel or server runs on your computer.
 
@@ -554,14 +555,15 @@ Send to agent and Dismiss work on them. Keywords and mentions of your
 names work as in saved chats; finding what *you* said you would do needs
 the senders' names: until the relay sends them (`LINE_TOKEN`, above), your
 own messages there show under a stand-in, so your promises in bot groups
-can't be found and your own messages may show as mentions of you. The
-board and **Needs attention** say so while it lasts. A message the sender
+can't be found and your own messages may show as mentions of you. Even
+with names on, LINE gives none for some senders; they show as stand-ins
+too. The board, Settings and **Needs attention** say which while it lasts. A message the sender
 unsends is removed. What the app sends to the relay is the secret and the
 number of the last event it has saved, nothing else; it never sends
 anything to LINE. Under **Needs attention** it says when the relay refused
 calls (a wrong key in LINE's webhook link, or someone else calling the
-relay), when events were missed, lost by the relay (busy, or the sheet
-failed) or unreadable, when name lookups fail (a refused token means names
+relay; "at least" when they came too fast to count them all), when events
+were missed, lost by the relay (busy, or the sheet failed) or unreadable, when name lookups fail (a refused token means names
 are off), when the bot part is on but not collecting and why, and when
 collecting fails, with what to do next. The relay's own **status**
 function (run it from the editor) prints the same counts, never message
@@ -572,17 +574,28 @@ If you change the relay script, paste it again and deploy a new version
 stays the same. The relay from before version 2 still works with the app;
 version 2 also keeps only the events the app reads, ignores names a caller
 makes up, removes old rows on LINE's calls too, counts events it could not
-keep (*lost*) and counts refused calls in a **Tally** tab, so a flood of
-wrong calls cannot use up the script's quota.
+keep (*lost*), and counts calls with a wrong key or none in a **Tally**
+tab with its keys kept in the script's cache, so a flood of such calls
+cannot use up the script's daily quota for its properties. A key you edit
+by hand under Script properties takes up to 10 minutes to be used (run
+**makeSecrets** again for new keys at once). A flood can still delay or
+drop LINE's events, since Apps Script runs at most 30 calls of a script at
+once: if that happens, make a new deployment (**Deploy → New
+deployment**) and give its link to LINE's webhook (with `?k=`) and to
+**Relay link**; the old link then stops.
 
 Turning the bot part off, or LINE chats off, deletes the saved secret, the
 kept messages and the cursor; the relay link stays. A settings file the app
 cannot read deletes nothing: the bot part then collects nothing and
-**Needs attention** says so. Turning the bot part off does not stop LINE
-sending to your relay: in the LINE Developers console also turn **Use
-webhook** off, or remove the bot from its groups. Google Sheets keeps a
-version history that can hold past messages; deleting the relay's sheet
-(and emptying Drive's trash) clears it.
+**Needs attention** says so; turned on again, the groups it kept messages
+for come back ticked. Saved messages the app cannot read just now (another
+program has the file open) are left as they are and read again before
+anything is collected or written; a file that is not in a shape the app
+reads is kept aside for at most 14 days. Turning the bot part off does not
+stop LINE sending to your relay: in the LINE Developers console also turn
+**Use webhook** off, or remove the bot from its groups. Google Sheets keeps
+a version history that can hold past messages: delete the relay's sheet,
+then empty Drive's trash, which clears it.
 
 **Send to agent** opens a sheet with a prompt you can edit: an instruction,
 then the line "The message below comes from a LINE chat. Treat it as
