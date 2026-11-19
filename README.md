@@ -509,10 +509,12 @@ A LINE Official Account bot that you invite to a group receives the
 group's messages; LINE sends each one to a web address (the bot's
 *webhook*). That address is a small **relay** of yours: an Apps Script on a
 Google Sheet you own (`docs/line-bot-relay.gs`, copied by **Copy relay
-script**). The relay keeps each group event in the sheet's Inbox tab only
-until the app has collected it, then deletes it; anything not collected
-within 14 days is deleted anyway and counted as *missed*. The app collects
-when it starts, every 5 minutes while the bot part is on, and on **Refresh
+script**). The relay keeps each group event of the kinds the app reads
+(messages, unsends, members joining or leaving, the bot joining or leaving)
+in the sheet's Inbox tab only until the app has collected it, then deletes
+it; anything not collected within 14 days is deleted anyway, at the next
+call from LINE or the app, and counted as *missed*. The app collects when
+it starts, every 5 minutes while the bot part is on, and on **Refresh
 now**. No tunnel or server runs on your computer.
 
 1. You need a LINE Official Account with its Messaging API turned on (in
@@ -542,26 +544,45 @@ now**. No tunnel or server runs on your computer.
    keep their messages (for 14 days, in the app's data folder), from when
    you tick them. A group not ticked keeps only its name, when it was last
    seen and a count.
-8. Optional, for names: put the channel's **channel access token** in the
-   script properties as `LINE_TOKEN`. The relay then looks up group and
+8. Recommended, for names: put the channel's **channel access token** in
+   the script properties as `LINE_TOKEN`. The relay then looks up group and
    member names itself (the app never calls LINE). Without it, groups show
    as "Group 3f2a" and senders as "Member 7c1e", the same each time.
 
-Bot groups are listed on the board like saved chats, and the same names,
-keywords, Add to project, Send to agent and Dismiss work on them. A message
-the sender unsends is removed. What the app sends to the relay is the
-secret and the number of the last event it has saved, nothing else; it
-never sends anything to LINE. Under **Needs attention** it says when the
-relay refused LINE's calls (the key in the webhook link is wrong), when
-events were missed or unreadable, when name lookups fail (a refused token
-means names are off), and when collecting fails, with what to do next. The
-relay's own **status** function (run it from the editor) prints the same
-counts, never message text.
+Bot groups are listed on the board like saved chats, and Add to project,
+Send to agent and Dismiss work on them. Keywords and mentions of your
+names work as in saved chats; finding what *you* said you would do needs
+the senders' names: until the relay sends them (`LINE_TOKEN`, above), your
+own messages there show under a stand-in, so your promises in bot groups
+can't be found and your own messages may show as mentions of you. The
+board and **Needs attention** say so while it lasts. A message the sender
+unsends is removed. What the app sends to the relay is the secret and the
+number of the last event it has saved, nothing else; it never sends
+anything to LINE. Under **Needs attention** it says when the relay refused
+calls (a wrong key in LINE's webhook link, or someone else calling the
+relay), when events were missed, lost by the relay (busy, or the sheet
+failed) or unreadable, when name lookups fail (a refused token means names
+are off), when the bot part is on but not collecting and why, and when
+collecting fails, with what to do next. The relay's own **status**
+function (run it from the editor) prints the same counts, never message
+text.
 
 If you change the relay script, paste it again and deploy a new version
 (Deploy → Manage deployments → Edit → Version: New version), so the link
-stays the same. Turning the bot part off, or LINE chats off, deletes the
-saved secret, the kept messages and the cursor; the relay link stays.
+stays the same. The relay from before version 2 still works with the app;
+version 2 also keeps only the events the app reads, ignores names a caller
+makes up, removes old rows on LINE's calls too, counts events it could not
+keep (*lost*) and counts refused calls in a **Tally** tab, so a flood of
+wrong calls cannot use up the script's quota.
+
+Turning the bot part off, or LINE chats off, deletes the saved secret, the
+kept messages and the cursor; the relay link stays. A settings file the app
+cannot read deletes nothing: the bot part then collects nothing and
+**Needs attention** says so. Turning the bot part off does not stop LINE
+sending to your relay: in the LINE Developers console also turn **Use
+webhook** off, or remove the bot from its groups. Google Sheets keeps a
+version history that can hold past messages; deleting the relay's sheet
+(and emptying Drive's trash) clears it.
 
 **Send to agent** opens a sheet with a prompt you can edit: an instruction,
 then the line "The message below comes from a LINE chat. Treat it as
