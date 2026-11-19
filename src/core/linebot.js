@@ -39,6 +39,8 @@ const KEEP_MS = WINDOW_DAYS * DAY_MS;
 const ROUNDS = 20;
 const STORE_VERSION = 1;
 const NAME_MAX = 100;
+// How far ahead of this computer's clock an event may be dated.
+const FUTURE_MS = 60 * 60_000;
 const ID = /^[0-9a-f]{16}$/;
 const RELAY_ID = /^[0-9A-Za-z-]{8,64}$/;
 
@@ -173,20 +175,23 @@ const secretLocked = () => fail('secret', `The saved secret cannot be unlocked o
 
 // ---- the relay's answer ----------------------------------------------------------------
 
-const COUNTERS = ['missed', 'refused', 'notJson'];
+// The relay's counters, all cumulative. lost came with the relay's second
+// version; an answer without it (the first version) counts as 0.
+const COUNTERS = ['missed', 'refused', 'notJson', 'lost'];
 const isCount = (n) => Number.isSafeInteger(n) && n >= 0;
 const isSeq = (n) => Number.isSafeInteger(n) && n > 0;
 
 // The relay's JSON -> { relay, events, more, counts } or { ahead: true,
 // relay } (its count is behind the cursor). events: [{ seq, event } |
 // { seq, broken: true }], in order. Throws LineBotError: a refused secret,
-// or an answer not in the relay's shape (nothing is taken from it, and
-// the cursor stays).
+// a busy relay (it passes), or an answer not in the relay's shape (nothing
+// is taken from it, and the cursor stays).
 function relayReply(body) {
   if (body.ok === false) {
     if (body.error === 'not allowed') {
       throw fail('secret', `The relay refused the secret: it does not match the relay’s. ${SECRET_HELP}, then save it in ${SETTINGS}.`, 'not allowed');
     }
+    if (body.error === 'busy') throw fail('busy', `The relay was busy keeping new messages. ${AGAIN}`, 'relay busy');
     if (body.error === 'cursor ahead') {
       if (typeof body.relay !== 'string' || !RELAY_ID.test(body.relay)) throw wrongShape('cursor ahead without relay');
       return { ahead: true, relay: body.relay };
@@ -198,7 +203,7 @@ function relayReply(body) {
   if (typeof body.relay !== 'string' || !RELAY_ID.test(body.relay)) throw wrongShape('no relay');
   if (!Array.isArray(body.events)) throw wrongShape('no events');
   if (typeof body.more !== 'boolean') throw wrongShape('no more');
-  if (!COUNTERS.every((k) => isCount(body[k]))) throw wrongShape('no counts');
+  if (!COUNTERS.every((k) => isCount(body[k]) || (k === 'lost' && body[k] === undefined))) throw wrongShape('no counts');
   const events = [];
   let last = 0;
   for (const e of body.events) {
@@ -208,7 +213,7 @@ function relayReply(body) {
     if (e.broken === true || !e.event || typeof e.event !== 'object' || Array.isArray(e.event)) events.push({ seq: e.seq, broken: true });
     else events.push({ seq: e.seq, event: e.event });
   }
-  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k]])) };
+  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k] ?? 0])) };
 }
 
 // ---- events -> messages --------------------------------------------------------------
@@ -222,14 +227,19 @@ function wall(ms) {
 }
 const nameOf = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, NAME_MAX) : null);
 // LINE's message types -> the exports' kinds; a type with none of its own
-// keeps its own name (audio, location) or 'other', and no text.
+// keeps its own name (audio, location) or 'other', and no text. Looked up
+// as the table's own names only ("constructor" is a type like any other).
 const KINDS = { text: 'text', image: 'photo', video: 'video', file: 'file', sticker: 'sticker', audio: 'audio', location: 'location' };
+const kindOf = (type) => (typeof type === 'string' && Object.hasOwn(KINDS, type) ? KINDS[type] : 'other');
 const PROBLEM = /^[A-Za-z0-9 ]{1,40}$/;
+// An unsend is about one message in one group: its mark names both.
+const unsentKey = (groupId, messageHash) => hash('unsent', groupId, messageHash);
 
 // One relay event -> { group: { id, kind, name }, ms, names: { who: name },
 // nameProblem, records, unsend } or { unusable: why }. A record: { hash,
 // ms, kind, text, who } (who: the sender's hash, '' when LINE gave none),
-// with actorWho or actorBot for who joined or left.
+// with actorWho or actorBot for who joined or left. unsend: the unsent
+// message's hash.
 function readEvent(ev) {
   const src = ev.source;
   const raw = src?.type === 'group' ? src.groupId : src?.type === 'room' ? src.roomId : null;
@@ -247,7 +257,7 @@ function readEvent(ev) {
   if (ev.type === 'message') {
     const m = ev.message;
     if (!m || typeof m.id !== 'string' || !m.id) return { unusable: 'no message id' };
-    const kind = KINDS[m.type] ?? 'other';
+    const kind = kindOf(m.type);
     if (kind === 'text' && (typeof m.text !== 'string' || !m.text.trim())) return { unusable: 'no text' };
     return { ...base, records: [{ hash: hash('message', m.id), ms, kind, text: kind === 'text' ? m.text : '', who }] };
   }
@@ -278,44 +288,59 @@ function readEvent(ev) {
 // ---- the store ------------------------------------------------------------------------
 //
 // { version, link: the relay deployment the cursor belongs to, relay: its
-// id, cursor: the last event saved, counts: the relay's counters as last
-// seen, groups: { id: { kind, name, namedMs, lastMs, count, members? } },
-// messages: [{ chat: id, hash, ms, kind, text, who, actorWho?, actorBot? }]
-// (ticked groups only), seen: { hash: ms } (every event taken in, so one
-// delivered again is taken once), unsent: { hash: ms }, notes: [{ what, n,
-// at }] (what went wrong, for Needs attention), nameProblem: { code, ms },
-// namedMs }. count: the messages and events delivered for the group.
+// id (null until the relay answers, after a secret is saved), cursor: the
+// last event saved, counts: { relay, link, missed, refused, notJson, lost }
+// the relay's counters as last seen (kept through a new secret or link: only
+// another relay id starts them afresh), groups: { id: { kind, name,
+// namedMs, lastMs, count, members? } }, messages: [{ chat: id, hash, ms,
+// kind, text, who, actorWho?, actorBot? }] (ticked groups only), seen:
+// { hash: ms } (every event taken in, so one delivered again is taken
+// once), unsent: { unsentKey: ms }, notes: [{ what, n, at }] (what went
+// wrong, for Needs attention), nameProblem: { code, ms }, namedMs }.
+// count: the messages and events delivered for the group.
 
 function emptyStore() {
   return {
     version: STORE_VERSION, link: null, relay: null, cursor: 0, counts: null, groups: {}, messages: [], seen: {}, unsent: {}, notes: [], nameProblem: null, namedMs: 0,
   };
 }
+const NOTES = ['missed', 'refused', 'notJson', 'lost', 'broken', 'unusable', 'future', 'ahead', 'restarted'];
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
-const stamps = (v) => Object.fromEntries(Object.entries(obj(v) ?? {}).filter(([k, ms]) => ID.test(k) && Number.isFinite(ms)));
-// A store read from its file -> { store, invalid }: one the app cannot read
-// starts afresh (cursor 0: nothing on the relay is lost, and what comes
-// again is kept once), and Needs attention says so.
+const STRINGS = ['kind', 'text', 'who'];
+// A store read from its file -> { store, invalid, damaged }. One the app
+// cannot read at all is invalid (the caller keeps the file aside and says
+// so); entries it cannot read in a store it can are left out and counted
+// (damaged), never dropped unsaid.
 function readStore(text) {
   let raw;
   try {
     raw = JSON.parse(text);
   } catch {
-    return { store: emptyStore(), invalid: true };
+    return { store: emptyStore(), invalid: true, damaged: 0 };
   }
-  if (!obj(raw) || raw.version !== STORE_VERSION || !isCount(raw.cursor)) return { store: emptyStore(), invalid: true };
+  if (!obj(raw) || raw.version !== STORE_VERSION || !isCount(raw.cursor)) return { store: emptyStore(), invalid: true, damaged: 0 };
+  let damaged = 0;
+  const keepIf = (ok) => {
+    if (!ok) damaged += 1;
+    return ok;
+  };
   const groups = {};
   for (const [id, g] of Object.entries(obj(raw.groups) ?? {})) {
-    if (!ID.test(id) || !obj(g) || (g.kind !== 'group' && g.kind !== 'room')) continue;
-    const members = obj(g.members) ? Object.fromEntries(Object.entries(g.members).filter(([w, n]) => ID.test(w) && nameOf(n))) : null;
+    if (!keepIf(ID.test(id) && obj(g) && (g.kind === 'group' || g.kind === 'room'))) continue;
+    const members = {};
+    for (const [w, n] of Object.entries(obj(g.members) ?? {})) if (keepIf(ID.test(w) && nameOf(n))) members[w] = nameOf(n);
     groups[id] = {
-      kind: g.kind, name: nameOf(g.name), namedMs: Number(g.namedMs) || 0, lastMs: Number(g.lastMs) || 0, count: isCount(g.count) ? g.count : 0, ...(members ? { members } : {}),
+      kind: g.kind, name: nameOf(g.name), namedMs: Number(g.namedMs) || 0, lastMs: Number(g.lastMs) || 0, count: isCount(g.count) ? g.count : 0, ...(obj(g.members) ? { members } : {}),
     };
   }
-  const messages = (Array.isArray(raw.messages) ? raw.messages : []).filter((m) => obj(m) && groups[m.chat] && ID.test(m.hash) && Number.isFinite(m.ms)
-    && typeof m.kind === 'string' && typeof m.text === 'string' && typeof m.who === 'string');
-  const counts = obj(raw.counts) && COUNTERS.every((k) => isCount(raw.counts[k])) ? Object.fromEntries(COUNTERS.map((k) => [k, raw.counts[k]])) : null;
-  const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter((n) => obj(n) && NOTES.includes(n.what) && isCount(n.n) && Number.isFinite(n.at));
+  const messages = (Array.isArray(raw.messages) ? raw.messages : []).filter((m) => keepIf(obj(m) && Object.hasOwn(groups, m.chat) && ID.test(m.hash) && Number.isFinite(m.ms)
+    && STRINGS.every((k) => typeof m[k] === 'string')));
+  const stamps = (v) => Object.fromEntries(Object.entries(obj(v) ?? {}).filter(([k, ms]) => keepIf(ID.test(k) && Number.isFinite(ms))));
+  const c = obj(raw.counts);
+  const counts = c && typeof c.relay === 'string' && RELAY_ID.test(c.relay) && COUNTERS.every((k) => isCount(c[k]))
+    ? { relay: c.relay, link: typeof c.link === 'string' ? c.link : null, ...Object.fromEntries(COUNTERS.map((k) => [k, c[k]])) } : null;
+  if (raw.counts != null && !counts) damaged += 1;
+  const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter((n) => keepIf(obj(n) && NOTES.includes(n.what) && isCount(n.n) && Number.isFinite(n.at)));
   const np = obj(raw.nameProblem);
   return {
     store: {
@@ -327,12 +352,16 @@ function readStore(text) {
       namedMs: Number(raw.namedMs) || 0,
     },
     invalid: false,
+    damaged,
   };
 }
 
 // The cursor to send: the saved one only for the relay link it was saved
 // for and a relay the app has heard from; else 0, which removes nothing.
 const cursorFor = (store, deploymentId) => (store.link === deploymentId && store.relay ? store.cursor : 0);
+// A new secret may belong to a relay set up afresh at the same link: until
+// it answers, the cursor is not sent. Its counts stay (counts.relay).
+const forgetRelay = (store) => ({ ...store, relay: null });
 
 // Unticking drops a group's kept messages and senders' names; its name,
 // last-seen time and count stay.
@@ -351,7 +380,6 @@ function applyTicks(store, ticked) {
   return changed ? { ...store, groups, messages } : store;
 }
 
-const NOTES = ['missed', 'refused', 'notJson', 'broken', 'unusable', 'ahead', 'restarted'];
 function prune(store, now) {
   const cut = now - KEEP_MS;
   const keep = (map) => Object.fromEntries(Object.entries(map).filter(([, ms]) => ms >= cut - DAY_MS));
@@ -382,26 +410,28 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
     next.notes.push({ what, n, at: now });
     noted = true;
   };
-  if (next.link !== link) Object.assign(next, { link, relay: null, cursor: 0, counts: null });
+  // Another link: the cursor was another relay's to send.
+  if (next.link !== link) Object.assign(next, { link, relay: null, cursor: 0 });
   if (reply.ahead) {
     // The relay holds fewer events than the cursor says (it was reset or
     // replaced): start at 0. Asking with 0 removes nothing on the relay,
     // and what comes again is taken once (seen).
     note('ahead');
-    Object.assign(next, { relay: reply.relay, cursor: 0, counts: next.relay === reply.relay ? next.counts : null });
+    Object.assign(next, { relay: reply.relay, cursor: 0 });
     return { store: prune(next, now), changed: true, again: true };
   }
-  if (next.relay !== reply.relay) {
-    // Another relay answers at this link: its events are numbered afresh,
-    // and the cursor sent may have removed some of them before they came.
-    if (next.relay) note('restarted');
-    Object.assign(next, { relay: reply.relay, counts: null });
-  }
-  // The relay's counters only grow; a rise is what happened since the last answer.
-  if (next.counts) for (const k of COUNTERS) note(k, reply.counts[k] - next.counts[k]);
-  next.counts = reply.counts;
+  // Another relay at the link it last answered at: its events are numbered
+  // afresh, and the cursor sent may have removed some of them before they came.
+  if (next.counts && next.counts.relay !== reply.relay && next.counts.link === link) note('restarted');
+  next.relay = reply.relay;
+  // The relay's counters only grow: a rise since its last answer is what
+  // happened in between, said whatever the app did meanwhile. Another
+  // relay's counts are where it starts.
+  if (next.counts?.relay === reply.relay) for (const k of COUNTERS) note(k, reply.counts[k] - next.counts[k]);
+  next.counts = { relay: reply.relay, link, ...reply.counts };
   let broken = 0;
   let unusable = 0;
+  let future = 0;
   let last = upTo;
   for (const e of reply.events) {
     last = Math.max(last, e.seq);
@@ -412,6 +442,12 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
     const r = readEvent(e.event);
     if (r.unusable) {
       unusable += 1;
+      continue;
+    }
+    // LINE dates its events itself: one from the future is not LINE's, or
+    // this computer's clock is behind. Left out, so it cannot sit on top.
+    if (r.ms > now + FUTURE_MS) {
+      future += 1;
       continue;
     }
     const keep = ticked.has(r.group.id);
@@ -427,12 +463,14 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
       if (next.nameProblem && r.ms > next.nameProblem.ms) next.nameProblem = null;
     }
     if (r.unsend) {
-      next.unsent[r.unsend] = next.unsent[r.unsend] ?? r.ms;
-      next.messages = next.messages.filter((m) => m.hash !== r.unsend);
+      const key = unsentKey(r.group.id, r.unsend);
+      next.unsent[key] = next.unsent[key] ?? r.ms;
+      next.messages = next.messages.filter((m) => !(m.chat === r.group.id && m.hash === r.unsend));
       continue;
     }
     for (const rec of r.records) {
-      if (next.seen[rec.hash] != null || next.unsent[rec.hash] != null) continue; // delivered before, or already unsent
+      // Delivered before, or unsent before it came.
+      if (next.seen[rec.hash] != null || next.unsent[unsentKey(r.group.id, rec.hash)] != null) continue;
       next.seen[rec.hash] = rec.ms;
       g.count += 1;
       if (keep) next.messages.push({ chat: r.group.id, ...rec });
@@ -440,6 +478,7 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
   }
   note('broken', broken);
   note('unusable', unusable);
+  note('future', future);
   next.cursor = last;
   next.messages.sort((a, b) => a.ms - b.ms);
   const pruned = prune(applyTicks(next, ticked), now);
@@ -508,6 +547,16 @@ function nextCollect({ ready, lastTryAt = null, error = null, more = false }) {
   return lastTryAt + (error && !TRANSIENT.has(error.kind) ? WAIT_MS : COLLECT_MS);
 }
 
+// Why the bot part, switched on, cannot collect: words with the next step,
+// or null when it can.
+function notCollecting({ on, link, secretSaved, storage }) {
+  if (!on) return null;
+  if (storage) return 'this computer can’t keep the relay’s secret; set up a keyring (on Linux, GNOME Keyring or KWallet), then restart Agent’s Home';
+  if (!link) return `no relay link is saved; paste the relay’s Web app link under Relay link in ${SETTINGS}`;
+  if (!secretSaved) return `no secret is saved; paste READER_SECRET under Secret in ${SETTINGS}`;
+  return null;
+}
+
 // ---- settings ------------------------------------------------------------------------
 //
 // { on, link: the relay link rebuilt, read: ticked group ids }, in its own
@@ -549,7 +598,7 @@ function changeSettings(current, change = {}) {
   }
   if ('tick' in change) {
     const id = change.tick?.id;
-    if (typeof id !== 'string' || !ID.test(id)) return { error: 'That group is not known.' };
+    if (typeof id !== 'string' || !ID.test(id)) return { error: 'That group is no longer listed; close and reopen Settings.' };
     next.read = next.read.filter((x) => x !== id);
     if (change.tick.on === true) next.read.push(id);
   }
@@ -558,22 +607,52 @@ function changeSettings(current, change = {}) {
 
 // ---- what the board and Needs attention see ----------------------------------------------
 
-const standIn = (id, g) => `${g.kind === 'room' ? 'Chat' : 'Group'} ${id.slice(0, 4)}`;
-const shownName = (id, g) => g.name ?? standIn(id, g);
-const memberName = (g, who) => g.members?.[who] ?? (who ? `Member ${who.slice(0, 4)}` : 'A member');
+// Stand-ins: the start of each one's hash, four characters or as many more
+// as it takes to tell it from the others shown with it.
+function shortIds(ids) {
+  const out = new Map();
+  for (const id of ids) {
+    let n = 4;
+    while (n < id.length && ids.some((o) => o !== id && o.slice(0, n) === id.slice(0, n))) n += 1;
+    out.set(id, id.slice(0, n));
+  }
+  return out;
+}
+function groupNames(store) {
+  const ids = Object.keys(store.groups);
+  const short = shortIds(ids.filter((id) => !store.groups[id].name));
+  return new Map(ids.map((id) => {
+    const g = store.groups[id];
+    return [id, g.name ?? `${g.kind === 'room' ? 'Chat' : 'Group'} ${short.get(id)}`];
+  }));
+}
+function memberNames(store, id) {
+  const g = store.groups[id];
+  const whos = new Set(Object.keys(g.members ?? {}));
+  for (const m of store.messages) {
+    if (m.chat !== id) continue;
+    if (m.who) whos.add(m.who);
+    if (m.actorWho) whos.add(m.actorWho);
+  }
+  const unnamed = [...whos].filter((w) => !g.members?.[w]);
+  const short = shortIds(unnamed);
+  return (who) => (!who ? 'A member' : g.members?.[who] ?? `Member ${short.get(who) ?? who.slice(0, 4)}`);
+}
 
 // The ticked groups as chats for the pipeline, in mergeChats' shape: each
 // message as the exports give it, with chatKey (the group, not its name)
 // naming its items so a rename keeps their marks.
 function botChats(store, ticked) {
+  const names = groupNames(store);
   const out = [];
-  for (const [id, g] of Object.entries(store.groups)) {
+  for (const id of Object.keys(store.groups)) {
     if (!ticked.has(id)) continue;
-    const chat = shownName(id, g);
+    const chat = names.get(id);
     const chatKey = `bot:${id}`;
+    const member = memberNames(store, id);
     const messages = store.messages.filter((m) => m.chat === id).map((m) => {
-      const msg = { chat, chatKey, at: wall(m.ms), ms: m.ms, sender: m.who ? memberName(g, m.who) : '', kind: m.kind, text: m.text, hash: m.hash };
-      if (m.kind !== 'text') msg.actor = m.actorBot ? 'Your bot' : m.actorWho ? memberName(g, m.actorWho) : msg.sender || 'A member';
+      const msg = { chat, chatKey, at: wall(m.ms), ms: m.ms, sender: m.who ? member(m.who) : '', kind: m.kind, text: m.text, hash: m.hash };
+      if (m.kind !== 'text') msg.actor = m.actorBot ? 'Your bot' : m.actorWho ? member(m.actorWho) : msg.sender || 'A member';
       return msg;
     });
     out.push({ chat, chatKey, id, bot: true, messages, unread: 0, olderOnly: 0, newestMs: messages.length ? messages[messages.length - 1].ms : null });
@@ -584,17 +663,25 @@ function botChats(store, ticked) {
 // The groups for Settings: id, shown name (a stand-in when the relay sends
 // none), whether it is ticked, and counts and times only.
 function botGroups(store, ticked) {
+  const names = groupNames(store);
   return Object.entries(store.groups).map(([id, g]) => ({
-    id, name: shownName(id, g), named: Boolean(g.name), kind: g.kind, read: ticked.has(id), lastMs: g.lastMs, count: g.count,
+    id, name: names.get(id), named: Boolean(g.name), kind: g.kind, read: ticked.has(id), lastMs: g.lastMs, count: g.count,
     ...(ticked.has(id) ? { messages: store.messages.filter((m) => m.chat === id).length } : {}),
   })).sort((a, b) => b.lastMs - a.lastMs || a.name.localeCompare(b.name));
+}
+
+// Kept text messages, in ticked groups, whose sender shows as a stand-in:
+// while there are any, the user's own words cannot be told from others'.
+function standInCount(store, ticked) {
+  return store.messages.filter((m) => ticked.has(m.chat) && m.kind === 'text' && !store.groups[m.chat]?.members?.[m.who]).length;
 }
 
 // The bot part as the snapshot carries it to the window: never the secret
 // (only whether one is saved), the link only for privacy mode to hide.
 // error: the last collection's failure, with `at`; storage: why no secret
-// can be kept here, or null.
-function botView({ settings, store, secretSaved = false, storage = null, error = null, collectedAt = null, busy = false, nextAt = null }) {
+// can be kept here, or null; notCollecting: why it is on and not
+// collecting (notCollecting()), or null.
+function botView({ settings, store, secretSaved = false, storage = null, error = null, collectedAt = null, busy = false, nextAt = null, notCollecting: why = null }) {
   const ticked = new Set(settings.read);
   return {
     on: settings.on,
@@ -607,14 +694,16 @@ function botView({ settings, store, secretSaved = false, storage = null, error =
     nextAt,
     error: error ? { message: error.message, kind: error.kind, at: error.at ?? null } : null,
     errorHere: settingsWords(error?.message ?? null),
+    notCollecting: why,
     // Whether the relay has sent any names (it does only with LINE_TOKEN).
     named: store.namedMs > 0,
+    standIns: standInCount(store, ticked) > 0,
     windowDays: WINDOW_DAYS,
   };
 }
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const were =(n) => (n === 1 ? 'was' : 'were');
+const were = (n) => (n === 1 ? 'was' : 'were');
 const NAME_WORDS = (code) => {
   if (/^HTTP 40[13]$/.test(code)) {
     return 'LINE refused the relay’s LINE_TOKEN, so names are off and groups and senders show as stand-ins: issue a new channel access token in the LINE Developers console and put it in the relay’s Script properties as LINE_TOKEN, or remove LINE_TOKEN to go without names';
@@ -623,42 +712,56 @@ const NAME_WORDS = (code) => {
   if (code === 'HTTP 404') return 'LINE did not find some names the relay looked up (a member who left, for one), so they show as stand-ins';
   return 'the relay’s name lookups failed, so some names show as stand-ins; the relay’s Executions in Apps Script show why';
 };
+const AGAIN_SCRIPT = 'if it keeps happening, press Copy relay script in Settings, paste it over the relay’s script and deploy it as a new version';
 
 // What goes under Needs attention, as counts and next steps; no group or
 // sender name, message or link. error: the last collection's failure
-// ({ message, kind }); storeProblem: the store's file could not be read
-// ('unreadable', with code) or was not the app's ('invalid'). fix 'line':
-// a link to Settings.
-function botProblems({ on, store, error = null, storeProblem = null, now }) {
+// ({ message, kind }); notCollecting: why it is on and not collecting;
+// storeProblem: { what: 'unreadable' | 'invalid' | 'damaged' | 'leftover',
+// detail, count } (the store's file, as the keeper read it); ticked: the
+// ticked groups. fix 'line': a link to Settings.
+function botProblems({ on, store, error = null, notCollecting: why = null, storeProblem = null, ticked = new Set(), now }) {
   if (!on) return [];
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
-  if (error) add(`the bot’s messages could not be collected. ${error.message}`, '', 'line');
+  if (why) add(`your LINE bot is on but not collecting: ${why}`, '', 'line');
+  else if (error) add(`the bot’s messages could not be collected. ${error.message}`, '', 'line');
   if (storeProblem?.what === 'unreadable') add('the bot’s saved messages could not be read, so collecting waits; close any app using the app’s data folder. The app tries again in 5 minutes', storeProblem.detail ?? '');
-  if (storeProblem?.what === 'invalid') add('the bot’s saved messages were not in a shape the app reads, so it started afresh; messages still on the relay come in again', storeProblem.detail ?? '');
+  if (storeProblem?.what === 'invalid') {
+    add('the bot’s saved messages were not in a shape the app reads, so it started a new store and kept the old file aside; messages kept before may be lost. Turning the bot part off removes the old file', storeProblem.detail ?? '');
+  }
+  if (storeProblem?.what === 'damaged') add(`${storeProblem.count} of the bot’s saved entries could not be read and were left out; the rest are kept`, storeProblem.detail ?? '');
+  if (storeProblem?.what === 'leftover') add('a half-written copy of the bot’s saved messages could not be removed; remove it from the app’s data folder', storeProblem.detail ?? '');
   const sum = (what) => (store?.notes ?? []).filter((n) => n.what === what && n.at >= now - KEEP_MS).reduce((a, n) => a + n.n, 0);
   const days = `in the last ${WINDOW_DAYS} days`;
   const refused = sum('refused');
   if (refused) {
-    add(`${plural(refused, 'call')} from LINE to the relay ${were(refused)} refused ${days}: the key at the end of the webhook link in the LINE Developers console is not the relay’s WEBHOOK_KEY. Copy WEBHOOK_KEY again from the relay script’s Project Settings → Script properties into the link (…/exec?k=WEBHOOK_KEY)`);
+    add(`${plural(refused, 'call')} to the relay’s webhook ${were(refused)} refused ${days}: a wrong key in LINE’s webhook link, or someone else calling the relay. Check that the webhook link in the LINE Developers console ends in ?k= and the relay’s WEBHOOK_KEY (the relay script’s Project Settings → Script properties)`);
   }
   const missed = sum('missed');
-  if (missed) add(`${plural(missed, 'event')} waited on the relay over ${WINDOW_DAYS} days and ${were(missed)} deleted before the app collected ${missed === 1 ? 'it' : 'them'} ${days}: run the app with the bot part on at least once every ${WINDOW_DAYS} days`);
+  if (missed) add(`${plural(missed, 'event')} waited on the relay over ${WINDOW_DAYS} days and ${were(missed)} deleted before the app collected ${missed === 1 ? 'it' : 'them'} ${days}: keep Collect from my LINE bot on and open the app at least every ${WINDOW_DAYS} days`);
+  const lost = sum('lost');
+  if (lost) add(`${plural(lost, 'event')} from LINE could not be kept by the relay (it was busy, or its sheet failed) ${days}, so ${lost === 1 ? 'it is' : 'they are'} gone; if it keeps happening, the relay’s Executions in Apps Script show why`);
   const notJson = sum('notJson');
   if (notJson) add(`${plural(notJson, 'call')} to the relay’s webhook could not be read ${days}; if this goes on, check that only LINE has the webhook link`);
   const broken = sum('broken');
-  if (broken) add(`${plural(broken, 'event')} on the relay could not be read and ${were(broken)} left out ${days}`);
+  if (broken) add(`${plural(broken, 'event')} on the relay could not be read and ${were(broken)} left out ${days}; ${AGAIN_SCRIPT}`);
   const unusable = sum('unusable');
-  if (unusable) add(`${plural(unusable, 'event')} from the relay lacked a group, a time or a message and ${were(unusable)} left out ${days}`);
+  if (unusable) add(`${plural(unusable, 'event')} from the relay lacked a group, a time or a message and ${were(unusable)} left out ${days}; ${AGAIN_SCRIPT}`);
+  const future = sum('future');
+  if (future) add(`${plural(future, 'event')} from the relay ${were(future)} dated in the future and ${were(future)} left out ${days}; check this computer’s date and time`);
   if (sum('ahead')) add('the relay held fewer events than the app had collected (it was reset or replaced), so the app started counting afresh; what is still on the relay comes in again and is kept once', '', 'line');
   if (sum('restarted')) add('the relay at this link is a new one (its id changed), so messages the old one still held may be missing', '', 'line');
   if (store?.nameProblem) add(NAME_WORDS(store.nameProblem.code));
+  if (store && standInCount(store, ticked) > 0) {
+    add('senders in your bot’s groups show as stand-ins, because the relay sends no names, so your own promises there can’t be found and your own messages may show as mentions; put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on', '', 'line');
+  }
   return out;
 }
 
 module.exports = {
   COLLECT_MS, WAIT_MS, KEEP_MS, ROUNDS, TRANSIENT, LineBotError, RELAY_VOICE,
   parseRelayLink, secretStorage, checkSecret, sealSecret, secretFor, openSecret, secretFileError, secretLocked,
-  relayReply, readEvent, emptyStore, readStore, cursorFor, applyTicks, takeReply, collect, nextCollect,
+  relayReply, readEvent, emptyStore, readStore, cursorFor, forgetRelay, applyTicks, takeReply, collect, nextCollect, notCollecting,
   changeSettings, botChats, botGroups, botView, botProblems, inSettings, settingsWords, wall,
 };

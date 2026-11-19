@@ -57,7 +57,8 @@ function fakeRelay({ relay = RELAY_A, secret = SECRET, batch = 500 } = {}) {
     if (upTo >= r.next) return { ok: false, error: 'cursor ahead', relay: r.relay };
     r.rows = r.rows.filter((row) => row.seq > upTo);
     const out = r.rows.slice(0, r.batch);
-    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson };
+    if (r.busy) return { ok: false, error: 'busy' };
+    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson, ...(r.lost !== undefined ? { lost: r.lost } : {}) };
   };
   // Google's way: the POST is answered with a redirect, the answer fetched from the echo host.
   let pending = null;
@@ -363,7 +364,7 @@ test('broken rows are counted and left out; the cursor moves past them', async (
   assert.equal(res.error, undefined);
   assert.equal(h.store.cursor, 3);
   assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['fine']);
-  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => p.label === 'LINE chats: 2 events on the relay could not be read and were left out in the last 14 days'));
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /^LINE chats: 2 events on the relay could not be read and were left out in the last 14 days; if it keeps happening, press Copy relay script/.test(p.label)));
 });
 
 test('events missing what the app needs are counted and left out', async () => {
@@ -385,7 +386,7 @@ test('events missing what the app needs are counted and left out', async () => {
 test('an answer not in the relay’s shape is refused whole: nothing is taken and the cursor stays', () => {
   const good = { ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 };
   const shape = (body) => assert.throws(() => B.relayReply(body), (e) => e.kind === 'reader' && /not in the shape the app reads.*Copy relay script/.test(e.message));
-  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0 } });
+  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0 } });
   shape({ ...good, ok: undefined });
   shape({ ...good, relay: undefined });
   shape({ ...good, events: 'none' });
@@ -532,8 +533,8 @@ test('the relay’s counters: a rise since the last answer is said with its next
   h.relay.notJson = 1;
   await h.collect();
   const said = B.botProblems({ on: true, store: h.store, now: NOW }).map((p) => p.label);
-  assert.ok(said.includes('LINE chats: 2 calls from LINE to the relay were refused in the last 14 days: the key at the end of the webhook link in the LINE Developers console is not the relay’s WEBHOOK_KEY. Copy WEBHOOK_KEY again from the relay script’s Project Settings → Script properties into the link (…/exec?k=WEBHOOK_KEY)'), said.join('\n'));
-  assert.ok(said.some((l) => /^LINE chats: 3 events waited on the relay over 14 days and were deleted before the app collected them/.test(l)));
+  assert.ok(said.includes('LINE chats: 2 calls to the relay’s webhook were refused in the last 14 days: a wrong key in LINE’s webhook link, or someone else calling the relay. Check that the webhook link in the LINE Developers console ends in ?k= and the relay’s WEBHOOK_KEY (the relay script’s Project Settings → Script properties)'), said.join('\n'));
+  assert.ok(said.some((l) => /^LINE chats: 3 events waited on the relay over 14 days and were deleted before the app collected them .*: keep Collect from my LINE bot on and open the app at least every 14 days$/.test(l)), said.join('\n'));
   assert.ok(said.some((l) => /^LINE chats: 1 call to the relay’s webhook could not be read/.test(l)));
   // Two weeks on, they are no longer said.
   assert.deepEqual(B.botProblems({ on: true, store: h.store, now: NOW + 15 * 86_400_000 }), []);
@@ -568,7 +569,7 @@ test('a failed collection is said with its next step and a link to Settings; not
 // ---- the store, settings and timing -----------------------------------------------------------
 
 test('a store the app cannot read starts afresh at cursor 0 and says so; a good one reads back as written', async () => {
-  assert.deepEqual(B.readStore('{not json'), { store: B.emptyStore(), invalid: true });
+  assert.deepEqual(B.readStore('{not json'), { store: B.emptyStore(), invalid: true, damaged: 0 });
   assert.equal(B.readStore(JSON.stringify({ version: 99 })).invalid, true);
   const h = harness();
   h.relay.add(message({ id: 'Q1', text: 'kept', groupName: 'Demo crew', senderName: 'Ken' }));
@@ -576,7 +577,7 @@ test('a store the app cannot read starts afresh at cursor 0 and says so; a good 
   const back = B.readStore(h.disk);
   assert.equal(back.invalid, false);
   assert.deepEqual(back.store, JSON.parse(h.disk));
-  assert.match(B.botProblems({ on: true, store: B.emptyStore(), storeProblem: { what: 'invalid' }, now: NOW })[0].label, /started afresh/);
+  assert.match(B.botProblems({ on: true, store: B.emptyStore(), storeProblem: { what: 'invalid' }, now: NOW })[0].label, /kept the old file aside; messages kept before may be lost/);
 });
 
 test('settings: off forgets the ticks, a link is saved rebuilt (an empty one keeps it), and only known group ids tick', () => {
@@ -592,7 +593,7 @@ test('settings: off forgets the ticks, a link is saved rebuilt (an empty one kee
   assert.match(B.changeSettings(s, { link: 'https://example.com' }).error, /not an Apps Script web app/);
   s = B.changeSettings(s, { tick: { id, on: true } }).settings;
   assert.deepEqual(s.read, [id]);
-  assert.match(B.changeSettings(s, { tick: { id: 'Cgroup-demo-1', on: true } }).error, /not known/);
+  assert.match(B.changeSettings(s, { tick: { id: 'Cgroup-demo-1', on: true } }).error, /^That group is no longer listed; close and reopen Settings\.$/);
   assert.deepEqual(B.changeSettings(s, { on: false }).settings, { on: false, link: EXEC, read: [] });
 });
 
@@ -629,4 +630,191 @@ test('the relay script that ships asks only for its own sheet, drops reply token
   assert.doesNotMatch(code, /method:\s*['"]post['"]/i);
   // The app's hosts are named in fieldsurvey.js alone; the relay is a doc.
   assert.equal(typeof F.callWebApp, 'function');
+});
+
+// ---- review round 1 ---------------------------------------------------------------------------
+
+test('a rise in the relay’s counts is said even when the secret was saved again in between; only a new relay id starts afresh', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'H1', text: 'first' }));
+  await h.collect();
+  // The app could not collect for a while; the relay aged events out (missed 0 -> 3).
+  h.relay.missed = 3;
+  h.relay.lost = 2;
+  // The user saves the secret again: the cursor is not trusted until the relay answers.
+  h.store = B.forgetRelay(h.store);
+  await h.collect();
+  const said = B.botProblems({ on: true, store: h.store, now: NOW }).map((p) => p.label);
+  assert.ok(said.some((l) => /^LINE chats: 3 events waited on the relay over 14 days/.test(l)), said.join('\n'));
+  assert.ok(said.some((l) => /^LINE chats: 2 events from LINE could not be kept by the relay/.test(l)), said.join('\n'));
+  // Another link to the same relay keeps the count too.
+  h.relay.missed = 5;
+  await h.collect({ deploymentId: OTHER_DEPLOY, url: `https://script.google.com/macros/s/${OTHER_DEPLOY}/exec` });
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /^LINE chats: 5 events waited/.test(p.label)));
+  // A new relay id: its counts are where it starts.
+  const fresh = harness();
+  fresh.relay.missed = 9;
+  await fresh.collect();
+  assert.deepEqual(B.botProblems({ on: true, store: fresh.store, now: NOW }), []);
+});
+
+test('an older relay’s answer without `lost` is read as before; a busy relay is a passing trouble', async () => {
+  const good = { ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 };
+  assert.equal(B.relayReply(good).counts.lost, 0);
+  assert.throws(() => B.relayReply({ ...good, lost: -1 }), (e) => e.kind === 'reader');
+  const h = harness();
+  h.relay.busy = true;
+  const res = await h.collect();
+  assert.equal(res.error.kind, 'busy');
+  assert.ok(B.TRANSIENT.has('busy'));
+  assert.match(res.error.message, /relay was busy.*tries again in 5 minutes/);
+});
+
+test('a message type that is a name on every object is still just "other"; it reads back after a restart', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'J1', type: 'constructor' }), message({ id: 'J2', type: 'toString' }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.kind), ['other', 'other']);
+  h.restart();
+  assert.equal(h.chats()[0].messages.length, 2);
+});
+
+test('an unsend removes the message only in its own group', async () => {
+  const h = harness({ ticked: ['Cgroup-demo-1', 'Cgroup-demo-2'] });
+  h.relay.add(message({ group: 'Cgroup-demo-1', id: 'K1', text: 'stays' }), unsend({ group: 'Cgroup-demo-2', id: 'K1' }));
+  await h.collect();
+  assert.deepEqual(h.chats().flatMap((c) => c.messages.map((m) => m.text)), ['stays']);
+  // And its later arrival in its own group is not kept.
+  h.relay.add(message({ group: 'Cgroup-demo-2', id: 'K1', text: 'unsent first' }));
+  await h.collect();
+  assert.deepEqual(h.chats().flatMap((c) => c.messages.map((m) => m.text)), ['stays']);
+});
+
+test('an event dated in the future is left out and counted, with the clock to check', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'L1', text: 'from the future', ms: NOW + 3 * 3_600_000 }), message({ id: 'L2', text: 'now' }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['now']);
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /^LINE chats: 1 event from the relay was dated in the future and was left out .*check this computer’s date and time/.test(p.label)));
+});
+
+test('stand-ins never collide: two members, or two groups, whose ids hash alike get longer labels', async () => {
+  // Find two invented user ids, and two group ids, whose hashes share their first four characters.
+  const first = (map, key, value) => {
+    const k = key.slice(0, 4);
+    if (map.has(k) && map.get(k) !== value) return map.get(k);
+    map.set(k, value);
+    return null;
+  };
+  const gid = idOf('Cgroup-demo-1');
+  const seenU = new Map();
+  let pair = null;
+  for (let i = 0; !pair; i += 1) {
+    const user = `Uuser-demo-${i}`;
+    const who = B.readEvent(message({ id: 'p', text: 'x', user })).records[0].who;
+    const other = first(seenU, who, user);
+    if (other) pair = [other, user];
+  }
+  const h = harness();
+  h.relay.add(message({ id: 'N1', text: 'a', user: pair[0] }), message({ id: 'N2', text: 'b', user: pair[1] }));
+  await h.collect();
+  const [x, y] = h.chats()[0].messages.map((m) => m.sender);
+  assert.notEqual(x, y);
+  assert.match(x, /^Member [0-9a-f]{5,}$/);
+  assert.ok(gid);
+  const seenG = new Map();
+  let groups = null;
+  for (let i = 0; !groups; i += 1) {
+    const raw = `Cgroup-demo-g${i}`;
+    const other = first(seenG, idOf(raw), raw);
+    if (other) groups = [other, raw];
+  }
+  const g = harness({ ticked: groups });
+  g.relay.add(message({ group: groups[0], id: 'N3', text: 'a' }), message({ group: groups[1], id: 'N4', text: 'b' }));
+  await g.collect();
+  const names = B.botGroups(g.store, g.ticked).map((x) => x.name);
+  assert.equal(new Set(names).size, 2, names.join(', '));
+  assert.deepEqual(g.chats().map((c) => c.chat).sort(), [...names].sort());
+});
+
+test('a store with some damaged entries keeps the rest and counts what it left out', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'Q1', text: 'kept' }), message({ id: 'Q2', text: 'also kept' }));
+  await h.collect();
+  const raw = JSON.parse(h.disk);
+  raw.messages[1].kind = 42;
+  raw.groups.nothex = { kind: 'group' };
+  const back = B.readStore(JSON.stringify(raw));
+  assert.equal(back.invalid, false);
+  assert.equal(back.damaged, 2);
+  assert.equal(back.store.messages.length, 1);
+  assert.ok(B.botProblems({ on: true, store: back.store, storeProblem: { what: 'damaged', count: 2 }, now: NOW }).some((p) => /^LINE chats: 2 of the bot’s saved entries could not be read and were left out/.test(p.label)));
+});
+
+test('while senders are stand-ins, the user is told their own promises cannot be found and their messages may show as mentions', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'S1', text: 'Mei will check' }));
+  await h.collect();
+  const view = B.botView({ settings: { on: true, link: EXEC, read: [...h.ticked] }, store: h.store, secretSaved: true });
+  assert.equal(view.standIns, true);
+  const said = B.botProblems({ on: true, store: h.store, ticked: h.ticked, now: NOW }).map((p) => p.label);
+  assert.ok(said.some((l) => /senders in your bot’s groups show as stand-ins.*your own promises there can’t be found.*your own messages may show as mentions.*LINE_TOKEN/.test(l)), said.join('\n'));
+  // With names from the relay, nothing to say.
+  const n = harness();
+  n.relay.add(message({ id: 'S2', text: 'hi', senderName: 'Ken', groupName: 'Demo crew' }));
+  await n.collect();
+  assert.equal(B.botView({ settings: { on: true, link: EXEC, read: [...n.ticked] }, store: n.store, secretSaved: true }).standIns, false);
+  assert.deepEqual(B.botProblems({ on: true, store: n.store, ticked: n.ticked, now: NOW }), []);
+});
+
+test('the bot part on but not collecting says why and what to do, in Needs attention and in the view', () => {
+  const cases = [
+    [{ link: '', secretSaved: false, storage: null }, /no relay link is saved.*Relay link/],
+    [{ link: EXEC, secretSaved: false, storage: null }, /no secret is saved.*Secret/],
+    [{ link: EXEC, secretSaved: false, storage: 'no protection' }, /this computer can’t keep the relay’s secret.*keyring/],
+  ];
+  for (const [state, words] of cases) {
+    const reason = B.notCollecting({ on: true, ...state });
+    assert.ok(reason, JSON.stringify(state));
+    const said = B.botProblems({ on: true, store: B.emptyStore(), notCollecting: reason, now: NOW }).map((p) => p.label);
+    assert.ok(said.some((l) => /^LINE chats: your LINE bot is on but not collecting: /.test(l) && words.test(l)), said.join('\n'));
+    const view = B.botView({ settings: { on: true, link: state.link, read: [] }, store: B.emptyStore(), secretSaved: state.secretSaved, storage: state.storage, notCollecting: reason });
+    assert.match(view.notCollecting, words);
+  }
+  assert.equal(B.notCollecting({ on: true, link: EXEC, secretSaved: true, storage: null }), null);
+  assert.equal(B.notCollecting({ on: false, link: '', secretSaved: false, storage: null }), null);
+});
+
+test('asked with 0 the relay cannot be ahead; a collection stops at ROUNDS calls and says more waits', async () => {
+  // A relay that answers "cursor ahead" even to 0 is not the relay's answer.
+  const stuck = fakeRelay();
+  stuck.answer = () => ({ ok: false, error: 'cursor ahead', relay: RELAY_A });
+  const h = harness({ relay: stuck });
+  const res = await h.collect();
+  assert.equal(res.error.kind, 'reader');
+  assert.match(res.error.message, /not in the shape the app reads/);
+  // ROUNDS calls of one event each, more waiting: the rest at the next collection, at once.
+  const many = harness({ relay: fakeRelay({ batch: 1 }) });
+  for (let i = 0; i < B.ROUNDS + 3; i += 1) many.relay.add(message({ id: `R${i}`, text: `n${i}`, ms: at(9, 0) + i * 1000 }));
+  const cut = await many.collect();
+  assert.equal(cut.more, true);
+  assert.equal(many.store.cursor, B.ROUNDS);
+  assert.equal(B.nextCollect({ ready: true, lastTryAt: NOW, more: cut.more }), NOW);
+});
+
+test('the relay’s own words for an answer too large and a second redirect', async () => {
+  const run = async (answers) => {
+    let i = 0;
+    const send = async () => {
+      const a = answers[i++];
+      return { status: a[0], location: a[1], contentType: 'application/json', text: async () => { if (a[2]) throw a[2]; return '{}'; } };
+    };
+    return (await B.collect({ store: B.emptyStore(), link: LINK, secret: SECRET, ticked: () => new Set(), send, write: () => {}, now: () => NOW })).error;
+  };
+  const big = await run([[302, ECHO], [200, undefined, Object.assign(new Error('big'), { name: 'TooLargeError' })]]);
+  assert.equal(big.kind, 'reader');
+  assert.match(big.message, /^The relay’s answer is larger than 20 MB.*Copy relay script/);
+  const twice = await run([[302, ECHO], [302, ECHO]]);
+  assert.equal(twice.kind, 'blocked');
+  assert.match(twice.message, /^Google redirected the relay’s answer a second time/);
 });
