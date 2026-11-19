@@ -1445,18 +1445,23 @@ app.whenReady().then(() => {
   const botStoreFile = path.join(app.getPath('userData'), 'line-bot-store.json');
   const botSecretFile = path.join(app.getPath('userData'), 'line-bot-secret.json');
   const BOT_TICK_MS = 30_000;
-  let bot = lineBot.changeSettings(undefined, {}).settings;
-  let botRead = 'missing';
-  try {
-    bot = lineBot.changeSettings(JSON.parse(fs.readFileSync(botFile, 'utf8')), {}).settings;
-    botRead = 'ok';
-  } catch (err) {
-    if (err.code !== 'ENOENT') {
-      botRead = 'unreadable';
-      problem('LINE chats: the bot part’s settings could not be read, so it is not collecting; its saved secret and messages are kept. Turn it on again in Settings → Connections → LINE chats', botFile, 'line');
-    }
-  }
+  // line-bot.json holds only whether the part is on; the ticks and the
+  // relay link live in the store (BotKeeper), so no loss of this file can
+  // lose them. An old file's ticks and link move into the store at its
+  // first good read, and the file is then written with `on` alone.
+  const botStart = lineBot.readBotSettings(() => fs.readFileSync(botFile, 'utf8'));
+  const botRead = botStart.read;
+  let botOn = botStart.on;
+  let botLegacy = botStart.legacy;
+  // Said under Needs attention until the part is on again and its store reads well.
+  let botSettingsLost = botRead === 'unreadable';
   const botKeeper = new lineBot.BotKeeper({ file: botStoreFile });
+  // The part's settings as the rest of this file reads them: on from the
+  // settings file, the ticks and the link from the store (none until it is read).
+  let bot = { on: botOn, link: '', read: [] };
+  const syncBot = () => {
+    bot = { on: botOn, link: botKeeper.settings.link, read: botKeeper.settings.read };
+  };
   const botBackend = () => (process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined);
   // Whether this computer can keep the secret at all: null, or why not.
   const botStorage = lineBot.secretStorage({ available: safeStorage.isEncryptionAvailable(), backend: botBackend() });
@@ -1480,45 +1485,39 @@ app.whenReady().then(() => {
   }
   function dropBotStore() {
     const stuck = botKeeper.remove();
+    syncBot();
     if (stuck.length) {
       problem('LINE chats: the bot’s saved messages could not all be removed; close any app using the app’s data folder and remove them from there', stuckWhere(botStoreFile, stuck));
     }
   }
   // The store is read before the part collects or writes anything: at
-  // start, when LINE chats or the bot part is turned on, when a secret is
-  // saved, and while it could not be read. Ticks lost with a settings file
-  // that could not be read come back from the groups the store kept text
-  // for, before anything is unticked. -> whether it was read.
-  let botTicksLost = botRead === 'unreadable';
+  // start, when LINE chats or the bot part is turned on, and while it could
+  // not be read. -> whether it was read.
   function botLoad() {
-    if (!botTicksLost) return botKeeper.load(new Set(bot.read));
-    if (!botKeeper.load(null)) return false;
-    bot = lineBot.changeSettings({ ...bot, read: [...new Set([...bot.read, ...lineBot.keptGroups(botKeeper.store)])] }, {}).settings;
-    botTicksLost = false;
-    try {
-      writeJsonFile(botFile, bot);
-    } catch (err) {
-      // Kept in memory: the store keeps the text either way, and the next start brings the ticks back from it again.
-      lineLog('bot settings not saved', err);
+    const ok = botKeeper.load(botLegacy);
+    syncBot();
+    if (ok && botOn) botSettingsLost = false;
+    // The old file's ticks and link are in the store on disk now: the file keeps `on` alone.
+    if (ok && botLegacy && !botKeeper.dirty) {
+      try {
+        writeJsonFile(botFile, { on: botOn });
+        botLegacy = null;
+      } catch (err) {
+        // The store already has them; the old file is moved over again at the next read.
+        lineLog('bot settings not saved', err);
+      }
     }
-    return true;
+    return ok;
   }
   {
-    const start = lineBot.startPlan({ lineRead, lineEnabled: line.enabled, botRead, botOn: bot.on });
+    const start = lineBot.startPlan({ lineRead, lineEnabled: line.enabled, botRead, botOn });
     if (start.drop) {
+      // Read first, so the relay link stays (BotKeeper.remove).
+      botLoad();
       dropBotSecret();
       dropBotStore();
-    } else if (start.collect) {
-      let deploymentId = null;
-      try {
-        deploymentId = lineBot.parseRelayLink(bot.link).deploymentId;
-      } catch {
-        deploymentId = null; // no link saved yet: no relay to tie the secret to, and Settings asks for the link
-      }
-      // A secret is never sent to another relay than its own.
-      if (botSecretSaved && botSecretFor && botSecretFor !== deploymentId) dropBotSecret();
-      botLoad();
-    }
+    } else if (start.collect) botLoad();
+    // A secret is never sent to another relay than its own: openSecret refuses one saved for another link.
   }
   function scanLine() {
     if (!line.enabled) {
@@ -1637,7 +1636,7 @@ app.whenReady().then(() => {
     const turnedOn = !line.enabled && next.enabled;
     line = next;
     // The bot part can collect again: its store is read first.
-    if (turnedOn && bot.on) {
+    if (turnedOn && botOn) {
       botLoad();
       [botError, botTriedAt, botMore] = [null, null, false];
     }
@@ -1669,7 +1668,7 @@ app.whenReady().then(() => {
     }
     const sealed = lineBot.openSecret(text, link.deploymentId); // another relay's, or not the app's file: says so
     try {
-      return safeStorage.decryptString(sealed);
+      return { secret: safeStorage.decryptString(sealed), id: lineBot.secretIdOf(text) };
     } catch {
       throw lineBot.secretLocked(); // the system's key changed: only a new secret helps
     }
@@ -1677,17 +1676,16 @@ app.whenReady().then(() => {
   // The bot part off (or LINE chats off), by the user: the ticks, the
   // secret and the store go; the link stays, as the exports folder does.
   function botOff() {
-    if (bot.on || bot.read.length) {
-      const next = lineBot.changeSettings(bot, { on: false }).settings;
+    if (botOn) {
+      botOn = false;
       try {
-        writeJsonFile(botFile, next);
+        writeJsonFile(botFile, { on: false });
       } catch (err) {
         // The secret and the store still go below; if the switch comes back
         // on at the next start, there is no secret, and Needs attention says
         // it is not collecting.
         lineLog('bot settings not saved', err);
       }
-      bot = next;
     }
     dropBotSecret();
     dropBotStore();
@@ -1710,8 +1708,8 @@ app.whenReady().then(() => {
       }
       let res;
       try {
-        res = !botKeeper.loaded && !botLoad() ? { waiting: true }
-          : await botKeeper.collect({ link, secret: readBotSecret(link), ticked: () => new Set(bot.read), send: askReader });
+        const saved = !botKeeper.loaded && !botLoad() ? null : readBotSecret(link);
+        res = !saved ? { waiting: true } : await botKeeper.collect({ link, secret: saved.secret, secretId: saved.id, send: askReader });
       } catch (err) {
         if (err instanceof lineBot.LineBotError) res = { error: err };
         else {
@@ -1748,12 +1746,13 @@ app.whenReady().then(() => {
     return botRun;
   }
   function botTick() {
-    if (!line.enabled || !bot.on) return;
-    // A removal whose write failed (an untick) is written now.
+    if (!line.enabled || !botOn) return;
+    // A store not read yet is read; a removal whose write failed is written; old text goes.
     if (!botRun) {
       if (!botKeeper.loaded) botLoad();
       else {
-        const retried = botKeeper.retry(new Set(bot.read));
+        const retried = botKeeper.retry();
+        syncBot();
         if (!retried.saved) lineLog('bot store not saved', { code: retried.code });
       }
     }
@@ -1774,34 +1773,37 @@ app.whenReady().then(() => {
       scanLine();
       return { ok: true };
     }
-    try {
-      writeJsonFile(botFile, res.settings);
-    } catch (err) {
-      lineLog('bot settings not saved', err);
-      return { ok: false, error: LINE_SAVE_ERROR };
-    }
-    const turnedOn = !bot.on && res.settings.on;
-    bot = res.settings;
-    let secretNote = null;
-    if (res.linkChanged) {
-      // The secret belongs to its relay: another link drops it, and asks again.
-      botKeeper.bump();
-      if (botSecretSaved && botSecretFor !== lineBot.parseRelayLink(bot.link).deploymentId) {
-        dropBotSecret();
-        if (!botSecretSaved) secretNote = 'The saved secret was the old relay’s, so it was removed: save this relay’s secret.';
+    if ('on' in allowed && !botOn) {
+      try {
+        writeJsonFile(botFile, { on: true });
+      } catch (err) {
+        lineLog('bot settings not saved', err);
+        return { ok: false, error: LINE_SAVE_ERROR };
       }
-      [botError, botTriedAt, botMore] = [null, null, false];
-    }
-    if (turnedOn) {
+      botOn = true;
       botLoad();
       [botError, botTriedAt, botMore] = [null, null, false];
     }
     let note = null;
-    if ('tick' in allowed) {
-      // Unticking drops the group's kept messages and senders, from the file too.
-      const done = botKeeper.untick(new Set(bot.read));
+    let secretNote = null;
+    if ('link' in allowed || 'tick' in allowed) {
+      // The ticks and the link live in the store, written only once it has been read.
+      if (!botKeeper.loaded && !botLoad()) return { ok: false, error: 'The bot’s saved messages can’t be read just now, so this can’t be saved yet; see Needs attention.' };
+      const done = botKeeper.setSettings({ read: res.settings.read, link: res.settings.link });
+      syncBot();
       if (!done.saved) lineLog('bot store not saved', { code: done.code });
-      if (!allowed.tick?.on) note = lineBot.untickNote({ saved: done.saved, aside: botKeeper.hasAside() });
+      // Unticking drops the group's kept messages and senders, from the file too (BotKeeper keeps a failed one beside it).
+      if ('tick' in allowed && !allowed.tick?.on) note = lineBot.untickNote({ saved: done.saved, aside: botKeeper.hasAside() });
+      else if (!done.saved) return { ok: false, error: LINE_SAVE_ERROR };
+      if (res.linkChanged) {
+        // The secret belongs to its relay: another link drops it, and asks again.
+        botKeeper.bump();
+        if (botSecretSaved && botSecretFor !== lineBot.parseRelayLink(bot.link).deploymentId) {
+          dropBotSecret();
+          if (!botSecretSaved) secretNote = 'The saved secret was the old relay’s, so it was removed: save this relay’s secret.';
+        }
+        [botError, botTriedAt, botMore] = [null, null, false];
+      }
     }
     scanLine();
     botTick();
@@ -1832,14 +1834,11 @@ app.whenReady().then(() => {
     }
     botSecretSaved = true;
     botSecretFor = checked.deploymentId;
-    // A new secret may be a relay set up afresh at the same link: until it
-    // answers, the cursor is not sent (linebot.cursorFor), so nothing on it
-    // is let go unseen; what comes again is kept once. A collection under
-    // way is dropped, keeping what it wrote.
-    // Read first if it has not been: a store that cannot be read takes the new secret at its next good read.
-    if (!botKeeper.loaded) botLoad();
-    const forgot = botKeeper.forgetRelay();
-    if (!forgot.saved) lineLog('bot store not saved', { code: forgot.code });
+    // A new secret may be a relay set up afresh at the same link: its file's
+    // own id is new, so the store forgets the relay id before the secret
+    // goes out (BotKeeper.collect), even after a restart; what comes again
+    // is kept once. A collection under way is dropped, keeping what it wrote.
+    botKeeper.bump();
     [botError, botTriedAt, botMore] = [null, null, false];
     botTick();
     return { ok: true };
@@ -2005,7 +2004,8 @@ app.whenReady().then(() => {
     });
   });
   function lineState() {
-    if (!line.enabled) return { enabled: false };
+    // Off: only whether a relay link is kept, for the words on how to stop LINE sending to it.
+    if (!line.enabled) return { enabled: false, bot: { on: false, link: bot.link } };
     const byChat = new Map();
     for (const f of lineScan?.files ?? []) {
       const c = byChat.get(f.chat) ?? { chat: f.chat, files: 0, read: line.read.includes(f.chat), problems: 0 };
@@ -2049,7 +2049,7 @@ app.whenReady().then(() => {
       }),
       ...(lineScanError ? [{ label: lineScanError, detail: '' }] : []),
       ...lineBot.botProblems({
-        on: line.enabled && bot.on, store: botKeeper.store, error: botError, notCollecting: botWhyNot(), storeProblems: botKeeper.problems(), ticked: new Set(bot.read), now: Date.now(),
+        on: line.enabled && bot.on, store: botKeeper.store, error: botError, notCollecting: botWhyNot(), storeProblems: botKeeper.problems(), ticked: new Set(bot.read), settingsLost: botSettingsLost, now: Date.now(),
       }),
       ...linePruneProblems,
       ...leftoverProblem(),
