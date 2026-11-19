@@ -766,7 +766,7 @@ const STORE_WORDS = {
   invalid: () => `the bot’s saved data is not in a shape the app reads, so nothing is collected or changed. To start afresh, turn off ${SWITCH} and turn it on again in ${SETTINGS}; that deletes what it kept`,
   unwritten: () => `the bot’s saved data could not be brought up to this version of the app, so nothing is collected or changed; ${CLOSE}. The app tries again within a minute`,
   damaged: (sp) => `${sp.count} of the bot’s saved entries could not be read and were left out; the rest are kept`,
-  rebuilt: () => `the bot’s settings file could not be read, so its ticks were rebuilt from the groups it kept messages for, and its relay link from the saved secret or the last collection; check them in ${SETTINGS}`,
+  rebuilt: () => `the bot’s settings file was missing or could not be read, so its ticks were rebuilt from the groups it kept messages for, and its relay link from the saved secret or the last collection; check them in ${SETTINGS}`,
   unlisted: () => `the app’s data folder could not be listed, so old copies of the bot’s saved data may not have been cleared yet; collecting goes on. The app tries again within a minute`,
   leftover: () => `an old copy of the bot’s saved data (half-written, or kept aside) could not be removed; ${CLOSE}. The app tries again within a minute`,
   aside: () => `a copy of the bot’s earlier saved data, kept aside because it could not be read, may still hold messages; it is deleted after ${WINDOW_DAYS} days at most, or when you turn off ${SWITCH}`,
@@ -785,12 +785,14 @@ const NEW_DEPLOYMENT = `make a new deployment, put its link in LINE’s webhook 
 function botProblems({ on, store, error = null, notCollecting: why = null, storeProblems = [], ticked = new Set(store?.settings?.read ?? []), now }) {
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
+  const take = (label) => [{ label: `LINE chats: ${label}`, detail: '', fix: 'line' }];
+  // The store's files are said whatever the switch says (a copy that would not go, say).
+  for (const sp of storeProblems) if (STORE_WORDS[sp.what]) add(STORE_WORDS[sp.what](sp), sp.detail ?? '', ['invalid', 'rebuilt'].includes(sp.what) ? 'line' : null);
   if (!on) return out;
   const stuck = storeProblems.some((sp) => STUCK.has(sp.what));
   // A store that can't be read says so itself, with what to do.
-  if (why && !stuck) add(`your LINE bot is on but not collecting: ${why}`, '', 'line');
-  else if (error && !stuck) add(`the bot’s messages could not be collected. ${error.message}`, '', 'line');
-  for (const sp of storeProblems) if (STORE_WORDS[sp.what]) add(STORE_WORDS[sp.what](sp), sp.detail ?? '', ['invalid', 'rebuilt'].includes(sp.what) ? 'line' : null);
+  if (why && !stuck) out.unshift(...take(`your LINE bot is on but not collecting: ${why}`));
+  else if (error && !stuck) out.unshift(...take(`the bot’s messages could not be collected. ${error.message}`));
   const sum = (what) => (store?.notes ?? []).filter((n) => n.what === what && n.at >= now - KEEP_MS).reduce((a, n) => a + n.n, 0);
   const days = `in the last ${WINDOW_DAYS} days`;
   // A full tally on the relay: these counts are floors.

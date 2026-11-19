@@ -1254,7 +1254,7 @@ test('migration with an older settings file that can’t be read: nothing is del
   assert.equal(fs.existsSync(o.legacyFile), false);
   const said = B.botProblems({ on: true, store: k.store, storeProblems: k.problems(), now: NOW }).filter((p) => /settings file/.test(p.label));
   assert.equal(said.length, 1);
-  assert.match(said[0].label, /settings file could not be read, so its ticks were rebuilt from the groups it kept messages for, and its relay link from the saved secret or the last collection; check them in Settings → Connections → LINE chats$/);
+  assert.match(said[0].label, /settings file was missing or could not be read, so its ticks were rebuilt from the groups it kept messages for, and its relay link from the saved secret or the last collection; check them in Settings → Connections → LINE chats$/);
   assert.equal(said[0].fix, 'line');
   // No store, but a secret saved: the part was on; its link comes from the secret.
   const s = olderVersion({ settingsFile: 'not json', storeText: null });
@@ -1465,4 +1465,15 @@ test('the words name the switch the user sees, never “the bot part”', async 
   ].join('\n');
   assert.doesNotMatch(words, /bot part/i);
   assert.match(words, /turn off Collect from my LINE bot/);
+});
+
+test('migration with no older settings file: a store from before rebuilds its ticks and link and says so; the store’s troubles are said even while off', () => {
+  const o = olderVersion({});
+  const k = new B.BotKeeper({ file: o.file, legacyFile: o.legacyFile, now: () => NOW });
+  k.load();
+  assert.deepEqual(onDisk(o.file).settings, { read: [o.gA, o.gB], link: EXEC });
+  assert.ok(B.botProblems({ on: true, store: k.store, storeProblems: k.problems(), now: NOW }).some((p) => /settings file was missing or could not be read/.test(p.label)));
+  const off = B.botProblems({ on: false, store: B.emptyStore(), storeProblems: [{ what: 'leftover', detail: 'x' }], now: NOW });
+  assert.equal(off.length, 1);
+  assert.match(off[0].label, /could not be removed/);
 });
