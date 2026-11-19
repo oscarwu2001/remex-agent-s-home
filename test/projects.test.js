@@ -125,3 +125,28 @@ test('projects with open to-dos come first (soonest day first), then those with 
   assert.equal(dueLabel('2026-10-31', today).text, 'Tomorrow');
   assert.equal(dueLabel('2026-10-29', today).when, 'overdue');
 });
+
+test('a redraw while a checkbox has focus gives the focus back and does not try to restore a caret', async () => {
+  const { paint } = await import('../renderer/projects-view.js');
+  const control = (type) => {
+    const el = {
+      id: 'opt-x', tagName: 'INPUT', type, value: 'on', dataset: {}, selectionStart: null, selectionEnd: null, focused: false,
+      focus() { el.focused = true; },
+      setSelectionRange() { throw new Error('InvalidStateError: the input element’s type does not support selection'); },
+    };
+    return el;
+  };
+  const before = control('checkbox');
+  const after = control('checkbox');
+  const saved = { document: globalThis.document, CSS: globalThis.CSS };
+  globalThis.document = { activeElement: before, body: {} };
+  globalThis.CSS = { escape: (s) => s };
+  try {
+    const root = { dataset: {}, innerHTML: '', contains: () => true, querySelector: (key) => (key === '#opt-x' ? after : null) };
+    paint(root, '<label>redrawn</label>');
+    assert.equal(after.focused, true);
+  } finally {
+    globalThis.document = saved.document;
+    globalThis.CSS = saved.CSS;
+  }
+});

@@ -2920,7 +2920,7 @@ setInterval(() => {
 const lineUi = { adding: null, todo: null, project: null, expanded: new Set(), all: false, error: '', errorKey: null };
 let lineStatus = null; // the section's one status line: { text, undo }
 // names/keywords: what is typed in Settings, kept across redraws until saved.
-const lineSettingsUi = { error: '', wordsError: '', note: '', names: null, keywords: null };
+const lineSettingsUi = { error: '', switchError: '', tickError: '', wordsError: '', note: '', names: null, keywords: null };
 // The bot part's Settings: which field is open, a link refused (kept as
 // typed), the last replies, and the switch as pressed until the snapshot
 // agrees (pendingOn). The secret is never kept here.
@@ -3306,7 +3306,8 @@ $('line-settings').addEventListener('change', async (e) => {
     return;
   }
   const res = await bridge.lineSet({ tick: { chat: tick.dataset.chat, on: tick.checked } }).catch(lineNoAnswer);
-  lineSettingsUi.error = res.ok ? '' : res.error;
+  // Said under the chats list, in the main process's own words.
+  lineSettingsUi.tickError = res.ok ? '' : res.error;
   if (!res.ok) tick.checked = !tick.checked;
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3367,9 +3368,10 @@ $('opt-line').addEventListener('change', async (e) => {
   if (!bridge.lineSet) return;
   lineSwitchedAt = Date.now();
   const res = await bridge.lineSet({ enabled: e.target.checked }).catch(lineNoAnswer);
-  lineSettingsUi.error = res.ok ? '' : res.error;
+  // Said under the switch, even while LINE chats stays off.
+  lineSettingsUi.switchError = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
-  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '' });
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', ...(res.ok ? { error: '' } : {}) });
   Object.assign(lineBotUi, {
     linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', tickError: '', refreshError: '', pendingOn: null,
   });

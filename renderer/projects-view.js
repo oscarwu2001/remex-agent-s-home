@@ -316,13 +316,16 @@ function keyOf(el) {
   return attrs ? `${el.tagName.toLowerCase()}${attrs}` : undefined;
 }
 
+const TYPED = /^(?:|text|search|url|tel|password|email)$/;
+
 // Redraws a list only when it changed, keeping keyboard focus, what is being
 // typed and where the caret is.
 export function paint(root, html) {
   if (root.dataset.sig === html) return;
   const active = root.contains(document.activeElement) ? document.activeElement : null;
   const key = keyOf(active);
-  const keep = active && 'value' in active && active.tagName === 'INPUT' ? { value: active.value, start: active.selectionStart, end: active.selectionEnd } : null;
+  // What is typed and the caret, only for fields that have them (a checkbox has neither).
+  const keep = active && active.tagName === 'INPUT' && TYPED.test(active.type ?? '') ? { value: active.value, start: active.selectionStart, end: active.selectionEnd } : null;
   root.innerHTML = html;
   root.dataset.sig = html;
   if (!key) return;
