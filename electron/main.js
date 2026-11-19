@@ -1469,26 +1469,44 @@ app.whenReady().then(() => {
       botSecretFor = null; // unreadable now: the next collection says so (secretFileError), and saving again replaces it
     }
   }
+  // Where a file that would not go is (s.name '.': the folder itself could not be listed).
+  const stuckWhere = (file, stuck) => stuck.map((s) => (s.name === '.' ? `${path.dirname(file)} (could not be listed: ${s.code})` : `${path.join(path.dirname(file), s.name)} (${s.code})`)).join(', ');
   function dropBotSecret() {
-    try {
-      fs.rmSync(botSecretFile, { force: true });
-    } catch (err) {
-      problem(`LINE chats: the relay’s saved secret could not be removed (${err.code || 'error'}); remove it from the app's data folder`, botSecretFile);
-    }
+    // The secret and any half-written copy of it.
+    const stuck = lineBot.removeSecret({ file: botSecretFile });
+    if (stuck.length) problem('LINE chats: the relay’s saved secret could not all be removed; close any app using the app’s data folder and remove it from there', stuckWhere(botSecretFile, stuck));
     botSecretSaved = fs.existsSync(botSecretFile);
     if (!botSecretSaved) botSecretFor = null;
   }
   function dropBotStore() {
     const stuck = botKeeper.remove();
     if (stuck.length) {
-      problem('LINE chats: the bot’s saved messages could not all be removed; close any app using the app’s data folder and remove them from there',
-        stuck.map((s) => `${path.join(path.dirname(botStoreFile), s.name)} (${s.code})`).join(', '));
+      problem('LINE chats: the bot’s saved messages could not all be removed; close any app using the app’s data folder and remove them from there', stuckWhere(botStoreFile, stuck));
     }
+  }
+  // The store is read before the part collects or writes anything: at
+  // start, when LINE chats or the bot part is turned on, when a secret is
+  // saved, and while it could not be read. Ticks lost with a settings file
+  // that could not be read come back from the groups the store kept text
+  // for, before anything is unticked. -> whether it was read.
+  let botTicksLost = botRead === 'unreadable';
+  function botLoad() {
+    if (!botTicksLost) return botKeeper.load(new Set(bot.read));
+    if (!botKeeper.load(null)) return false;
+    bot = lineBot.changeSettings({ ...bot, read: [...new Set([...bot.read, ...lineBot.keptGroups(botKeeper.store)])] }, {}).settings;
+    botTicksLost = false;
+    try {
+      writeJsonFile(botFile, bot);
+    } catch (err) {
+      // Kept in memory: the store keeps the text either way, and the next start brings the ticks back from it again.
+      lineLog('bot settings not saved', err);
+    }
+    return true;
   }
   {
     const start = lineBot.startPlan({ lineRead, lineEnabled: line.enabled, botRead, botOn: bot.on });
     if (start.drop) {
-      if (botSecretSaved) dropBotSecret();
+      dropBotSecret();
       dropBotStore();
     } else if (start.collect) {
       let deploymentId = null;
@@ -1499,7 +1517,7 @@ app.whenReady().then(() => {
       }
       // A secret is never sent to another relay than its own.
       if (botSecretSaved && botSecretFor && botSecretFor !== deploymentId) dropBotSecret();
-      botKeeper.load(new Set(bot.read));
+      botLoad();
     }
   }
   function scanLine() {
@@ -1616,7 +1634,13 @@ app.whenReady().then(() => {
   function saveLine(next) {
     writeJsonFile(lineFile, next);
     const turnedOff = line.enabled && !next.enabled;
+    const turnedOn = !line.enabled && next.enabled;
     line = next;
+    // The bot part can collect again: its store is read first.
+    if (turnedOn && bot.on) {
+      botLoad();
+      [botError, botTriedAt, botMore] = [null, null, false];
+    }
     if (turnedOff) {
       lineTmux = { sessions: [], why: null };
       pruneLinePrompts(0);
@@ -1686,7 +1710,8 @@ app.whenReady().then(() => {
       }
       let res;
       try {
-        res = await botKeeper.collect({ link, secret: readBotSecret(link), ticked: () => new Set(bot.read), send: askReader });
+        res = !botKeeper.loaded && !botLoad() ? { waiting: true }
+          : await botKeeper.collect({ link, secret: readBotSecret(link), ticked: () => new Set(bot.read), send: askReader });
       } catch (err) {
         if (err instanceof lineBot.LineBotError) res = { error: err };
         else {
@@ -1726,8 +1751,11 @@ app.whenReady().then(() => {
     if (!line.enabled || !bot.on) return;
     // A removal whose write failed (an untick) is written now.
     if (!botRun) {
-      const retried = botKeeper.retry();
-      if (!retried.saved) lineLog('bot store not saved', { code: retried.code });
+      if (!botKeeper.loaded) botLoad();
+      else {
+        const retried = botKeeper.retry(new Set(bot.read));
+        if (!retried.saved) lineLog('bot store not saved', { code: retried.code });
+      }
     }
     if (!botReady() || botRun) return;
     const due = lineBot.nextCollect({ ready: true, lastTryAt: botTriedAt, error: botError, more: botMore });
@@ -1765,17 +1793,15 @@ app.whenReady().then(() => {
       [botError, botTriedAt, botMore] = [null, null, false];
     }
     if (turnedOn) {
-      botKeeper.load(new Set(bot.read));
+      botLoad();
       [botError, botTriedAt, botMore] = [null, null, false];
     }
     let note = null;
     if ('tick' in allowed) {
       // Unticking drops the group's kept messages and senders, from the file too.
       const done = botKeeper.untick(new Set(bot.read));
-      if (!done.saved) {
-        lineLog('bot store not saved', { code: done.code });
-        note = 'Unticked. Its kept messages are hidden; the app could not remove them from its file just now and tries again within a minute.';
-      }
+      if (!done.saved) lineLog('bot store not saved', { code: done.code });
+      if (!allowed.tick?.on) note = lineBot.untickNote({ saved: done.saved, aside: botKeeper.hasAside() });
     }
     scanLine();
     botTick();
@@ -1810,6 +1836,8 @@ app.whenReady().then(() => {
     // answers, the cursor is not sent (linebot.cursorFor), so nothing on it
     // is let go unseen; what comes again is kept once. A collection under
     // way is dropped, keeping what it wrote.
+    // Read first if it has not been: a store that cannot be read takes the new secret at its next good read.
+    if (!botKeeper.loaded) botLoad();
     const forgot = botKeeper.forgetRelay();
     if (!forgot.saved) lineLog('bot store not saved', { code: forgot.code });
     [botError, botTriedAt, botMore] = [null, null, false];
