@@ -43,6 +43,7 @@ class Sheet {
     this.maxRows += n;
   }
   deleteRows(first, n) {
+    this.env.hook('remove', this);
     if (n >= this.maxRows) throw new Error('You can’t delete all the rows on the sheet.');
     this.cells.splice(first - 1, n);
     this.maxRows -= n;
@@ -78,6 +79,7 @@ class Sheet {
         });
       },
       clearContent() {
+        sheet.env.hook('remove', sheet);
         for (let i = 0; i < rows; i++) {
           const r = sheet.cells[row - 1 + i];
           if (r) for (let j = 0; j < cols; j++) r[col - 1 + j] = '';
@@ -121,8 +123,13 @@ function appsScript() {
   };
   const store = {
     getProperty(k) {
+      env.hook('getProperty', k);
       env.propReads += 1;
       return props.has(k) ? props.get(k) : null;
+    },
+    getKeys() {
+      env.propReads += 1;
+      return [...props.keys()];
     },
     getProperties() {
       env.propReads += 1;
@@ -132,6 +139,12 @@ function appsScript() {
       env.hook('setProperty', k);
       env.propWrites += 1;
       props.set(k, String(v));
+    },
+    // One write for all of them.
+    setProperties(o) {
+      env.hook('setProperties', o);
+      env.propWrites += 1;
+      for (const [k, v] of Object.entries(o)) props.set(k, String(v));
     },
     deleteProperty(k) {
       env.propWrites += 1;
@@ -224,7 +237,8 @@ test('rows older than 14 days go on LINE’s calls too, counted as missed, with 
   // LINE's Verify button: no events, and the old row still goes.
   assert.deepEqual(env.line({ events: [] }), { ok: true });
   assert.equal(env.inbox().getLastRow(), 1);
-  assert.equal(env.props.get('MISSED'), '1');
+  // Its number waits in the Gone tab for the app's next call to count.
+  assert.equal(env.sheets.get('Gone').getLastRow(), 1);
   env.line({ events: [text('second')] });
   env.inbox().cells[1][1] = new Date(Date.now() - 15 * DAY).toISOString();
   env.line({ events: [text('third')] });
@@ -329,8 +343,8 @@ test('the reply keeps the shape the app has always read, with lost added; a repl
   const env = appsScript();
   env.line({ events: [text('a')] });
   const reply = env.app(0);
-  assert.deepEqual(Object.keys(reply).sort(), ['capped', 'events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay']);
-  const { lost, capped, ...v1 } = reply;
+  assert.deepEqual(Object.keys(reply).sort(), ['capped', 'denied', 'events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay', 'version']);
+  const { lost, capped, denied, version, ...v1 } = reply;
   assert.equal(lost, 0);
   assert.equal(capped, 0);
   assert.equal(B.relayReply(v1).counts.lost, 0);
@@ -466,4 +480,107 @@ test('when the Tally is full the relay marks it, and the app is told the refused
   assert.equal(tally.getLastRow(), 0);
   assert.equal(reply.refused, 100_000);
   assert.equal(reply.capped, 1);
+});
+
+// ---- review round 3 ---------------------------------------------------------------------------
+
+test('calls with a wrong secret are counted as denied, with no property read or write, and capped like refused ones', () => {
+  const env = appsScript();
+  env.cache.clear();
+  const reads = env.propReads;
+  const writes = env.propWrites;
+  for (let i = 0; i < 30; i++) assert.deepEqual(env.app(0, 'not-the-secret-not-the-secret-not-the-secret'), { ok: false, error: 'not allowed' });
+  assert.ok(env.propReads - reads <= 1, `${env.propReads - reads} reads`);
+  assert.equal(env.propWrites, writes);
+  const reply = env.app(0);
+  assert.equal(reply.denied, 30);
+  assert.equal(reply.refused, 0);
+});
+
+test('the relay says its version', () => {
+  const env = appsScript();
+  assert.equal(env.app(0).version, 3);
+});
+
+test('after a long absence the app is told exactly the events it never saved', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b')] });
+  assert.deepEqual(env.app(0).events.map((e) => e.seq), [1, 2]); // sent, then the app could not save them
+  env.line({ events: [text('c')] });
+  for (const r of env.inbox().cells.slice(1)) if (r && r[0] !== '') r[1] = new Date(Date.now() - 15 * DAY).toISOString();
+  env.line({ events: [text('d')] });
+  const back = env.app(0);
+  assert.equal(back.missed, 3);
+  assert.deepEqual(back.events.map((e) => e.event.message.text), ['d']);
+  // Asked again with the same cursor: not counted twice.
+  assert.equal(env.app(0).missed, 3);
+});
+
+test('a missed count is never lost when the write recording it fails, on LINE’s calls or the app’s', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b')] });
+  for (const r of env.inbox().cells.slice(1)) if (r && r[0] !== '') r[1] = new Date(Date.now() - 15 * DAY).toISOString();
+  // LINE's call ages them out while no property can be written.
+  env.hooks.setProperty = () => { throw new Error('Service invoked too many times: properties'); };
+  env.hooks.setProperties = () => { throw new Error('Service invoked too many times: properties'); };
+  env.line({ events: [] });
+  // The app's call fails to write the count once, then succeeds.
+  env.hooks.setProperties = () => { throw new Error('Service invoked too many times: properties'); };
+  delete env.hooks.setProperty;
+  env.app(0);
+  assert.equal(env.app(0).missed, 2);
+});
+
+test('a fold that fails part-way never adds a count twice', () => {
+  const env = appsScript();
+  for (let i = 0; i < 3; i++) env.line({ events: [] }, 'wrong-key');
+  env.hooks.remove = (sheet) => {
+    if (sheet.name === 'Tally') throw new Error('Service Spreadsheets failed');
+    return false;
+  };
+  assert.equal(env.app(0).refused, 3);
+  delete env.hooks.remove;
+  assert.equal(env.app(0).refused, 3);
+  assert.equal(env.sheets.get('Tally').getLastRow(), 0);
+  // The count's own write failing: the rows are counted once, at the next call.
+  env.line({ events: [] }, 'wrong-key');
+  env.hooks.setProperties = () => { throw new Error('Service invoked too many times: properties'); };
+  env.app(0);
+  assert.equal(env.app(0).refused, 4);
+});
+
+test('counts that wait as properties are bounded, and the overflow says the count is a floor', () => {
+  const env = appsScript();
+  env.sheetsFail = true;
+  env.lockBusy = true;
+  for (let i = 0; i < 80; i++) env.line({ events: [text(`e${i}`)] });
+  const spare = [...env.props.keys()].filter((k) => k.startsWith('TALLY_'));
+  assert.ok(spare.length <= 51, `${spare.length} properties`);
+  env.sheetsFail = false;
+  env.lockBusy = false;
+  const reply = env.app(0);
+  assert.equal(reply.lost, 50);
+  assert.equal(reply.capped, 1);
+});
+
+test('LINE-looking events counted while the key could not be read are capped per call', () => {
+  const env = appsScript();
+  env.cache.clear();
+  env.hooks.getProperty = (k) => {
+    if (k === 'WEBHOOK_KEY') throw new Error('Service unavailable');
+    return false;
+  };
+  assert.deepEqual(env.line({ events: Array.from({ length: 500 }, (_, i) => text(`u${i}`)) }), { ok: false, error: 'settings' });
+  delete env.hooks.getProperty;
+  assert.equal(env.app(0).lost, 100);
+});
+
+test('a reader secret the relay cannot read is said as its settings, not as busy', () => {
+  const env = appsScript();
+  env.cache.clear();
+  env.hooks.getProperty = (k) => {
+    if (k === 'READER_SECRET') throw new Error('Service unavailable');
+    return false;
+  };
+  assert.deepEqual(env.app(0), { ok: false, error: 'settings' });
 });
