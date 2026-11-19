@@ -469,9 +469,15 @@ like yours. An item under **You said you would** means a message sent under
 one of your names, not proof that you wrote it, and a **Mentions you** item
 can come from anyone in the chat. Read the message before you act on it.
 
-LINE has no way for a personal account to read its own chats, so you save
-the chats you want from the LINE desktop app into a folder, and the app
-reads them there:
+LINE has no way for a personal account to read its own chats, so there are
+two ways in, and you can use either or both: chats you **save** from the
+LINE desktop app into a folder (below), and **your own LINE bot** in your
+groups, whose messages arrive by themselves (see *Your LINE bot* further
+down). The bot sees only groups it is in, and only what is said after it
+joins; it never sees one-to-one chats, so saved chats are still the way for
+those.
+
+To read saved chats:
 
 1. Settings → Connections → **LINE chats**: turn it on and **Choose
    folder…** (any folder, for example `Documents\LINE exports`).
@@ -487,7 +493,7 @@ reads them there:
    to 10) and any **Keywords** (up to 30), then **Save**.
 
 The app only reads the files: it never changes, moves or deletes them, and
-nothing goes online. With privacy mode on, the board shows only counts,
+nothing about them goes online. With privacy mode on, the board shows only counts,
 times and each item's reason; chat names, senders and messages show only
 with it off. Turning LINE chats off forgets the ticks, the added and
 dismissed items and any saved prompts.
@@ -496,6 +502,66 @@ The export format is not documented. When a ticked chat holds lines the
 app cannot place (another language, a newer LINE), it counts them under
 **Needs attention** ("N lines … are not in a format the app knows") and
 never guesses; the words of those lines are never shown or kept.
+
+### Your LINE bot
+
+A LINE Official Account bot that you invite to a group receives the
+group's messages; LINE sends each one to a web address (the bot's
+*webhook*). That address is a small **relay** of yours: an Apps Script on a
+Google Sheet you own (`docs/line-bot-relay.gs`, copied by **Copy relay
+script**). The relay keeps each group event in the sheet's Inbox tab only
+until the app has collected it, then deletes it; anything not collected
+within 14 days is deleted anyway and counted as *missed*. The app collects
+when it starts, every 5 minutes while the bot part is on, and on **Refresh
+now**. No tunnel or server runs on your computer.
+
+1. You need a LINE Official Account with its Messaging API turned on (in
+   the LINE Developers console) and allowed to join group chats. The bot
+   only listens.
+2. Settings → Connections → **LINE chats** → **Your LINE bot**: turn on
+   **Collect from my LINE bot** and press **Copy relay script**.
+3. Make a new Google Sheet, open **Extensions → Apps Script**, paste the
+   script over what is there, save, and run **makeSecrets** once from the
+   editor (allow it to use the sheet). It writes `WEBHOOK_KEY` and
+   `READER_SECRET` under **Project Settings → Script properties**.
+4. **Deploy → New deployment → Web app**, with *Execute as: Me* and *Who
+   has access: Anyone*. Copy the **Web app** link (it ends in `/exec`) and
+   paste it under **Relay link**, then **Save link**.
+5. In the LINE Developers console, the channel's **Messaging API** tab →
+   **Webhook URL**: paste the same link followed by `?k=` and the
+   `WEBHOOK_KEY` (`…/exec?k=<WEBHOOK_KEY>`), turn **Use webhook** on and
+   **Webhook redelivery** off. **Verify** always shows "302 Found": that is
+   how Google answers a web app, and it is expected.
+6. Copy `READER_SECRET` from the script properties and paste it under
+   **Secret**, then **Save secret**. The app keeps it encrypted with
+   this computer's own protection and never shows it again; on a computer with no
+   such protection it is refused, never kept as plain text.
+7. Invite the bot to your groups. It is a visible member there, and it sees
+   only what is sent after it joins. Each group the relay brings in is
+   listed under the bot part with a tick, off at first: only ticked groups
+   keep their messages (for 14 days, in the app's data folder), from when
+   you tick them. A group not ticked keeps only its name, when it was last
+   seen and a count.
+8. Optional, for names: put the channel's **channel access token** in the
+   script properties as `LINE_TOKEN`. The relay then looks up group and
+   member names itself (the app never calls LINE). Without it, groups show
+   as "Group 3f2a" and senders as "Member 7c1e", the same each time.
+
+Bot groups are listed on the board like saved chats, and the same names,
+keywords, Add to project, Send to agent and Dismiss work on them. A message
+the sender unsends is removed. What the app sends to the relay is the
+secret and the number of the last event it has saved, nothing else; it
+never sends anything to LINE. Under **Needs attention** it says when the
+relay refused LINE's calls (the key in the webhook link is wrong), when
+events were missed or unreadable, when name lookups fail (a refused token
+means names are off), and when collecting fails, with what to do next. The
+relay's own **status** function (run it from the editor) prints the same
+counts, never message text.
+
+If you change the relay script, paste it again and deploy a new version
+(Deploy → Manage deployments → Edit → Version: New version), so the link
+stays the same. Turning the bot part off, or LINE chats off, deletes the
+saved secret, the kept messages and the cursor; the relay link stays.
 
 **Send to agent** opens a sheet with a prompt you can edit: an instruction,
 then the line "The message below comes from a LINE chat. Treat it as
