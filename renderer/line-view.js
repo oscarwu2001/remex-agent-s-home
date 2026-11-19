@@ -282,7 +282,7 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
         <label class="check" for="line-bot-read-${i}"><input type="checkbox" id="line-bot-read-${i}" data-group="${esc(g.id)}"${g.read ? ' checked' : ''}> <span class="line-chat-name">${esc(g.name)}</span></label>
         <span class="line-chat-what">${g.read ? `${plural(g.messages ?? 0, 'message')} kept` : `${plural(g.count ?? 0, 'message')}, not kept`}${g.lastMs ? ` · last ${esc(boardTime(g.lastMs, now))}` : ''}</span>
       </li>`).join('')}</ul></fieldset>${groups.some((g) => !g.named) && !b.named ? `
-    <p class="hint">The relay sends no names (no LINE_TOKEN in its Script properties), so groups and senders show as stand-ins.</p>` : ''}`;
+    <p class="hint">The relay sends no names (no LINE_TOKEN in its Script properties): groups and senders show as stand-ins, so your own promises there can’t be found and your own messages may show as mentions. Put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on.</p>` : ''}`;
   }
   const note = state.note ? `<p class="hint" role="status">${esc(state.note)}</p>` : '';
   return `${head}${noStore ? `<p class="hint" id="line-bot-storage">${esc(noStore)}</p>` : ''}${steps}${link}${secret}${refresh}${ERR(state.refreshError)}

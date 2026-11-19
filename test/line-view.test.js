@@ -351,6 +351,7 @@ test('with privacy off each group has a tick, off unless ticked, with what is ke
   // Without names from the relay, it says why the stand-ins.
   const unnamed = lineSettingsHtml(line({ bot: botPart({ named: false, groups: [{ id: 'c3c3c3c3c3c3c3c3', name: 'Group c3c3', named: false, kind: 'group', read: false, lastMs: at(9, 0), count: 1 }] }) }), { privacy: false, online: true, now: NOW });
   assert.match(unnamed, /The relay sends no names \(no LINE_TOKEN/);
+  assert.match(unnamed, /stand-ins, so your own promises there can’t be found and your own messages may show as mentions/);
   // Names and keywords are asked for with the bot alone, no folder.
   assert.match(lineSettingsHtml(line({ folder: '', chats: [], bot: botPart() }), { privacy: false, online: true, now: NOW }), /id="line-names"/);
 });
