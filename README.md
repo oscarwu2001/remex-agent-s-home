@@ -610,7 +610,8 @@ bot's own switch turns nothing off and says why: close that program and
 try again; LINE chats' switch still turns LINE chats off, and the bot's off
 is finished within a minute of the file being freed (Settings and **Needs
 attention** say it is not finished until then, and LINE chats can't be
-turned on again before it is). The settings file of the version before
+turned on again before it is; a restart finishes it too, since the app keeps
+a note of the unfinished off in its data folder until it is done). The settings file of the version before
 (`line-bot.json`) is moved into the store, then removed; while it cannot be
 read just now the app waits for it, and if it is not settings, or the
 store's own ticks cannot be read, nothing is deleted: the ticks are rebuilt
