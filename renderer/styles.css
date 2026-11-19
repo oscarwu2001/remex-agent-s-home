@@ -901,6 +901,9 @@ body.no-select, body.no-select * { user-select: none; }
 .line-section .form-actions > .link-btn:first-child { margin-left: calc(-1 * var(--s-2)); }
 /* Settings: the chats in the folder, each with its tick. */
 .line-chats { border: 0; margin: 0; padding: 0; min-width: 0; }
+/* The two parts of LINE chats in Settings: saved chats and the bot. */
+.line-part-h { margin: var(--s-3) 0 0; font: 400 14px var(--font); color: var(--ink); }
+.line-part-h:first-child { margin-top: 0; }
 .line-chats legend { padding: 0; margin-bottom: var(--s-1); font-size: 13px; color: var(--ink-muted); }
 .line-chats ul { list-style: none; margin: 0; padding: 0; }
 /* Name, what it holds, then its tick on a line of its own: the panel is narrow. */

@@ -211,7 +211,8 @@ export function demoSnapshot(nowMs, epochMs) {
 
 // Made-up LINE items, so the section can be seen without exports: one of
 // each reason, as src/core/linechat.js gives them (relatedToYou, draftTodo,
-// promptDraft), in invented chats with invented people.
+// promptDraft), in invented chats with invented people, and a group the
+// LINE bot brings in (src/core/linebot.js botView), with one not ticked.
 function demoLine(nowMs) {
   const pad = (n) => String(n).padStart(2, '0');
   const wall = (ms) => {
@@ -228,14 +229,24 @@ function demoLine(nowMs) {
     return { key: hash, hash, chat, at, ms, sender, text, reason, matched, draft: { text: todo, source: { chat, at, sender } }, prompt };
   };
   return {
-    enabled: true, demo: true, folder: 'C:\\sample\\LINE exports', names: ['Sam'], keywords: ['calibration'], readCount: 2, folderError: null,
+    enabled: true, demo: true, folder: 'C:\\sample\\LINE exports', names: ['Sam'], keywords: ['calibration'], readCount: 3, folderError: null,
     scannedAt: nowMs - 8_000, windowDays: 14,
     chats: [
       { chat: 'Sample crew', files: 2, read: true, problems: 0, messages: 184 },
       { chat: '範例實驗室', files: 1, read: true, problems: 0, messages: 57 },
       { chat: 'Sample family', files: 1, read: false, problems: 0 },
     ],
+    bot: {
+      on: true, link: 'https://…/macros/s/sample-relay/exec', secretSaved: true, secretStorage: null, busy: false,
+      collectedAt: nowMs - 2 * min, nextAt: nowMs + 3 * min, error: null, errorHere: null, named: true, windowDays: 14,
+      groups: [
+        { id: 'b07a5e1f00000001', name: 'Sample ward team', named: true, kind: 'group', read: true, lastMs: nowMs - 12 * min, count: 63, messages: 63 },
+        { id: 'b07a5e1f00000002', name: 'Group 5e1f', named: false, kind: 'group', read: false, lastMs: nowMs - 180 * min, count: 9 },
+      ],
+    },
     items: [
+      // From the bot's group: an item like any other.
+      item('d0a1b2c3d4e5f604', 12 * min, 'Sample ward team', 'Alex', 'Sam, can you bring the spare tracker cable to theatre 3 this afternoon?', 'mention', 'Sam', 'bring the spare tracker cable to theatre 3 this afternoon?'),
       // Guessed long (isLong) but not cut on a wide board, so its Show all is hidden once drawn.
       item('d0a1b2c3d4e5f601', 25 * min, 'Sample crew', 'Robin', '@Sam could you check why the nightly export failed? The log says the tracker lost the probe twice, once just after the warm-up and once near the end, and the retry did not start on its own. No rush before lunch.', 'mention', 'Sam', 'check why the nightly export failed? The log says the tracker lost the probe twice.'),
       // Long enough to be cut at six lines, so its Show all can be seen.

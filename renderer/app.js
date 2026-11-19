@@ -15,7 +15,7 @@ import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
-import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus } from './line-view.js';
+import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts } from './line-view.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -147,7 +147,10 @@ for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['o
     prefs[key] = e.target.checked;
     if (key === 'demo') demoEpoch = Date.now();
     // A link typed but not saved shows no more once privacy mode is on.
-    if (key === 'private' && prefs.private) forgetFieldDrafts();
+    if (key === 'private' && prefs.private) {
+      forgetFieldDrafts();
+      forgetLineBotDrafts();
+    }
     savePrefs();
     applyPrefs();
     render(true);
@@ -2918,6 +2921,12 @@ const lineUi = { adding: null, todo: null, project: null, expanded: new Set(), a
 let lineStatus = null; // the section's one status line: { text, undo }
 // names/keywords: what is typed in Settings, kept across redraws until saved.
 const lineSettingsUi = { error: '', note: '', names: null, keywords: null };
+// The bot part's Settings: which field is open, a link refused (kept as
+// typed), the last replies, and the switch as pressed until the snapshot
+// agrees (pendingOn). The secret is never kept here.
+const lineBotUi = {
+  linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', pendingOn: null, pendingAt: 0, focusAfter: '',
+};
 const lineDemoMarks = new Set(); // the demo's added and dismissed items, until it is turned off
 // Items added or dismissed whose mark is saved but which the snapshot still
 // lists: hidden at once, and no longer pending once a snapshot drops them.
@@ -2990,12 +2999,64 @@ function renderLineSettings() {
   const online = Boolean(bridge.lineSet);
   if (Date.now() - lineSwitchedAt > 1500) $('opt-line').checked = Boolean(l?.enabled);
   $('opt-line').disabled = !online || Boolean(l?.demo);
+  if (lineBotUi.pendingOn != null && (l?.bot?.on === lineBotUi.pendingOn || Date.now() - lineBotUi.pendingAt > 1500)) lineBotUi.pendingOn = null;
   const shown = l?.enabled ? {
     ...l,
+    ...(l.bot && lineBotUi.pendingOn != null ? { bot: { ...l.bot, on: lineBotUi.pendingOn } } : {}),
     names: lineSettingsUi.names != null ? [lineSettingsUi.names] : l.names,
     keywords: lineSettingsUi.keywords != null ? [lineSettingsUi.keywords] : l.keywords,
   } : l;
-  paint($('line-settings'), lineSettingsHtml(shown, { privacy: prefs.private, online, state: lineSettingsUi }));
+  paint($('line-settings'), lineSettingsHtml(shown, { privacy: prefs.private, online, state: lineSettingsUi, bot: lineBotUi }));
+  // After a Save, focus goes to what replaced the field, once it is drawn.
+  if (lineBotUi.focusAfter && $(lineBotUi.focusAfter)) {
+    $(lineBotUi.focusAfter).focus({ preventScroll: true });
+    lineBotUi.focusAfter = '';
+  }
+}
+// A relay link typed but not saved goes (privacy mode turned on, or
+// Settings closed), drawn afresh with focus already off the fields.
+function forgetLineBotDrafts() {
+  dropLineBotDrafts(lineBotUi);
+  $('line-settings').dataset.sig = '';
+  renderLineSettings();
+}
+// The bot part's buttons. Its outcome (collecting, then when, or why it
+// failed) comes with the snapshot; only a refusal before collecting is
+// said here.
+async function lineBotAction(act) {
+  const cannot = snapshot.demo ? 'The demo saves and collects nothing; with your own bot this works.' : 'The preview cannot do this; it works in the app.';
+  if (act === 'bot-copy-script') {
+    const res = bridge.lineBotCopyScript ? await bridge.lineBotCopyScript().catch(lineNoAnswer) : { ok: false, error: 'The preview cannot copy the script; this works in the app.' };
+    lineBotUi.scriptNote = res.ok ? 'Relay script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
+    lineBotUi.scriptError = res.ok ? '' : res.error;
+    renderLineSettings();
+  } else if (act === 'bot-change-link') {
+    lineBotUi.linkEditing = true;
+    renderLineSettings();
+    $('line-bot-link')?.focus();
+  } else if (act === 'bot-replace-secret') {
+    lineBotUi.secretEditing = true;
+    renderLineSettings();
+    $('line-bot-secret')?.focus();
+  } else if (act === 'bot-cancel-link' || act === 'bot-cancel-secret') {
+    // Back to what is saved, and to the button that opened the field.
+    if (act === 'bot-cancel-link') Object.assign(lineBotUi, { linkEditing: false, linkError: '', linkDraft: null });
+    else Object.assign(lineBotUi, { secretEditing: false, secretError: '' });
+    renderLineSettings();
+    $(act === 'bot-cancel-link' ? 'line-bot-change-link' : 'line-bot-replace-secret')?.focus();
+  } else if (act === 'bot-refresh') {
+    if (snapshot.demo || !bridge.lineBotRefresh) {
+      lineBotUi.note = cannot;
+      renderLineSettings();
+      return;
+    }
+    Object.assign(lineBotUi, { note: '', error: '' });
+    renderLineSettings();
+    const res = await bridge.lineBotRefresh().catch(lineNoAnswer);
+    if (!res.ok && !res.collected) lineBotUi.error = res.error;
+    renderLineSettings();
+    renderLine();
+  }
 }
 // After Add or Dismiss the item hides at once (linePending) and focus moves
 // to the same action on the next item still listed, else the one before
@@ -3090,6 +3151,10 @@ async function lineMark(key, what) {
 }
 async function lineAction(act, key) {
   lineUi.error = '';
+  if (act?.startsWith('bot-')) {
+    await lineBotAction(act);
+    return;
+  }
   if (act === 'settings') showInSettings('line-settings-h');
   else if (act === 'choose-folder' && (snapshot.demo || !bridge.lineChooseFolder)) {
     lineSettingsUi.note = snapshot.demo ? 'The demo chooses no folder.' : 'The preview cannot choose a folder; this works in the app.';
@@ -3203,6 +3268,34 @@ $('line-settings').addEventListener('input', (e) => {
   if (e.target.id === 'line-keywords') lineSettingsUi.keywords = e.target.value;
 });
 $('line-settings').addEventListener('change', async (e) => {
+  // The bot part's switch: on starts its set-up; off deletes its secret and kept messages.
+  if (e.target.id === 'opt-line-bot') {
+    if (snapshot.demo || !bridge.lineBotSet) return;
+    Object.assign(lineBotUi, { pendingOn: e.target.checked, pendingAt: Date.now() });
+    const res = await bridge.lineBotSet({ on: e.target.checked }).catch(lineNoAnswer);
+    Object.assign(lineBotUi, {
+      linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '',
+      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot',
+    });
+    renderLineSettings();
+    setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+    return;
+  }
+  const group = e.target.closest('input[type="checkbox"][data-group]');
+  if (group) {
+    if (snapshot.demo || !bridge.lineBotSet) {
+      group.checked = !group.checked;
+      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this ticks the group.' : 'The preview cannot save; this works in the app.';
+      renderLineSettings();
+      return;
+    }
+    const res = await bridge.lineBotSet({ tick: { id: group.dataset.group, on: group.checked } }).catch(lineNoAnswer);
+    Object.assign(lineBotUi, { error: res.ok ? '' : `Not saved. ${res.error}`, note: res.note ?? '' });
+    if (!res.ok) group.checked = !group.checked;
+    renderLineSettings();
+    setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
+    return;
+  }
   const tick = e.target.closest('input[type="checkbox"][data-chat]');
   if (!tick) return;
   if (snapshot.demo || !bridge.lineSet) {
@@ -3219,6 +3312,42 @@ $('line-settings').addEventListener('change', async (e) => {
 });
 $('line-settings').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (e.target.id === 'line-bot-link-form') {
+    const typed = $('line-bot-link').value;
+    if (snapshot.demo || !bridge.lineBotSet) {
+      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this saves the relay link.' : 'The preview cannot save; this works in the app.';
+      renderLineSettings();
+      return;
+    }
+    const res = await bridge.lineBotSet({ link: typed }).catch(lineNoAnswer);
+    // Refused: the link stays as typed, to be put right.
+    Object.assign(lineBotUi, res.ok
+      ? { linkError: '', linkDraft: null, linkEditing: false, focusAfter: 'line-bot-change-link', secretNote: res.secretNote ?? '' }
+      : { linkError: res.error, linkDraft: typed });
+    renderLineSettings();
+    if (!res.ok) $('line-bot-link')?.focus();
+    setTimeout(renderLineSettings, 600);
+    return;
+  }
+  if (e.target.id === 'line-bot-secret-form') {
+    // Read once and cleared at once: the secret stays in no field or state.
+    const input = $('line-bot-secret');
+    const secret = input.value;
+    input.value = '';
+    if (snapshot.demo || !bridge.lineBotSaveSecret) {
+      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this saves the secret.' : 'The preview cannot save; this works in the app.';
+      renderLineSettings();
+      return;
+    }
+    const res = await bridge.lineBotSaveSecret(secret).catch(lineNoAnswer);
+    Object.assign(lineBotUi, res.ok
+      ? { secretError: '', secretEditing: false, secretNote: '', focusAfter: 'line-bot-replace-secret' }
+      : { secretError: res.error });
+    renderLineSettings();
+    if (!res.ok) $('line-bot-secret')?.focus();
+    setTimeout(renderLineSettings, 600);
+    return;
+  }
   if (e.target.id !== 'line-words-form') return;
   if (snapshot.demo || !bridge.lineSet) {
     lineSettingsUi.note = snapshot.demo ? 'The demo saves nothing; with your own folder this saves your names and keywords.' : 'The preview cannot save; this works in the app.';
@@ -3239,6 +3368,9 @@ $('opt-line').addEventListener('change', async (e) => {
   lineSettingsUi.error = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
   Object.assign(lineSettingsUi, { names: null, keywords: null, note: '' });
+  Object.assign(lineBotUi, {
+    linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', pendingOn: null,
+  });
   Object.assign(lineUi, { adding: null, todo: null, project: null, error: '' });
   lineDrafts.clear();
   setLineStatus(null);
@@ -3473,6 +3605,7 @@ function setSettings(open) {
     $('settings-open').focus();
     // A link typed but not saved is not kept past Settings.
     forgetFieldDrafts();
+    forgetLineBotDrafts();
   }
 }
 $('settings-open').addEventListener('click', () => setSettings($('settings').hidden));
