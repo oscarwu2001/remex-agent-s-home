@@ -513,8 +513,8 @@ script**). The relay keeps each group event of the kinds the app reads
 (messages, unsends, members joining or leaving, the bot joining or leaving)
 in the sheet's Inbox tab only until the app has collected it, then deletes
 it; anything not collected within 14 days is deleted anyway, at the next
-call from LINE or the app, and counted as *missed* unless the app had
-already been sent it. The app collects when
+call from LINE or the app; those the app never saved are counted as
+*missed* at its next call. The app collects when
 it starts, every 5 minutes while the bot part is on, and on **Refresh
 now**. No tunnel or server runs on your computer.
 
@@ -562,33 +562,40 @@ unsends is removed. What the app sends to the relay is the secret and the
 number of the last event it has saved, nothing else; it never sends
 anything to LINE. Under **Needs attention** it says when the relay refused
 calls (a wrong key in LINE's webhook link, or someone else calling the
-relay; "at least" when they came too fast to count them all), when events
-were missed, lost by the relay (busy, or the sheet failed) or unreadable, when name lookups fail (a refused token means names
-are off), when the bot part is on but not collecting and why, and when
-collecting fails, with what to do next. The relay's own **status**
+relay), when calls had a wrong secret (someone other than this app), when
+events were missed, lost by the relay (busy, or the sheet failed) or unreadable, when name lookups fail (a refused token means names
+are off), when the bot part is on but not collecting and why, when the
+relay is an older version (with how to update it), and when collecting
+fails, with what to do next; a count is "at least" when calls came too fast
+for the relay to keep them all. The relay's own **status**
 function (run it from the editor) prints the same counts, never message
 text.
 
 If you change the relay script, paste it again and deploy a new version
 (Deploy → Manage deployments → Edit → Version: New version), so the link
-stays the same. The relay from before version 2 still works with the app;
-version 2 also keeps only the events the app reads, ignores names a caller
-makes up, removes old rows on LINE's calls too, counts events it could not
-keep (*lost*), and counts calls with a wrong key or none in a **Tally**
-tab with its keys kept in the script's cache, so a flood of such calls
-cannot use up the script's daily quota for its properties. A key you edit
+stays the same. An older relay still works with the app, which says once
+that it can be updated. Version 3 keeps only the events the app reads,
+ignores names a caller makes up, removes old rows on LINE's calls too
+(their numbers wait in a **Gone** tab, so the app is told exactly which it
+never saved), counts events it could not keep (*lost*), and counts calls
+with a wrong key, none, or a wrong secret in a **Tally** tab with its keys
+kept in the script's cache, so a flood of such calls cannot use up the
+script's daily quota for its properties. A key you edit
 by hand under Script properties takes up to 10 minutes to be used (run
 **makeSecrets** again for new keys at once). A flood can still delay or
 drop LINE's events, since Apps Script runs at most 30 calls of a script at
 once: if that happens, make a new deployment (**Deploy → New
-deployment**) and give its link to LINE's webhook (with `?k=`) and to
-**Relay link**; the old link then stops.
+deployment**), put its link in LINE's webhook (with `?k=`) and in **Relay
+link**, then archive the old deployment (**Deploy → Manage deployments →
+Archive**): an old deployment answers until it is archived.
 
-Turning the bot part off, or LINE chats off, deletes the saved secret, the
-kept messages and the cursor; the relay link stays. A settings file the app
-cannot read deletes nothing: the bot part then collects nothing and
-**Needs attention** says so; turned on again, the groups it kept messages
-for come back ticked. Saved messages the app cannot read just now (another
+The bot's ticks and its relay link are kept with its saved messages, in the
+app's data folder; its settings file says only whether it is on (an older
+one's ticks and link move over by themselves). Turning the bot part off, or
+LINE chats off, deletes the saved secret, the kept messages, the ticks and
+the cursor; the relay link stays. A settings file the app cannot read
+deletes nothing: the bot part then collects nothing and **Needs attention**
+says so until you turn it on again, with its ticks and link as they were. Saved messages the app cannot read just now (another
 program has the file open) are left as they are and read again before
 anything is collected or written; a file that is not in a shape the app
 reads is kept aside for at most 14 days. Turning the bot part off does not
