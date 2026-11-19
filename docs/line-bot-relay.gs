@@ -40,6 +40,7 @@ const TALLY = 'Tally';
 const KEEP_DAYS = 14;
 const BATCH = 500;
 const FOLD = 5000;
+const TALLY_MAX = 100000;
 const TYPES = ['message', 'unsend', 'memberJoined', 'memberLeft', 'join', 'leave'];
 const TALLIED = { refused: 'REFUSED', notJson: 'NOT_JSON', lost: 'LOST' };
 
@@ -260,10 +261,15 @@ function tallySheet_() {
 }
 
 // One row per count, appended without the lock: an append is whole on its
-// own, so no count is lost, and nothing waits for LINE's calls.
+// own, so no count is lost, and nothing waits for LINE's calls. Past
+// TALLY_MAX rows waiting (a flood of wrong-key calls) no more refused ones
+// are added, so the spreadsheet cannot fill up: the count has risen enough
+// to be said. LINE's own (notJson, lost) are always added.
 function tally_(what, n) {
   try {
-    tallySheet_().appendRow([what, n, new Date().toISOString()]);
+    const sheet = tallySheet_();
+    if (what === 'refused' && sheet.getLastRow() >= TALLY_MAX) return;
+    sheet.appendRow([what, n, new Date().toISOString()]);
   } catch (err) {
     console.error('Not counted (' + what + ' ' + n + '): ' + err); // shown under Executions
   }

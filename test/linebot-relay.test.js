@@ -306,3 +306,22 @@ test('the reply keeps the shape the app has always read, with lost added; a repl
   assert.deepEqual(env.app(reply.events[0].seq).events, []);
   assert.equal(env.inbox().getLastRow(), 1);
 });
+
+test('a flood of wrong-key calls stops adding Tally rows at the cap, and LINE’s events are still kept', () => {
+  const env = appsScript();
+  env.line({ events: [] }, 'wrong-key');
+  const tally = env.sheets.get('Tally');
+  for (let i = tally.getLastRow(); i < 100_000; i++) tally.cells[i] = ['refused', 1, 'then'];
+  env.line({ events: [] }, 'wrong-key');
+  assert.equal(tally.getLastRow(), 100_000);
+  // LINE's own events lost meanwhile are still counted.
+  env.lockBusy = true;
+  assert.deepEqual(env.line({ events: [text('lost')] }), { ok: false, error: 'busy' });
+  env.lockBusy = false;
+  assert.deepEqual(env.line({ events: [text('a')] }), { ok: true });
+  for (let i = 0; i < 25 && env.sheets.get('Tally').getLastRow(); i++) env.line({ events: [] });
+  const reply = env.app(0);
+  assert.equal(reply.events.length, 1);
+  assert.equal(reply.lost, 1);
+  assert.equal(reply.refused, 100_000);
+});
