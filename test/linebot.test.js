@@ -1,0 +1,632 @@
+'use strict';
+
+// LINE chats' bot part (src/core/linebot.js): the relay's answers, the
+// events as messages, the store and its cursor, over invented groups,
+// people and messages. The relay here is a stand-in that keeps the
+// relay script's rules (docs/line-bot-relay.gs): it numbers events, forgets
+// those up to the cursor it is sent, and says "cursor ahead" when the
+// cursor is past what it has numbered.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+const B = require('../src/core/linebot');
+const L = require('../src/core/linechat');
+const F = require('../src/core/fieldsurvey');
+
+const DEPLOY = 'AKfycbRelayRelayRelay0123456789_-abcdefg';
+const OTHER_DEPLOY = 'AKfycbOtherRelayRelay9876543210_-zyxwvut';
+const EXEC = `https://script.google.com/macros/s/${DEPLOY}/exec`;
+const ECHO = 'https://script.googleusercontent.com/macros/echo?user_content_key=demo-key&lib=demo';
+const LINK = { deploymentId: DEPLOY, url: EXEC };
+const SECRET = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+const RELAY_A = '11111111-2222-4333-8444-555555555555';
+const RELAY_B = '99999999-8888-4777-8666-555555555555';
+const NOW = new Date(2026, 10, 19, 12, 0).getTime();
+const at = (h, m, day = 19) => new Date(2026, 10, day, h, m).getTime();
+const min = 60_000;
+
+// Invented LINE webhook events, as the relay keeps them (no replyToken).
+let eventNo = 0;
+const source = (group, user) => ({ type: group.startsWith('R') ? 'room' : 'group', ...(group.startsWith('R') ? { roomId: group } : { groupId: group }), ...(user ? { userId: user } : {}) });
+const names = ({ groupName, senderName, nameProblem }) => ({
+  ...(groupName ? { _groupName: groupName } : {}), ...(senderName ? { _senderName: senderName } : {}), ...(nameProblem ? { _nameProblem: nameProblem } : {}),
+});
+const message = ({ group = 'Cgroup-demo-1', user = 'Uuser-demo-ken', id, type = 'text', text, ms = at(11, 0), ...rest }) => ({
+  type: 'message', mode: 'active', timestamp: ms, webhookEventId: `01DEMO${String(eventNo += 1).padStart(6, '0')}`, deliveryContext: { isRedelivery: false },
+  source: source(group, user), message: { id, type, ...(text != null ? { text } : {}) }, ...names(rest),
+});
+const unsend = ({ group = 'Cgroup-demo-1', user = 'Uuser-demo-ken', id, ms = at(11, 30) }) => ({
+  type: 'unsend', mode: 'active', timestamp: ms, webhookEventId: `01DEMO${String(eventNo += 1).padStart(6, '0')}`, source: source(group, user), unsend: { messageId: id },
+});
+const members = (type, { group = 'Cgroup-demo-1', users = ['Uuser-demo-new'], ms = at(10, 0) } = {}) => ({
+  type, timestamp: ms, webhookEventId: `01DEMO${String(eventNo += 1).padStart(6, '0')}`, source: source(group),
+  [type === 'memberJoined' ? 'joined' : 'left']: { members: users.map((userId) => ({ type: 'user', userId })) },
+});
+
+// The relay stand-in: rows { seq, received, event | broken }.
+function fakeRelay({ relay = RELAY_A, secret = SECRET, batch = 500 } = {}) {
+  const r = { relay, secret, batch, rows: [], next: 1, missed: 0, refused: 0, notJson: 0, calls: [] };
+  r.add = (...events) => {
+    for (const e of events) r.rows.push({ seq: r.next++, received: new Date(NOW).toISOString(), ...(e === 'broken' ? { broken: true } : { event: e }) });
+  };
+  r.answer = (body) => {
+    if (body.secret !== r.secret) return { ok: false, error: 'not allowed' };
+    const upTo = Math.max(0, Math.floor(Number(body.upTo) || 0));
+    if (upTo >= r.next) return { ok: false, error: 'cursor ahead', relay: r.relay };
+    r.rows = r.rows.filter((row) => row.seq > upTo);
+    const out = r.rows.slice(0, r.batch);
+    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson };
+  };
+  // Google's way: the POST is answered with a redirect, the answer fetched from the echo host.
+  let pending = null;
+  r.send = async (url, init) => {
+    r.calls.push({ url, init });
+    if (r.fail) {
+      const f = r.fail;
+      r.fail = null;
+      throw f;
+    }
+    if (init.method === 'POST') {
+      pending = r.answer(JSON.parse(init.body));
+      return { status: 302, location: ECHO, contentType: 'text/html', text: async () => '<html>moved</html>' };
+    }
+    const body = JSON.stringify(pending);
+    return { status: 200, location: undefined, contentType: 'application/json', text: async () => body };
+  };
+  return r;
+}
+
+// One collection against the stand-in, writing the store to `disk` (a
+// JSON text, as electron/main.js writes it) unless `failWrite` is set.
+function harness({ ticked = ['Cgroup-demo-1'], relay = fakeRelay() } = {}) {
+  const h = { relay, store: B.emptyStore(), disk: null, writes: 0, failWrite: null, ticked: new Set() };
+  h.tick = (raw, on = true) => {
+    const id = idOf(raw);
+    if (on) h.ticked.add(id);
+    else h.ticked.delete(id);
+    h.store = B.applyTicks(h.store, h.ticked);
+  };
+  for (const g of ticked) h.ticked.add(idOf(g));
+  h.collect = async (link = LINK, secret = SECRET) => {
+    const res = await B.collect({
+      store: h.store, link, secret, ticked: () => h.ticked, send: h.relay.send, now: () => NOW,
+      write: (s) => {
+        if (h.failWrite) throw h.failWrite;
+        h.disk = JSON.stringify(s);
+        h.writes += 1;
+      },
+    });
+    h.store = res.store;
+    return res;
+  };
+  // The app starting again: the store as read back from its file.
+  h.restart = () => {
+    h.store = h.disk ? B.readStore(h.disk).store : B.emptyStore();
+  };
+  h.chats = () => B.botChats(h.store, h.ticked);
+  return h;
+}
+// The group's id as the store knows it, found the way the app finds it:
+// from the event the relay delivered.
+const idOf = (raw) => B.readEvent(message({ group: raw, id: 'probe', text: 'x' })).group.id;
+const keysOf = (chats, opts = { names: ['Mei'], keywords: ['calibration'], since: 0 }) => chats.flatMap((c) => L.relatedToYou(c.messages, opts)).map((h) => h.key);
+
+// ---- events as messages ------------------------------------------------------------------
+
+test('a text event becomes a message in the exports’ shape, and the pipeline finds what concerns the user', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'M1', text: '@Mei please check the calibration', ms: at(11, 5), groupName: 'Demo crew', senderName: 'Ken' }));
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  const [chat] = h.chats();
+  assert.equal(chat.chat, 'Demo crew');
+  assert.equal(chat.messages.length, 1);
+  const m = chat.messages[0];
+  assert.deepEqual({ chat: m.chat, at: m.at, ms: m.ms, sender: m.sender, kind: m.kind, text: m.text }, {
+    chat: 'Demo crew', at: '2026-11-19 11:05', ms: at(11, 5), sender: 'Ken', kind: 'text', text: '@Mei please check the calibration',
+  });
+  assert.match(m.hash, /^[0-9a-f]{16}$/);
+  const hits = L.relatedToYou(chat.messages, { names: ['Mei'], keywords: [], since: 0 });
+  assert.deepEqual(hits.map((x) => [x.reason, x.chat, x.sender]), [['mention', 'Demo crew', 'Ken']]);
+  assert.equal(L.draftTodo(hits[0]).text, 'please check the calibration');
+  assert.match(L.promptDraft(hits[0]), /Chat: Demo crew\nFrom: Ken, 2026-11-19 11:05/);
+});
+
+test('each LINE message type maps onto an export kind; only text keeps its words', async () => {
+  const h = harness();
+  h.relay.add(
+    message({ id: 'K1', type: 'image' }), message({ id: 'K2', type: 'video' }), message({ id: 'K3', type: 'audio' }),
+    message({ id: 'K4', type: 'file' }), message({ id: 'K5', type: 'location' }), message({ id: 'K6', type: 'sticker' }),
+    message({ id: 'K7', type: 'somethingNew' }),
+    members('memberJoined', { users: ['Uuser-demo-new'] }), members('memberLeft', { users: ['Uuser-demo-old'] }),
+  );
+  await h.collect();
+  const [chat] = h.chats();
+  assert.deepEqual(chat.messages.map((m) => m.kind).sort(), ['audio', 'file', 'joined', 'left', 'location', 'other', 'photo', 'sticker', 'video']);
+  for (const m of chat.messages) {
+    assert.equal(m.text, '');
+    assert.equal(typeof m.actor, 'string');
+  }
+});
+
+test('a group is known by its id across renames: its items keep their keys, and it shows its latest name', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'R1', text: 'Mei can you look', groupName: 'Old name', senderName: 'Ken', ms: at(9, 0) }));
+  await h.collect();
+  const before = keysOf(h.chats());
+  h.relay.add(message({ id: 'R2', text: 'thanks', groupName: 'New name', senderName: 'Ken', ms: at(9, 30) }));
+  await h.collect();
+  assert.deepEqual(h.chats().map((c) => c.chat), ['New name']);
+  assert.deepEqual(keysOf(h.chats()), before);
+  // An older event carrying the old name does not win back.
+  h.relay.add(message({ id: 'R0', text: 'earlier', groupName: 'Old name', ms: at(8, 0) }));
+  await h.collect();
+  assert.deepEqual(h.chats().map((c) => c.chat), ['New name']);
+});
+
+test('without names from the relay, a group and a sender get stable stand-ins, never their LINE ids', async () => {
+  const h = harness({ ticked: ['Cgroup-demo-9'] });
+  h.relay.add(message({ group: 'Cgroup-demo-9', user: 'Uuser-demo-ana', id: 'S1', text: 'Mei, the report?' }), message({ group: 'Cgroup-demo-9', user: 'Uuser-demo-ana', id: 'S2', text: 'again' }));
+  await h.collect();
+  const [chat] = h.chats();
+  assert.match(chat.chat, /^Group [0-9a-f]{4}$/);
+  assert.match(chat.messages[0].sender, /^Member [0-9a-f]{4}$/);
+  assert.equal(chat.messages[0].sender, chat.messages[1].sender);
+  const all = JSON.stringify([h.store, h.chats(), B.botGroups(h.store, h.ticked)]);
+  assert.ok(!all.includes('Cgroup-demo-9'));
+  assert.ok(!all.includes('Uuser-demo-ana'));
+  // The same stand-ins after a restart.
+  h.restart();
+  assert.equal(h.chats()[0].chat, chat.chat);
+  assert.equal(h.chats()[0].messages[0].sender, chat.messages[0].sender);
+  // A multi-person chat (a room) is a "Chat".
+  const r = harness({ ticked: ['Rroom-demo-1'] });
+  r.relay.add(message({ group: 'Rroom-demo-1', id: 'S3', text: 'hi' }));
+  await r.collect();
+  assert.match(r.chats()[0].chat, /^Chat [0-9a-f]{4}$/);
+});
+
+test('item keys stay the same across a restart and a second delivery, so marks keep working', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'D1', text: 'Mei please sign', groupName: 'Demo crew', senderName: 'Ken' }));
+  await h.collect();
+  const keys = keysOf(h.chats());
+  assert.equal(keys.length, 1);
+  h.restart();
+  assert.deepEqual(keysOf(h.chats()), keys);
+  // A dismissal saved under the key hides the item after the restart.
+  const marks = L.changeSettings({ enabled: true }, { mark: { key: keys[0], what: 'dismissed' } }).settings.marks;
+  assert.ok(marks[keysOf(h.chats())[0]]);
+});
+
+// ---- unsend and duplicates ------------------------------------------------------------------
+
+test('an unsend removes that message from what is kept and shown', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'U1', text: 'Mei do X', ms: at(11, 0) }), message({ id: 'U2', text: 'Mei do Y', ms: at(11, 1) }));
+  await h.collect();
+  assert.equal(h.chats()[0].messages.length, 2);
+  h.relay.add(unsend({ id: 'U1' }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['Mei do Y']);
+  assert.ok(!h.disk.includes('Mei do X'));
+});
+
+test('an unsend of a message the app never kept removes nothing, and that message is not kept if it comes later', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'V1', text: 'kept' }), unsend({ id: 'V-unknown' }));
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['kept']);
+  assert.deepEqual(B.botProblems({ on: true, store: h.store, now: NOW }), []);
+  h.relay.add(message({ id: 'V-unknown', text: 'unsent before it came' }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['kept']);
+});
+
+test('the same event delivered twice is kept once', async () => {
+  const h = harness();
+  const ev = message({ id: 'W1', text: 'once', groupName: 'Demo crew' });
+  h.relay.add(ev, ev);
+  await h.collect();
+  assert.equal(h.chats()[0].messages.length, 1);
+  assert.equal(B.botGroups(h.store, h.ticked)[0].count, 1);
+});
+
+// ---- the relay's rules ------------------------------------------------------------------------
+
+test('a wrong secret is refused: nothing is taken or written, the cursor stays, and the message names READER_SECRET', async () => {
+  const h = harness({ relay: fakeRelay({ secret: 'a'.repeat(64) }) });
+  h.relay.add(message({ id: 'X1', text: 'hello' }));
+  const res = await h.collect();
+  assert.equal(res.error.kind, 'secret');
+  assert.match(res.error.message, /refused the secret.*READER_SECRET.*Settings → Connections → LINE chats/);
+  assert.equal(h.writes, 0);
+  assert.equal(h.store.cursor, 0);
+  assert.ok(!B.TRANSIENT.has(res.error.kind));
+  // In Settings it names the Secret field, open or behind Replace secret.
+  assert.match(B.inSettings(res.error.message, { secretOpen: true }), /then save it under Secret\.$/);
+  assert.match(B.inSettings(res.error.message, { secretOpen: false }), /then press Replace secret and save the new one\.$/);
+});
+
+test('the request posts only the secret and the cursor, to the relay link, and follows the one redirect with a plain GET', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'Y1', text: 'a' }));
+  await h.collect();
+  const [post, get] = h.relay.calls;
+  assert.equal(post.url, EXEC);
+  assert.deepEqual(JSON.parse(post.init.body), { secret: SECRET, upTo: 0 });
+  assert.equal(get.url, ECHO);
+  assert.equal(get.init.method, 'GET');
+  assert.ok(!JSON.stringify(get).includes(SECRET));
+  h.relay.add(message({ id: 'Y2', text: 'b' }));
+  await h.collect();
+  assert.deepEqual(JSON.parse(h.relay.calls[2].init.body), { secret: SECRET, upTo: 1 });
+});
+
+test('the cursor moves only after the messages it covers are written: a failed write gets the same events again, kept once', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'Z1', text: 'Mei first' }), message({ id: 'Z2', text: 'Mei second' }));
+  h.failWrite = Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+  const failed = await h.collect();
+  assert.equal(failed.error.kind, 'store');
+  assert.ok(B.TRANSIENT.has('store'));
+  assert.match(failed.error.message, /could not be saved/);
+  assert.equal(failed.error.code, 'store ENOSPC');
+  assert.equal(h.store.cursor, 0);
+  assert.equal(h.chats()[0]?.messages.length ?? 0, 0);
+  // The relay still holds them (nothing past cursor 0 was let go).
+  assert.equal(h.relay.rows.length, 2);
+  h.failWrite = null;
+  const ok = await h.collect();
+  assert.equal(ok.error, undefined);
+  assert.equal(h.store.cursor, 2);
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['Mei first', 'Mei second']);
+  // The next call lets the relay forget them; they stay kept once.
+  await h.collect();
+  assert.equal(h.relay.rows.length, 0);
+  assert.equal(h.chats()[0].messages.length, 2);
+});
+
+test('while the relay says there is more, the app asks again, saving before each ask', async () => {
+  const h = harness({ relay: fakeRelay({ batch: 2 }) });
+  for (let i = 0; i < 5; i += 1) h.relay.add(message({ id: `P${i}`, text: `n${i}`, ms: at(10, i) }));
+  const cursors = [];
+  const res = await B.collect({
+    store: h.store, link: LINK, secret: SECRET, ticked: () => h.ticked, send: h.relay.send, now: () => NOW,
+    write: (s) => {
+      // Each write comes before the call that lets the relay forget what it covers.
+      assert.ok(h.relay.rows.some((r) => r.seq === s.cursor));
+      cursors.push(s.cursor);
+    },
+  });
+  assert.deepEqual(cursors, [2, 4, 5]);
+  assert.equal(res.store.messages.length, 5);
+  assert.equal(res.more, undefined);
+});
+
+test('cursor ahead: the app starts at 0 in the same collection, keeps each event once, and says so', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'A1', text: 'one' }), message({ id: 'A2', text: 'two' }));
+  await h.collect();
+  assert.equal(h.store.cursor, 2);
+  // The relay's count set back by hand (its NEXT_SEQ) while it still holds
+  // both events: the cursor is past its count.
+  h.relay.next = 2;
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  const sent = h.relay.calls.filter((c) => c.init.method === 'POST').map((c) => JSON.parse(c.init.body).upTo);
+  assert.deepEqual(sent, [0, 2, 0]);
+  assert.equal(h.store.cursor, 2);
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['one', 'two']);
+  assert.equal(B.botGroups(h.store, h.ticked)[0].count, 2);
+  const said = B.botProblems({ on: true, store: h.store, now: NOW }).map((p) => p.label);
+  assert.ok(said.some((l) => /fewer events than the app had collected.*started counting afresh/.test(l)), said.join('\n'));
+  // Told in the relay's answer without a relay id, it is not the relay's answer.
+  assert.throws(() => B.relayReply({ ok: false, error: 'cursor ahead' }), (e) => e.kind === 'reader' && /not in the shape/.test(e.message));
+});
+
+test('a new relay id at the same link: its events are taken, and the app warns that some may be missing', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'B1', text: 'old relay' }), message({ id: 'B2', text: 'old relay 2' }));
+  await h.collect();
+  const next = fakeRelay({ relay: RELAY_B });
+  for (let i = 0; i < 4; i += 1) next.add(message({ id: `BN${i}`, text: `new ${i}`, ms: at(11, 10 + i) }));
+  h.relay = next;
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  assert.equal(h.store.relay, RELAY_B);
+  assert.equal(h.store.cursor, 4);
+  // The cursor sent (2) let the new relay forget its first two.
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['old relay', 'old relay 2', 'new 2', 'new 3']);
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /new one \(its id changed\).*may be missing/.test(p.label)));
+});
+
+test('another relay link starts the cursor at 0, so nothing is let go on a relay the app has not heard from', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'C1', text: 'kept' }), message({ id: 'C2', text: 'kept too' }));
+  await h.collect();
+  assert.equal(B.cursorFor(h.store, DEPLOY), 2);
+  assert.equal(B.cursorFor(h.store, OTHER_DEPLOY), 0);
+  await h.collect({ deploymentId: OTHER_DEPLOY, url: `https://script.google.com/macros/s/${OTHER_DEPLOY}/exec` });
+  assert.equal(JSON.parse(h.relay.calls[h.relay.calls.length - 2].init.body).upTo, 0);
+  assert.equal(h.store.link, OTHER_DEPLOY);
+  assert.equal(h.chats()[0].messages.length, 2);
+});
+
+test('broken rows are counted and left out; the cursor moves past them', async () => {
+  const h = harness();
+  h.relay.add('broken', message({ id: 'E1', text: 'fine' }), 'broken');
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  assert.equal(h.store.cursor, 3);
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['fine']);
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => p.label === 'LINE chats: 2 events on the relay could not be read and were left out in the last 14 days'));
+});
+
+test('events missing what the app needs are counted and left out', async () => {
+  const h = harness();
+  const ok = message({ id: 'F1', text: 'fine' });
+  const noGroup = { ...message({ id: 'F2', text: 'x' }), source: { type: 'user', userId: 'Uuser-demo-ken' } };
+  const noTime = { ...message({ id: 'F3', text: 'x' }), timestamp: undefined };
+  const noId = { ...message({ id: 'F4', text: 'x' }), message: { type: 'text', text: 'no id' } };
+  const noText = message({ id: 'F5' });
+  const noMembers = { ...members('memberJoined'), joined: {} };
+  const noUnsendId = { ...unsend({ id: 'F1' }), unsend: {} };
+  h.relay.add(ok, noGroup, noTime, noId, noText, noMembers, noUnsendId);
+  const res = await h.collect();
+  assert.equal(res.error, undefined);
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['fine']);
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /^LINE chats: 6 events from the relay lacked a group, a time or a message/.test(p.label)));
+});
+
+test('an answer not in the relay’s shape is refused whole: nothing is taken and the cursor stays', () => {
+  const good = { ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 };
+  const shape = (body) => assert.throws(() => B.relayReply(body), (e) => e.kind === 'reader' && /not in the shape the app reads.*Copy relay script/.test(e.message));
+  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0 } });
+  shape({ ...good, ok: undefined });
+  shape({ ...good, relay: undefined });
+  shape({ ...good, events: 'none' });
+  shape({ ...good, more: 'no' });
+  shape({ ...good, missed: -1 });
+  shape({ ...good, events: [{ seq: 2, event: {} }, { seq: 1, event: {} }] });
+  shape({ ...good, events: [{ seq: 'one', event: {} }] });
+  assert.throws(() => B.relayReply({ ok: false, error: 'something new' }), (e) => e.kind === 'reader' && /reason the app does not know/.test(e.message));
+});
+
+// ---- the transport ------------------------------------------------------------------------
+
+test('the relay goes through field feedback’s transport: one hop to the echo host only, and its failures in the relay’s words', async () => {
+  const run = async (answers) => {
+    const calls = [];
+    const send = async (url, init) => {
+      calls.push(url);
+      const a = answers[calls.length - 1];
+      if (a instanceof Error) throw a;
+      const [status, body = '', o = {}] = a;
+      return { status, location: o.location, contentType: o.contentType ?? 'application/json', text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) };
+    };
+    const res = await B.collect({ store: B.emptyStore(), link: LINK, secret: SECRET, ticked: () => new Set(), send, write: () => {}, now: () => NOW });
+    return { ...res, calls };
+  };
+  const away = await run([[302, '', { location: 'https://example.com/steal' }]]);
+  assert.equal(away.error.kind, 'blocked');
+  assert.match(away.error.message, /relay’s answer was sent to example\.com.*only from script\.googleusercontent\.com/);
+  assert.equal(away.calls.length, 1);
+  const signIn = await run([[302, '', { location: 'https://accounts.google.com/ServiceLogin' }]]);
+  assert.equal(signIn.error.kind, 'access');
+  assert.match(signIn.error.message, /In the relay script, Deploy → Manage deployments → Edit → Who has access → Anyone/);
+  const gone = await run([[404, '']]);
+  assert.equal(gone.error.kind, 'missing');
+  assert.match(gone.error.message, /No relay answers at this link/);
+  const slow = await run([Object.assign(new Error(`timed out ${EXEC}`), { name: 'TimeoutError' })]);
+  assert.equal(slow.error.kind, 'network');
+  assert.ok(B.TRANSIENT.has('network'));
+  assert.match(slow.error.message, /tries again in 5 minutes/);
+  const off = await run([new Error(`connect failed to ${EXEC} with ${SECRET}`)]);
+  assert.equal(off.error.kind, 'network');
+  // Neither the secret nor the link reaches the log's code.
+  assert.ok(!off.error.code.includes(SECRET));
+  assert.ok(!off.error.code.includes(DEPLOY));
+  const page = await run([[302, '', { location: ECHO }], [200, '<html><title>Error</title></html>', { contentType: 'text/html' }]]);
+  assert.equal(page.error.kind, 'reader');
+  assert.match(page.error.message, /relay script failed.*Executions/);
+  // A link anywhere else is refused before anything is sent.
+  const stray = await B.collect({ store: B.emptyStore(), link: { deploymentId: DEPLOY, url: 'https://example.com/exec' }, secret: SECRET, ticked: () => new Set(), send: async () => assert.fail('sent'), write: () => {}, now: () => NOW });
+  assert.equal(stray.error.kind, 'blocked');
+  assert.match(stray.error.message, /talks only to your relay/);
+});
+
+test('the relay link is the web app’s /exec link, rebuilt from its id; other links are refused with what to copy', () => {
+  assert.deepEqual(B.parseRelayLink(`${EXEC}?x=1#y`), LINK);
+  assert.throws(() => B.parseRelayLink(''), /^RangeError: No relay link yet\. In the relay script, Deploy → Manage deployments/);
+  assert.throws(() => B.parseRelayLink(EXEC.replace('/exec', '/dev')), /test link.*In the relay script/);
+  assert.throws(() => B.parseRelayLink('https://example.com/macros/s/x/exec'), /not an Apps Script web app/);
+});
+
+// ---- the secret --------------------------------------------------------------------------
+
+test('the secret is kept only where the system protects it, belongs to its relay link, and is never repeated back', () => {
+  const ready = { available: true, link: EXEC };
+  assert.deepEqual(B.checkSecret(` ${SECRET}\n`, ready), { secret: SECRET, deploymentId: DEPLOY });
+  assert.match(B.checkSecret(SECRET, { ...ready, available: false }).error, /never keeps it as plain text/);
+  assert.match(B.checkSecret(SECRET, { ...ready, backend: 'basic_text' }).error, /no protected storage/);
+  assert.match(B.checkSecret(SECRET, { available: true, link: '' }).error, /Save the relay link first/);
+  const short = B.checkSecret('tooshort', ready);
+  assert.match(short.error, /32 characters or more.*READER_SECRET/);
+  assert.ok(!short.error.includes('tooshort'));
+  assert.match(B.checkSecret('', { ...ready, saved: true }).error, /press Cancel to keep the saved one/);
+  assert.equal(B.secretStorage({ available: true }), null);
+  // The file: sealed, with the relay it belongs to; another relay's is not sent.
+  const file = B.sealSecret(DEPLOY, Buffer.from('sealed-bytes'));
+  assert.equal(B.secretFor(file), DEPLOY);
+  assert.equal(B.openSecret(file, DEPLOY).toString(), 'sealed-bytes');
+  assert.throws(() => B.openSecret(file, OTHER_DEPLOY), (e) => e.kind === 'setup' && /another relay link/.test(e.message));
+  assert.throws(() => B.openSecret('not json', DEPLOY), (e) => e.kind === 'secret');
+  assert.equal(B.secretFileError({ code: 'ENOENT' }).kind, 'setup');
+  assert.equal(B.secretFileError({ code: 'EBUSY' }).kind, 'secretfile');
+  assert.ok(B.TRANSIENT.has('secretfile'));
+  assert.equal(B.secretLocked().kind, 'secret');
+});
+
+test('the secret never appears in the store, the chats, the snapshot, the problems or an error', async () => {
+  const h = harness({ relay: fakeRelay() });
+  h.relay.add(message({ id: 'G1', text: 'Mei hi', groupName: 'Demo crew', senderName: 'Ken' }), 'broken');
+  h.relay.refused = 3;
+  await h.collect();
+  h.relay.refused = 5;
+  h.relay.fail = new Error(`socket closed while sending ${SECRET}`);
+  const res = await h.collect();
+  const view = B.botView({ settings: { on: true, link: EXEC, read: [...h.ticked] }, store: h.store, secretSaved: true, error: { ...res.error, message: res.error.message, at: NOW } });
+  const everything = JSON.stringify([h.disk, h.store, h.chats(), view, B.botProblems({ on: true, store: h.store, error: res.error, now: NOW }), res.error.message, res.error.code]);
+  assert.ok(!everything.includes(SECRET));
+  assert.equal(view.secretSaved, true);
+  assert.ok(!('secret' in view));
+});
+
+// ---- ticks ------------------------------------------------------------------------------
+
+test('a group not ticked keeps only its name, last-seen time and a count: never its text or senders', async () => {
+  const h = harness({ ticked: [] });
+  h.relay.add(message({ group: 'Cgroup-demo-2', id: 'T1', text: 'private words', groupName: 'Family', senderName: 'Grandma', ms: at(10, 0) }),
+    message({ group: 'Cgroup-demo-2', id: 'T2', text: 'more private words', ms: at(10, 5) }));
+  await h.collect();
+  assert.ok(!h.disk.includes('private words'));
+  assert.ok(!h.disk.includes('Grandma'));
+  assert.deepEqual(h.chats(), []);
+  const [g] = B.botGroups(h.store, h.ticked);
+  assert.deepEqual({ name: g.name, read: g.read, count: g.count, lastMs: g.lastMs, messages: g.messages }, { name: 'Family', read: false, count: 2, lastMs: at(10, 5), messages: undefined });
+  // Ticked: its messages are kept from then on.
+  h.tick('Cgroup-demo-2');
+  h.relay.add(message({ group: 'Cgroup-demo-2', id: 'T3', text: 'now kept', senderName: 'Grandma', ms: at(10, 10) }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => [m.sender, m.text]), [['Grandma', 'now kept']]);
+  // Unticked again: its kept text and senders go, and the next write has none.
+  h.tick('Cgroup-demo-2', false);
+  assert.deepEqual(h.chats(), []);
+  h.relay.add(message({ group: 'Cgroup-demo-1', id: 'T4', text: 'another group' }));
+  await h.collect();
+  assert.ok(!h.disk.includes('now kept'));
+  assert.ok(!h.disk.includes('Grandma'));
+});
+
+test('messages older than 14 days are not kept', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'O1', text: 'old', ms: NOW - 15 * 86_400_000 }), message({ id: 'O2', text: 'recent', ms: NOW - 13 * 86_400_000 }));
+  await h.collect();
+  assert.deepEqual(h.chats()[0].messages.map((m) => m.text), ['recent']);
+});
+
+// ---- Needs attention ---------------------------------------------------------------------
+
+test('the relay’s counters: a rise since the last answer is said with its next step; what came before the first is not', async () => {
+  const h = harness();
+  h.relay.refused = 4; // set-up attempts before the app first collected
+  h.relay.missed = 1;
+  await h.collect();
+  assert.deepEqual(B.botProblems({ on: true, store: h.store, now: NOW }), []);
+  h.relay.refused = 6;
+  h.relay.missed = 4;
+  h.relay.notJson = 1;
+  await h.collect();
+  const said = B.botProblems({ on: true, store: h.store, now: NOW }).map((p) => p.label);
+  assert.ok(said.includes('LINE chats: 2 calls from LINE to the relay were refused in the last 14 days: the key at the end of the webhook link in the LINE Developers console is not the relay’s WEBHOOK_KEY. Copy WEBHOOK_KEY again from the relay script’s Project Settings → Script properties into the link (…/exec?k=WEBHOOK_KEY)'), said.join('\n'));
+  assert.ok(said.some((l) => /^LINE chats: 3 events waited on the relay over 14 days and were deleted before the app collected them/.test(l)));
+  assert.ok(said.some((l) => /^LINE chats: 1 call to the relay’s webhook could not be read/.test(l)));
+  // Two weeks on, they are no longer said.
+  assert.deepEqual(B.botProblems({ on: true, store: h.store, now: NOW + 15 * 86_400_000 }), []);
+});
+
+test('a name lookup the relay could not make is said: a refused token means names are off; a later name clears it', async () => {
+  const h = harness();
+  h.relay.add(message({ id: 'N1', text: 'a', nameProblem: 'HTTP 401', ms: at(10, 0) }));
+  await h.collect();
+  const said = B.botProblems({ on: true, store: h.store, now: NOW }).map((p) => p.label);
+  assert.ok(said.some((l) => /LINE refused the relay’s LINE_TOKEN, so names are off/.test(l)), said.join('\n'));
+  h.relay.add(message({ id: 'N2', text: 'b', groupName: 'Demo crew', senderName: 'Ken', ms: at(10, 5) }));
+  await h.collect();
+  assert.deepEqual(B.botProblems({ on: true, store: h.store, now: NOW }), []);
+  // A code the app does not know is not repeated as it came.
+  h.relay.add(message({ id: 'N3', text: 'c', nameProblem: 'weird <b>code</b>', ms: at(10, 10) }));
+  await h.collect();
+  assert.ok(B.botProblems({ on: true, store: h.store, now: NOW }).some((p) => /name lookups failed/.test(p.label)));
+  assert.equal(h.store.nameProblem.code, 'other');
+});
+
+test('a failed collection is said with its next step and a link to Settings; nothing is said while the bot part is off', () => {
+  const error = { kind: 'secret', message: 'The relay refused the secret. Save it in Settings → Connections → LINE chats.' };
+  const [p] = B.botProblems({ on: true, store: B.emptyStore(), error, now: NOW });
+  assert.equal(p.fix, 'line');
+  assert.match(p.label, /^LINE chats: the bot’s messages could not be collected\. The relay refused the secret/);
+  assert.deepEqual(B.botProblems({ on: false, store: B.emptyStore(), error, now: NOW }), []);
+  const unread = B.botProblems({ on: true, store: B.emptyStore(), storeProblem: { what: 'unreadable', detail: 'EBUSY' }, now: NOW });
+  assert.match(unread[0].label, /saved messages could not be read/);
+});
+
+// ---- the store, settings and timing -----------------------------------------------------------
+
+test('a store the app cannot read starts afresh at cursor 0 and says so; a good one reads back as written', async () => {
+  assert.deepEqual(B.readStore('{not json'), { store: B.emptyStore(), invalid: true });
+  assert.equal(B.readStore(JSON.stringify({ version: 99 })).invalid, true);
+  const h = harness();
+  h.relay.add(message({ id: 'Q1', text: 'kept', groupName: 'Demo crew', senderName: 'Ken' }));
+  await h.collect();
+  const back = B.readStore(h.disk);
+  assert.equal(back.invalid, false);
+  assert.deepEqual(back.store, JSON.parse(h.disk));
+  assert.match(B.botProblems({ on: true, store: B.emptyStore(), storeProblem: { what: 'invalid' }, now: NOW })[0].label, /started afresh/);
+});
+
+test('settings: off forgets the ticks, a link is saved rebuilt (an empty one keeps it), and only known group ids tick', () => {
+  const id = idOf('Cgroup-demo-1');
+  let s = B.changeSettings(undefined, { on: true }).settings;
+  assert.deepEqual(s, { on: true, link: '', read: [] });
+  const linked = B.changeSettings(s, { link: `${EXEC}?q=1` });
+  assert.equal(linked.linkChanged, true);
+  assert.equal(linked.settings.link, EXEC);
+  s = linked.settings;
+  assert.equal(B.changeSettings(s, { link: EXEC }).linkChanged, false);
+  assert.equal(B.changeSettings(s, { link: '  ' }).settings.link, EXEC);
+  assert.match(B.changeSettings(s, { link: 'https://example.com' }).error, /not an Apps Script web app/);
+  s = B.changeSettings(s, { tick: { id, on: true } }).settings;
+  assert.deepEqual(s.read, [id]);
+  assert.match(B.changeSettings(s, { tick: { id: 'Cgroup-demo-1', on: true } }).error, /not known/);
+  assert.deepEqual(B.changeSettings(s, { on: false }).settings, { on: false, link: EXEC, read: [] });
+});
+
+test('when to collect: every 5 minutes, at once while more waits, and hourly after a failure only the user can mend', () => {
+  assert.equal(B.nextCollect({ ready: false }), null);
+  assert.equal(B.nextCollect({ ready: true }), 0);
+  assert.equal(B.nextCollect({ ready: true, lastTryAt: NOW }), NOW + 5 * min);
+  assert.equal(B.nextCollect({ ready: true, lastTryAt: NOW, error: { kind: 'network' } }), NOW + 5 * min);
+  assert.equal(B.nextCollect({ ready: true, lastTryAt: NOW, error: { kind: 'secret' } }), NOW + 60 * min);
+  assert.equal(B.nextCollect({ ready: true, lastTryAt: NOW, more: true }), NOW);
+});
+
+test('in Settings a relay message names the control in view; the board keeps the Settings path', () => {
+  const missing = 'No relay answers at this link: its deployment may have been archived or deleted. In the relay script, Deploy → Manage deployments, copy the Web app link and paste it in Settings → Connections → LINE chats.';
+  const w = B.settingsWords(missing);
+  assert.match(w['11'], /and paste it under Relay link\.$/);
+  assert.match(w['10'], /, press Change link and paste it\.$/);
+  assert.equal(B.settingsWords(null), null);
+  assert.match(B.inSettings('No relay secret is saved. Save it in Settings → Connections → LINE chats.', { noStorage: true }), /once this computer can keep it/);
+});
+
+// ---- the relay script ----------------------------------------------------------------------
+
+test('the relay script that ships asks only for its own sheet, drops reply tokens, refuses a short secret and never sends to LINE', () => {
+  const text = fs.readFileSync(path.join(__dirname, '..', 'docs', 'line-bot-relay.gs'), 'utf8');
+  const lines = text.split(/\r?\n/);
+  assert.equal(lines[0], '/** @OnlyCurrentDoc */');
+  const code = lines.filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.match(code, /delete copy\.replyToken/);
+  assert.match(code, /secret\.length < 32\b/);
+  assert.match(code, /key\.length < 32\b/);
+  // Its only calls to LINE look up names; nothing is pushed or replied.
+  assert.doesNotMatch(code, /\/message\/(?:push|reply|multicast|broadcast|narrowcast)/);
+  assert.doesNotMatch(code, /method:\s*['"]post['"]/i);
+  // The app's hosts are named in fieldsurvey.js alone; the relay is a doc.
+  assert.equal(typeof F.callWebApp, 'function');
+});

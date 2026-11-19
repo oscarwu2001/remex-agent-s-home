@@ -301,6 +301,16 @@ test('the same message in two chats is two items with their own keys', () => {
   assert.match(a.key, /^[0-9a-f]{16}$/);
 });
 
+test('a message with a chatKey (from the LINE bot) is keyed by it, not by the chat name it shows; an export’s key is as before', () => {
+  const m = { chat: 'Old name', at: '2026-11-16 09:00', ms: 1, sender: 'Ken', kind: 'text', text: '@Mei hi', hash: 'abcdefabcdef0123' };
+  const key = (msg) => L.relatedToYou([msg], { names: ['Mei'], keywords: [], since: 0 })[0].key;
+  const asBot = key({ ...m, chatKey: 'bot:0123456789abcdef' });
+  assert.equal(key({ ...m, chat: 'New name', chatKey: 'bot:0123456789abcdef' }), asBot);
+  assert.notEqual(key(m), asBot);
+  // An export's key: its chat's name and the message, as items were keyed before the bot.
+  assert.equal(key(m), require('crypto').createHash('sha1').update(['Old name', m.hash].join('\u0000')).digest('hex').slice(0, 16));
+});
+
 test('a Latin name is found only as a whole word, not inside an address or a longer name', () => {
   const hits = (text) => L.relatedToYou(chatOf(`09:00\tKen\t${text}`), { names: ['Mei'], keywords: [], since: 0 }).length;
   for (const text of ['write to mei@example.com', 'ask Mei-Ling', 'see x.mei.y', 'Meiling']) assert.equal(hits(text), 0, text);

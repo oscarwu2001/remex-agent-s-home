@@ -545,7 +545,9 @@ const commitmentIn = (text) => COMMITMENT.exec(plainText(text).replace(NOT_COMMI
 // on (commitment). Only text messages at or after `since` (ms).
 // Each hit: { key, hash, chat, at, ms, sender, text, reason, matched }. key
 // (the chat and the message) names the item: one message can be in two
-// chats; hash (the message alone) is what re-exports are merged by.
+// chats; hash (the message alone) is what re-exports are merged by. A
+// message from the LINE bot names its chat by chatKey (its group, which
+// keeps its key across renames; linebot.js), an export's by its name.
 function relatedToYou(messages, { names = [], keywords = [], since = 0 } = {}) {
   const mine = new Set(names.map(norm).filter(Boolean));
   const nameList = names.filter((n) => norm(n));
@@ -564,7 +566,7 @@ function relatedToYou(messages, { names = [], keywords = [], since = 0 } = {}) {
       if (name) [reason, matched] = ['mention', name];
       else if (word) [reason, matched] = ['keyword', word];
     }
-    if (reason) hits.push({ key: hashOf(m.chat ?? '', m.hash), hash: m.hash, chat: m.chat ?? '', at: m.at, ms: m.ms, sender: m.sender, text: m.text, reason, matched, order });
+    if (reason) hits.push({ key: hashOf(m.chatKey ?? m.chat ?? '', m.hash), hash: m.hash, chat: m.chat ?? '', at: m.at, ms: m.ms, sender: m.sender, text: m.text, reason, matched, order });
   });
   return hits.sort((a, b) => (b.ms ?? 0) - (a.ms ?? 0) || b.order - a.order).map(({ order, ...h }) => h);
 }
