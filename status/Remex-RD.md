@@ -1,8 +1,8 @@
-# Remex-RD · 2026-11-19 15:00
+# Remex-RD · 2026-11-19 16:00
 
 **1 running · 1 session(s) in the last hour**
 
-GPU RTX 2000E Ada Generation 2% · 0.5/16 GB · 36°C · CPU 7% · RAM 11.8/48 GB
+GPU RTX 2000E Ada Generation 1% · 0.5/16 GB · 36°C · CPU 7% · RAM 11.7/48 GB
 
 - ▶ spine-sim
 
