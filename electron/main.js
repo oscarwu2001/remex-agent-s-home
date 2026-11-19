@@ -1718,7 +1718,7 @@ app.whenReady().then(() => {
         botCollectedAt = Date.now();
       }
       scanLine();
-      return res.error ? { ok: false, error: res.error.message } : { ok: true };
+      return res.error ? { ok: false, collected: true, error: res.error.message } : { ok: true, collected: true };
     })().finally(() => {
       botRun = null;
     });
