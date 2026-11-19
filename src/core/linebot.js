@@ -24,6 +24,8 @@
 // group not ticked keeps its name, when it was last seen and a count.
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const fieldSurvey = require('./fieldsurvey');
 const { WINDOW_DAYS } = require('./linechat');
 
@@ -712,26 +714,31 @@ const NAME_WORDS = (code) => {
   if (code === 'HTTP 404') return 'LINE did not find some names the relay looked up (a member who left, for one), so they show as stand-ins';
   return 'the relay’s name lookups failed, so some names show as stand-ins; the relay’s Executions in Apps Script show why';
 };
+// A trouble with the store's files, in words (BotKeeper's problems()).
+function storeWords(sp, add) {
+  if (sp.what === 'unreadable') add('the bot’s saved messages could not be read, so collecting waits; close any app using the app’s data folder. The app tries again in 5 minutes', sp.detail ?? '');
+  if (sp.what === 'invalid') {
+    add('the bot’s saved messages were not in a shape the app reads, so it started a new store and kept the old file aside; messages kept before may be lost. Turning the bot part off removes the old file', sp.detail ?? '');
+  }
+  if (sp.what === 'damaged') add(`${sp.count} of the bot’s saved entries could not be read and were left out; the rest are kept`, sp.detail ?? '');
+  if (sp.what === 'leftover') add('a half-written copy of the bot’s saved messages could not be removed; close any app using the app’s data folder and remove it from there', sp.detail ?? '');
+}
 const AGAIN_SCRIPT = 'if it keeps happening, press Copy relay script in Settings, paste it over the relay’s script and deploy it as a new version';
 
 // What goes under Needs attention, as counts and next steps; no group or
 // sender name, message or link. error: the last collection's failure
 // ({ message, kind }); notCollecting: why it is on and not collecting;
-// storeProblem: { what: 'unreadable' | 'invalid' | 'damaged' | 'leftover',
-// detail, count } (the store's file, as the keeper read it); ticked: the
-// ticked groups. fix 'line': a link to Settings.
-function botProblems({ on, store, error = null, notCollecting: why = null, storeProblem = null, ticked = new Set(), now }) {
+// storeProblems: [{ what: 'unreadable' | 'invalid' | 'damaged' |
+// 'leftover', detail, count }] (the store's files, as BotKeeper found
+// them; storeProblem: one of them); ticked: the ticked groups. fix 'line':
+// a link to Settings.
+function botProblems({ on, store, error = null, notCollecting: why = null, storeProblem = null, storeProblems = storeProblem ? [storeProblem] : [], ticked = new Set(), now }) {
   if (!on) return [];
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
   if (why) add(`your LINE bot is on but not collecting: ${why}`, '', 'line');
   else if (error) add(`the bot’s messages could not be collected. ${error.message}`, '', 'line');
-  if (storeProblem?.what === 'unreadable') add('the bot’s saved messages could not be read, so collecting waits; close any app using the app’s data folder. The app tries again in 5 minutes', storeProblem.detail ?? '');
-  if (storeProblem?.what === 'invalid') {
-    add('the bot’s saved messages were not in a shape the app reads, so it started a new store and kept the old file aside; messages kept before may be lost. Turning the bot part off removes the old file', storeProblem.detail ?? '');
-  }
-  if (storeProblem?.what === 'damaged') add(`${storeProblem.count} of the bot’s saved entries could not be read and were left out; the rest are kept`, storeProblem.detail ?? '');
-  if (storeProblem?.what === 'leftover') add('a half-written copy of the bot’s saved messages could not be removed; remove it from the app’s data folder', storeProblem.detail ?? '');
+  for (const sp of storeProblems) storeWords(sp, add);
   const sum = (what) => (store?.notes ?? []).filter((n) => n.what === what && n.at >= now - KEEP_MS).reduce((a, n) => a + n.n, 0);
   const days = `in the last ${WINDOW_DAYS} days`;
   const refused = sum('refused');
@@ -759,9 +766,210 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   return out;
 }
 
+// ---- the store on disk --------------------------------------------------------------------
+//
+// The bot's store as the main process keeps it. The copy in memory is the
+// one last written (or read at start): every change goes through save(), a
+// collection's rounds included, so an older copy is never written over a
+// newer one and nothing the relay was let forget is only in memory. The one
+// exception is a removal (an untick, a forgotten relay id) whose write
+// failed: memory has less than the disk until retry() writes it. A write
+// is whole: a temp file, flushed to disk, then renamed; a temp file holds
+// message text, so none stays behind unsaid. bump() marks the settings as
+// changed under a collection (a new link or secret, off): that collection
+// writes nothing more and its result is dropped. A store that cannot be
+// read is moved aside, never written over, and said until the part is
+// turned off.
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+class BotKeeper {
+  constructor({ file, fsys = fs }) {
+    this.file = file;
+    this.fsys = fsys;
+    this.dir = path.dirname(file);
+    this.base = path.basename(file);
+    this.stem = this.base.replace(/\.json$/i, '');
+    this.store = emptyStore();
+    this.generation = 0;
+    this.dirty = false;
+    this.unreadable = false;
+    this.found = []; // { what, detail, count } from reading, for botProblems
+  }
+
+  names(re) {
+    try {
+      return this.fsys.readdirSync(this.dir).filter((n) => re.test(n));
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      this.note({ what: 'unreadable', detail: `${this.dir} (${err.code || 'error'})` });
+      return [];
+    }
+  }
+  temps() {
+    return this.names(new RegExp(`^${escapeRe(this.base)}\\.[\\w-]+\\.tmp$`));
+  }
+  asides() {
+    return this.names(new RegExp(`^${escapeRe(this.stem)}\\.unreadable(?:-\\d+)?\\.json$`));
+  }
+  note(problem) {
+    this.found = [...this.found.filter((p) => p.what !== problem.what), problem];
+  }
+  // Removes the named files in the folder -> [{ name, code }] that would not go.
+  removeAll(list) {
+    const stuck = [];
+    for (const name of list) {
+      try {
+        this.fsys.rmSync(path.join(this.dir, name), { force: true });
+      } catch (err) {
+        stuck.push({ name, code: err.code || 'error' });
+      }
+    }
+    return stuck;
+  }
+  leftover(stuck) {
+    if (stuck.length) this.note({ what: 'leftover', detail: stuck.map((s) => `${path.join(this.dir, s.name)} (${s.code})`).join(', ') });
+  }
+
+  // Reads the store at start (and again while it could not be read), with
+  // the groups ticked now: one that is not ticked loses its kept text, on
+  // disk too.
+  load(ticked) {
+    this.found = [];
+    this.leftover(this.removeAll(this.temps()));
+    let text = null;
+    try {
+      text = this.fsys.readFileSync(this.file, 'utf8');
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        // Busy or not the app's to open: kept as it is and read again before the next collection.
+        this.store = emptyStore();
+        this.unreadable = true;
+        this.note({ what: 'unreadable', detail: `${this.file} (${err.code || 'error'})` });
+        return;
+      }
+    }
+    this.unreadable = false;
+    this.store = emptyStore();
+    if (text != null) {
+      const read = readStore(text);
+      if (read.invalid) {
+        try {
+          this.fsys.renameSync(this.file, path.join(this.dir, `${this.stem}.unreadable-${Date.now()}.json`));
+        } catch (err) {
+          this.unreadable = true;
+          this.note({ what: 'unreadable', detail: `${this.file} (${err.code || 'error'})` });
+          return;
+        }
+      } else {
+        this.store = read.store;
+        if (read.damaged) this.note({ what: 'damaged', count: read.damaged, detail: this.file });
+      }
+    }
+    const aside = this.asides();
+    if (aside.length) this.note({ what: 'invalid', detail: aside.map((n) => path.join(this.dir, n)).join(', ') });
+    this.untick(ticked);
+  }
+
+  problems() {
+    return [...this.found];
+  }
+
+  save(store) {
+    const f = this.fsys;
+    const tmp = path.join(this.dir, `${this.base}.${process.pid}.tmp`);
+    try {
+      f.mkdirSync(this.dir, { recursive: true });
+      const fd = f.openSync(tmp, 'w', 0o600);
+      try {
+        f.writeFileSync(fd, `${JSON.stringify(store)}\n`);
+        f.fsyncSync(fd);
+      } finally {
+        f.closeSync(fd);
+      }
+      f.renameSync(tmp, this.file);
+    } catch (err) {
+      this.leftover(this.removeAll([path.basename(tmp)]));
+      throw err;
+    }
+    this.store = store;
+    this.dirty = false;
+    this.found = this.found.filter((p) => p.what !== 'unreadable');
+  }
+
+  // A removal that must reach the disk: memory has it at once; a failed
+  // write is tried again (retry) and finished at the next load.
+  change(next) {
+    if (next === this.store && !this.dirty) return { saved: true };
+    try {
+      this.save(next);
+      return { saved: true };
+    } catch (err) {
+      this.store = next;
+      this.dirty = true;
+      return { saved: false, code: err.code || 'error' };
+    }
+  }
+  untick(ticked) {
+    return this.change(applyTicks(this.store, ticked));
+  }
+  forgetRelay() {
+    this.bump();
+    return this.change(forgetRelay(this.store));
+  }
+  retry() {
+    return this.dirty ? this.change(this.store) : { saved: true };
+  }
+  bump() {
+    this.generation += 1;
+  }
+
+  // One collection (collect()) on the store as last written. -> { error?,
+  // more?, waiting? (the store cannot be read yet), stale? (the settings
+  // changed under it: dropped, and it wrote nothing after the change) }.
+  async collect({ link, secret, ticked, send, now = () => Date.now() }) {
+    if (this.unreadable) {
+      this.load(ticked());
+      if (this.unreadable) return { waiting: true };
+    }
+    const generation = this.generation;
+    const res = await collect({
+      store: this.store, link, secret, ticked, send, now,
+      write: (store) => {
+        if (generation !== this.generation) throw Object.assign(new Error('The bot part changed while collecting'), { code: 'stale' });
+        this.save(store);
+      },
+    });
+    if (generation !== this.generation) return { stale: true };
+    return { ...(res.error ? { error: res.error } : {}), ...(res.more ? { more: true } : {}) };
+  }
+
+  // Off: the store, its half-written copies and any copy kept aside go. ->
+  // [{ name, code }] of those that would not.
+  remove() {
+    this.bump();
+    const stuck = this.removeAll([...new Set([this.base, ...this.temps(), ...this.asides()])]);
+    this.store = emptyStore();
+    this.dirty = false;
+    this.unreadable = false;
+    this.found = [];
+    this.leftover(stuck.filter((s) => s.name !== this.base));
+    return stuck;
+  }
+}
+
+// At start, from how the two settings files read ('ok', 'missing' or
+// 'unreadable'): drop (the secret and the store go) only for an "off" read
+// cleanly from a file, never for a file that could not be read; collect
+// only when both say on.
+function startPlan({ lineRead, lineEnabled, botRead, botOn }) {
+  const readable = lineRead !== 'unreadable' && botRead !== 'unreadable';
+  const cleanOff = (lineRead === 'ok' && !lineEnabled) || (botRead === 'ok' && !botOn);
+  return { drop: readable && cleanOff, collect: lineRead === 'ok' && botRead === 'ok' && Boolean(lineEnabled) && Boolean(botOn) };
+}
+
 module.exports = {
   COLLECT_MS, WAIT_MS, KEEP_MS, ROUNDS, TRANSIENT, LineBotError, RELAY_VOICE,
   parseRelayLink, secretStorage, checkSecret, sealSecret, secretFor, openSecret, secretFileError, secretLocked,
   relayReply, readEvent, emptyStore, readStore, cursorFor, forgetRelay, applyTicks, takeReply, collect, nextCollect, notCollecting,
-  changeSettings, botChats, botGroups, botView, botProblems, inSettings, settingsWords, wall,
+  changeSettings, botChats, botGroups, botView, botProblems, inSettings, settingsWords, wall, BotKeeper, startPlan,
 };

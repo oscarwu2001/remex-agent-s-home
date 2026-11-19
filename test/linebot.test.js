@@ -818,3 +818,193 @@ test('the relay’s own words for an answer too large and a second redirect', as
   assert.equal(twice.kind, 'blocked');
   assert.match(twice.message, /^Google redirected the relay’s answer a second time/);
 });
+
+// ---- the store on disk (BotKeeper) -----------------------------------------------------------
+
+const os = require('os');
+const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'linebot-'));
+const onDisk = (file) => B.readStore(fs.readFileSync(file, 'utf8')).store;
+const textsOnDisk = (file) => onDisk(file).messages.map((m) => m.text);
+
+// A relay whose second POST runs `during` first: the moment after round 1 is written.
+function relayWithHook(during) {
+  const r = fakeRelay({ batch: 2 });
+  const send = r.send;
+  let posts = 0;
+  r.send = async (url, init) => {
+    if (init.method === 'POST' && ++posts === 2) during();
+    if (init.method === 'GET' && r.failNextGet) {
+      r.failNextGet = false;
+      throw new Error('socket hang up');
+    }
+    return send(url, init);
+  };
+  return r;
+}
+
+test('kept messages are never lost to an older copy: a new secret, a new link or an untick after round 1 keeps every message on disk', async () => {
+  const gA = idOf('Cgroup-demo-1');
+  const gB = idOf('Cgroup-demo-2');
+  for (const action of ['secret', 'link', 'untick', 'untick, then round 2 lost on the way back']) {
+    const dir = tempDir();
+    const file = path.join(dir, 'line-bot-store.json');
+    const keeper = new B.BotKeeper({ file });
+    let ticked = new Set([gA, gB]);
+    keeper.load(ticked);
+    const r = relayWithHook(() => {
+      if (action === 'secret') keeper.forgetRelay();
+      if (action === 'link') keeper.bump();
+      if (action.startsWith('untick')) {
+        ticked = new Set([gA]);
+        keeper.untick(ticked);
+      }
+      if (action.includes('lost')) r.failNextGet = true;
+    });
+    r.add(message({ group: 'Cgroup-demo-2', id: `${action}-b`, text: 'in B', ms: at(9, 0) }));
+    for (let i = 1; i <= 4; i += 1) r.add(message({ id: `${action}-a${i}`, text: `a${i}`, ms: at(10, i) }));
+    const first = await keeper.collect({ link: LINK, secret: SECRET, ticked: () => ticked, send: r.send, now: () => NOW });
+    // Round 1 is on disk, whatever happened after it.
+    assert.equal(onDisk(file).cursor, keeper.store.cursor, action);
+    assert.ok(first.stale || !first.error || (action.includes('lost') && first.error.kind === 'network'), action);
+    const second = await keeper.collect({ link: action === 'link' ? { deploymentId: OTHER_DEPLOY, url: `https://script.google.com/macros/s/${OTHER_DEPLOY}/exec` } : LINK, secret: SECRET, ticked: () => ticked, send: r.send, now: () => NOW });
+    assert.equal(second.error, undefined, action);
+    await keeper.collect({ link: action === 'link' ? { deploymentId: OTHER_DEPLOY, url: `https://script.google.com/macros/s/${OTHER_DEPLOY}/exec` } : LINK, secret: SECRET, ticked: () => ticked, send: r.send, now: () => NOW });
+    const want = action.startsWith('untick') ? ['a1', 'a2', 'a3', 'a4'] : ['in B', 'a1', 'a2', 'a3', 'a4'];
+    assert.deepEqual(textsOnDisk(file), want, action);
+    assert.deepEqual(keeper.store.messages.map((m) => m.text), want, action);
+    assert.equal(onDisk(file).cursor, keeper.store.cursor, action);
+    // The relay let go of everything, and nothing it let go of is missing.
+    assert.equal(r.rows.length, 0, action);
+  }
+});
+
+test('turning the part off during a collection: nothing is written back afterwards', async () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'line-bot-store.json');
+  const keeper = new B.BotKeeper({ file });
+  const ticked = new Set([idOf('Cgroup-demo-1')]);
+  keeper.load(ticked);
+  const r = relayWithHook(() => keeper.remove());
+  for (let i = 1; i <= 4; i += 1) r.add(message({ id: `off-${i}`, text: `t${i}`, ms: at(10, i) }));
+  const res = await keeper.collect({ link: LINK, secret: SECRET, ticked: () => ticked, send: r.send, now: () => NOW });
+  assert.equal(res.stale, true);
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(fs.readdirSync(dir), []);
+  assert.deepEqual(keeper.store.messages, []);
+});
+
+test('at start only a cleanly read "off" removes the secret and the store; settings that cannot be read keep both', () => {
+  // Read cleanly, off: what was kept goes.
+  assert.equal(B.startPlan({ lineRead: 'ok', lineEnabled: false, botRead: 'ok', botOn: true }).drop, true);
+  assert.equal(B.startPlan({ lineRead: 'ok', lineEnabled: true, botRead: 'ok', botOn: false }).drop, true);
+  // On: kept, and collecting may start.
+  assert.deepEqual(B.startPlan({ lineRead: 'ok', lineEnabled: true, botRead: 'ok', botOn: true }), { drop: false, collect: true });
+  // Not read (busy, not allowed, cut short): kept, and nothing is collected.
+  for (const bad of [{ lineRead: 'unreadable' }, { botRead: 'unreadable' }]) {
+    const plan = B.startPlan({ lineRead: 'ok', lineEnabled: false, botRead: 'ok', botOn: false, ...bad });
+    assert.deepEqual(plan, { drop: false, collect: false }, JSON.stringify(bad));
+  }
+  // No settings file yet is not the user's "off" either.
+  assert.equal(B.startPlan({ lineRead: 'missing', lineEnabled: false, botRead: 'missing', botOn: false }).drop, false);
+});
+
+test('a store that still holds an unticked group’s text loses it when loaded, on disk too; a failed untick write is finished after a restart', () => {
+  const gA = idOf('Cgroup-demo-1');
+  const gB = idOf('Cgroup-demo-2');
+  const dir = tempDir();
+  const file = path.join(dir, 'line-bot-store.json');
+  const first = new B.BotKeeper({ file });
+  first.load(new Set([gA, gB]));
+  let store = B.takeReply(first.store, { relay: RELAY_A, events: [
+    { seq: 1, event: message({ group: 'Cgroup-demo-1', id: 'U1', text: 'A text' }) },
+    { seq: 2, event: message({ group: 'Cgroup-demo-2', id: 'U2', text: 'B private', senderName: 'Grandma' }) },
+  ], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0 } }, { link: DEPLOY, upTo: 0, ticked: new Set([gA, gB]), now: NOW }).store;
+  first.save(store);
+  // Untick B, and the write fails.
+  const failing = { ...fs, renameSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } };
+  const keeper = new B.BotKeeper({ file, fsys: failing });
+  keeper.load(new Set([gA, gB]));
+  const said = keeper.untick(new Set([gA]));
+  assert.equal(said.saved, false);
+  assert.match(fs.readFileSync(file, 'utf8'), /B private/);
+  // Restart with B unticked: the load takes it out, on disk.
+  const again = new B.BotKeeper({ file });
+  again.load(new Set([gA]));
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(!text.includes('B private'));
+  assert.ok(!text.includes('Grandma'));
+  assert.deepEqual(textsOnDisk(file), ['A text']);
+  store = null;
+});
+
+test('a store the app cannot read is kept aside, said to be possibly lost, and still said after a restart until the part is turned off', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'line-bot-store.json');
+  fs.writeFileSync(file, '{"version":1,"cursor":');
+  const keeper = new B.BotKeeper({ file });
+  keeper.load(new Set());
+  const aside = fs.readdirSync(dir).filter((n) => /^line-bot-store\.unreadable/.test(n));
+  assert.equal(aside.length, 1);
+  assert.equal(fs.readFileSync(path.join(dir, aside[0]), 'utf8'), '{"version":1,"cursor":');
+  assert.equal(fs.existsSync(file), false);
+  const [p] = keeper.problems();
+  assert.equal(p.what, 'invalid');
+  assert.match(B.botProblems({ on: true, store: keeper.store, storeProblems: keeper.problems(), now: NOW })[0].label, /kept the old file aside; messages kept before may be lost/);
+  // A new store is written beside it; the copy is never written over.
+  keeper.save(B.emptyStore());
+  assert.equal(fs.readFileSync(path.join(dir, aside[0]), 'utf8'), '{"version":1,"cursor":');
+  const restarted = new B.BotKeeper({ file });
+  restarted.load(new Set());
+  assert.equal(restarted.problems()[0]?.what, 'invalid');
+  restarted.remove();
+  assert.deepEqual(fs.readdirSync(dir), []);
+  const after = new B.BotKeeper({ file });
+  after.load(new Set());
+  assert.deepEqual(after.problems(), []);
+});
+
+test('a save is flushed to disk before it takes the store’s place; a failed one leaves no half-written copy', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'line-bot-store.json');
+  const calls = [];
+  const spy = {
+    ...fs,
+    fsyncSync: (fd) => { calls.push('fsync'); return fs.fsyncSync(fd); },
+    renameSync: (a, b) => { calls.push('rename'); return fs.renameSync(a, b); },
+  };
+  const keeper = new B.BotKeeper({ file, fsys: spy });
+  keeper.load(new Set());
+  keeper.save(B.emptyStore());
+  assert.deepEqual(calls, ['fsync', 'rename']);
+  // A rename that fails: the temp copy (which holds message text) is removed.
+  const failing = { ...fs, renameSync: () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); } };
+  const k2 = new B.BotKeeper({ file, fsys: failing });
+  k2.load(new Set());
+  assert.throws(() => k2.save({ ...B.emptyStore(), cursor: 9 }), /denied/);
+  assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith('.tmp')), []);
+  assert.equal(onDisk(file).cursor, 0);
+});
+
+test('half-written copies left by an earlier run are removed at start and when the part is turned off; one that cannot be removed is said', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'line-bot-store.json');
+  fs.writeFileSync(`${file}.1234.tmp`, 'secret words');
+  const keeper = new B.BotKeeper({ file });
+  keeper.load(new Set());
+  assert.deepEqual(fs.readdirSync(dir), []);
+  fs.writeFileSync(`${file}.5678.tmp`, 'secret words');
+  const stuck = { ...fs, rmSync: (p, o) => { if (String(p).endsWith('.tmp')) throw Object.assign(new Error('in use'), { code: 'EBUSY' }); return fs.rmSync(p, o); } };
+  const k2 = new B.BotKeeper({ file, fsys: stuck });
+  k2.load(new Set());
+  const left = k2.problems().find((p) => p.what === 'leftover');
+  assert.ok(left);
+  assert.match(left.detail, /line-bot-store\.json\.5678\.tmp \(EBUSY\)/);
+  assert.match(B.botProblems({ on: true, store: k2.store, storeProblems: k2.problems(), now: NOW }).map((p) => p.label).join('\n'), /half-written copy .* could not be removed/);
+  // Off: removed, with what could not be said.
+  const k3 = new B.BotKeeper({ file });
+  k3.load(new Set());
+  k3.save(B.emptyStore());
+  fs.writeFileSync(`${file}.9.tmp`, 'secret words');
+  assert.deepEqual(k3.remove(), []);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
