@@ -1795,7 +1795,7 @@ test('a taken off names what would not go: a half-written copy of the store or o
   assert.deepEqual(B.offLeft({ secretStuck, secretBase: SECRET_FILE }), ['secret']);
   assert.equal(B.secretLeftWords(secretStuck, SECRET_FILE), `LINE chats: the bot’s secret could not be deleted; close any app using the app’s data folder and delete line-bot-secret.json (and any line-bot-secret.json.*.tmp) from ${B.dataDir()}`);
   // A folder that could not be listed: copies may be left.
-  assert.deepEqual(B.offLeft({ storeProblems: [{ what: 'unlisted' }], secretStuck: [{ name: '.', code: 'EMFILE' }], secretBase: SECRET_FILE }), ['unlisted']);
+  assert.deepEqual(B.offLeft({ storeProblems: [{ what: 'unlisted' }], secretStuck: [{ name: '.', code: 'EMFILE' }], secretBase: SECRET_FILE }), ['unlisted', 'secretUnlisted']);
   assert.deepEqual(B.offLeft({ storeProblems: [], secretStuck: [], secretBase: SECRET_FILE }), []);
 });
 
@@ -1949,7 +1949,7 @@ test('an off that could not start stays known and said, is tried again every hal
   assert.equal(k.notStarted, true);
   const said = () => B.botProblems({ on: true, store: k.store, storeProblems: k.problems(), now: NOW });
   const row = said().find((p) => /could not be started/.test(p.label));
-  assert.equal(row.label, 'LINE chats: turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute');
+  assert.equal(row.label, 'LINE chats: turning the bot off could not be started because the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute');
   assert.equal(row.fix, 'line');
   // Still failing: nothing changes, and it stays said.
   assert.deepEqual(k.housekeep(), { drop: false, code: 'line-bot-store-off.json EACCES' });
@@ -1962,12 +1962,14 @@ test('an off that could not start stays known and said, is tried again every hal
   assert.equal(fs.existsSync(h.file), false);
   assert.ok(fs.existsSync(offFile), 'the record goes last, after the secret');
   assert.ok(!said().some((p) => /could not be started/.test(p.label)));
-  // LINE chats turned on gives it up.
+  // LINE chats turned on gives it up, once its settings are saved (the caller's forgetUnstarted).
   const h2 = await seeded();
   const k2 = new B.BotKeeper({ file: h2.file, fsys: noOpen(path.join(path.dirname(h2.file), 'line-bot-store-off.json'), { on: true }), now: () => NOW });
   k2.load();
   k2.offWithLine(() => {});
   assert.deepEqual(k2.lineOn(), { ok: true });
+  assert.equal(k2.notStarted, true);
+  k2.forgetUnstarted();
   assert.equal(k2.notStarted, false);
   assert.deepEqual(k2.problems(), []);
   assert.equal(k2.ready, true);
@@ -1984,7 +1986,7 @@ test('a record that would not go after the store and the secret blocks nothing b
   assert.equal(k.on, false);
   assert.equal(k.recordLeft, true);
   const label = B.botProblems({ on: false, store: k.store, storeProblems: k.problems(), now: NOW }).map((p) => p.label).join('\n');
-  assert.equal(label, `LINE chats: the bot’s off is finished, but its note line-bot-store-off.json could not be deleted; close any app using the app’s data folder and delete it from ${B.dataDir()}. The app tries again within a minute`);
+  assert.equal(label, 'LINE chats: turning the bot off is finished, but its note line-bot-store-off.json could not be deleted; close any app using the app’s data folder, and the app deletes it within a minute of the file being freed');
   assert.deepEqual(k.lineOn(), { ok: true });
   assert.deepEqual(k.turnOn(), { ok: false, error: 'Not turned on: the note of the bot’s earlier off (line-bot-store-off.json) could not be deleted; close any app using the app’s data folder and try again.' });
   state.held = false;
@@ -2026,4 +2028,92 @@ test('a held untick file from an earlier version has its own words at off', asyn
   k.load();
   assert.deepEqual(k.remove(), { ok: true, drop: true });
   assert.deepEqual(B.botProblems({ on: false, store: k.store, storeProblems: k.problems(), now: NOW }).map((p) => p.label), [`LINE chats: the bot’s file from an earlier version, line-bot-store.untick.json, could not be deleted; close any app using the app’s data folder and delete it from ${B.dataDir()}`]);
+});
+
+// ---- cleanup round 11 ------------------------------------------------------------------------
+
+test('two offs finished later in one run each get a new number, so a window says each once', async () => {
+  const h = await seeded();
+  const state = { held: true };
+  const k = new B.BotKeeper({ file: h.file, fsys: holdingFs(h.file, state), now: () => NOW });
+  k.load();
+  k.offWithLine(() => {});
+  state.held = false;
+  assert.deepEqual(k.housekeep(), { drop: true });
+  k.doneLater([]);
+  assert.deepEqual(k.offDone, { n: 1, left: [] });
+  assert.ok(k.unmarkOff().ok);
+  assert.ok(k.turnOn().ok);
+  assert.equal(k.offDone, null, 'on again: the first off is no longer said');
+  state.held = true;
+  k.offWithLine(() => {});
+  state.held = false;
+  assert.deepEqual(k.housekeep(), { drop: true });
+  k.doneLater(['secret']);
+  assert.deepEqual(k.offDone, { n: 2, left: ['secret'] });
+});
+
+test('LINE chats on whose save fails leaves an off not started pending, said and tried again; only a saved on gives it up', async () => {
+  const h = await seeded();
+  const k = new B.BotKeeper({ file: h.file, fsys: noOpen(path.join(path.dirname(h.file), 'line-bot-store-off.json'), { on: true }), now: () => NOW });
+  k.load();
+  k.offWithLine(() => {});
+  assert.deepEqual(k.lineOn(), { ok: true });
+  // The caller's save of LINE chats on fails here: nothing more is called.
+  assert.equal(k.notStarted, true);
+  assert.ok(k.problems().some((p) => p.what === 'notStarted'));
+  assert.deepEqual(k.housekeep(), { drop: false, code: 'line-bot-store-off.json EACCES' });
+  k.forgetUnstarted();
+  assert.equal(k.notStarted, false);
+  assert.deepEqual(k.problems(), []);
+});
+
+test('a collection under way when LINE chats goes off with an off that can’t start writes nothing more and asks the relay nothing more', async () => {
+  const h = await seeded();
+  h.fsys.openSync = noOpen(path.join(path.dirname(h.file), 'line-bot-store-off.json'), { on: true }).openSync;
+  let off;
+  const r = duringRound2(h, () => {
+    off = h.keeper.offWithLine(() => {});
+  });
+  for (let i = 1; i <= 6; i += 1) r.add(message({ id: `F3-${i}`, text: `f${i}`, ms: at(10, i) }));
+  const before = r.calls.length;
+  const res = await h.collect();
+  assert.deepEqual(off, { drop: false, notStarted: true, code: 'line-bot-store-off.json EACCES' });
+  assert.equal(res.stale, true);
+  assert.equal(r.calls.slice(before).filter((c) => c.init.method === 'POST').length, 2, 'the call in flight at the off, none after');
+  assert.deepEqual(textsOnDisk(h.file), ['f1', 'f2', 'kept one', 'kept two'], 'round 1 only (kept by time)');
+});
+
+test('a leftover half-written secret with no secret goes; with the folder unlistable it is said as its own row', () => {
+  const dir = tempDir();
+  const sf = path.join(dir, 'line-bot-secret.json');
+  fs.writeFileSync(`${sf}.77.tmp`, 'sealed copy');
+  assert.deepEqual(B.removeSecret({ file: sf }), []);
+  assert.deepEqual(fs.readdirSync(dir), []);
+  fs.writeFileSync(`${sf}.78.tmp`, 'sealed copy');
+  const stuck = B.removeSecret({ file: sf, fsys: { ...fs, readdirSync: () => { throw Object.assign(new Error('too many'), { code: 'EMFILE' }); } } });
+  assert.deepEqual(stuck, [{ name: '.', code: 'EMFILE' }]);
+  assert.deepEqual(B.offLeft({ secretStuck: stuck, secretBase: 'line-bot-secret.json' }), ['secretUnlisted']);
+});
+
+test('a secret-only listing failure has its own key in the off’s reply', () => {
+  assert.deepEqual(B.offLeft({ storeProblems: [], secretStuck: [{ name: '.', code: 'EMFILE' }], secretBase: 'line-bot-secret.json' }), ['secretUnlisted']);
+  assert.deepEqual(B.offLeft({ storeProblems: [{ what: 'unlisted' }], secretStuck: [], secretBase: 'line-bot-secret.json' }), ['unlisted']);
+});
+
+test('a held untick file’s row survives a restart', async () => {
+  const h = await seeded();
+  const untick = path.join(path.dirname(h.file), 'line-bot-store.untick.json');
+  fs.writeFileSync(untick, '{"read":[]}');
+  const held = holdingFs(untick, { held: true });
+  const k = new B.BotKeeper({ file: h.file, fsys: held, now: () => NOW });
+  k.load();
+  assert.ok(k.remove().ok);
+  const restarted = new B.BotKeeper({ file: h.file, fsys: held, now: () => NOW });
+  restarted.load();
+  assert.deepEqual(restarted.problems().map((p) => p.what), ['untickLeft']);
+  const freed = new B.BotKeeper({ file: h.file, now: () => NOW });
+  freed.load();
+  assert.deepEqual(freed.problems(), []);
+  assert.equal(fs.existsSync(untick), false);
 });

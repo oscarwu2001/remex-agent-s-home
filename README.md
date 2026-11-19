@@ -611,7 +611,13 @@ try again; LINE chats' switch still turns LINE chats off, and the bot's off
 is finished within a minute of the file being freed (Settings and **Needs
 attention** say it is not finished until then, and LINE chats can't be
 turned on again before it is; a restart finishes it too, since the app keeps
-a note of the unfinished off in its data folder until it is done). The settings file of the version before
+a note of the unfinished off in its data folder until it is done). If the
+app can't write that note, the bot's off does not start: Settings and **Needs
+attention** say so, the bot's data stays as it was, and the app tries again
+every half minute until it can, or until you turn LINE chats on again. If
+the note itself can't be deleted once the off is done, **Needs attention**
+says so and the app deletes it once it is freed; until then the bot can't
+be turned on again. The settings file of the version before
 (`line-bot.json`) is moved into the store, then removed; while it cannot be
 read just now the app waits for it, and if it is not settings, or the
 store's own ticks cannot be read, nothing is deleted: the ticks are rebuilt

@@ -217,21 +217,26 @@ const LEFT = {
   secret: 'its secret could not be deleted',
   secretCopy: 'a half-written copy of its secret could not be deleted',
   storeCopy: 'a half-written copy of its saved data (kept messages and relay link) could not be deleted',
-  unlisted: 'the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there',
+  unlisted: 'the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there',
+  secretUnlisted: 'the app’s data folder could not be listed, so half-written copies of the bot’s secret may be left there',
 };
+// Both listings failed: one phrase for the folder.
+const BOTH_UNLISTED = 'the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there';
 function offWords(state) {
   const left = (state.left ?? []).filter((k) => LEFT[k]);
   // A copy of its saved data holds the relay link and kept messages too.
   const copies = left.includes('storeCopy') || left.includes('unlisted');
-  const secretGone = !['secret', 'secretCopy', 'unlisted'].some((k) => left.includes(k));
+  const secretGone = !['secret', 'secretCopy', 'secretUnlisted'].some((k) => left.includes(k));
   const deleted = [copies ? '' : 'relay link', secretGone ? 'secret' : '', copies ? '' : 'kept messages'].filter(Boolean);
   const list = deleted.length > 2 ? `${deleted.slice(0, -1).join(', ')} and ${deleted.at(-1)}` : deleted.join(' and ');
   if (!left.length) return `<p class="hint" role="status">Turned off: the app deleted the bot’s ${list}.</p>`;
-  return `<p class="form-error" role="alert">${deleted.length ? `Turned off: the app deleted the bot’s ${list}; ` : 'Turned the bot off, but '}${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
+  const both = left.includes('unlisted') && left.includes('secretUnlisted');
+  const words = left.filter((k) => !(both && k === 'secretUnlisted')).map((k) => (both && k === 'unlisted' ? BOTH_UNLISTED : LEFT[k]));
+  return `<p class="form-error" role="alert">${deleted.length ? `Turned off: the app deleted the bot’s ${list}; ` : 'Turned the bot off, but '}${words.join('; ')} (see Needs attention).</p>`;
 }
 // LINE chats off whose bot part could not even be started (its record
 // could not be written; the snapshot's bot.notStarted, tried again by the app).
-const NOT_STARTED = '<p class="form-error" role="status">LINE chats is off, but turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute; to try again now, restart Agent’s Home (or turn LINE chats on and then off).</p>';
+const NOT_STARTED = '<p class="form-error" role="status">LINE chats is off, but turning the bot off could not be started because the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute; to try again now, restart Agent’s Home (or turn LINE chats on and then off).</p>';
 // The bot part as on: not while an off of it is not finished or not started.
 const botOn = (b) => Boolean(b?.on) && !b?.unfinished && !b?.notStarted;
 // The user's off, not finished (BotKeeper.unfinished: 'held' or 'failed'):
@@ -372,7 +377,8 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
     // words only for an off taken (never while its data is still there).
     const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : l?.bot?.notStarted ? NOT_STARTED
       : state.stopped && !state.unfinished && !state.notStarted ? offWords(state) : '';
-    return `${switchErr}${said}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
+    // Not started: nothing of the bot's is off yet, so no advice on stopping LINE.
+    return `${switchErr}${said}${!l?.bot?.notStarted && (l?.bot?.linkSet || state.stopped) ? STOP_WORDS : ''}`;
   }
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
   const folder = l.folder
