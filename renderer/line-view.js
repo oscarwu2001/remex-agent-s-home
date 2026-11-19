@@ -122,7 +122,7 @@ function itemHtml(it, { privacy, now, ui, projects }) {
 // What the last button did goes to the section's one status line (statusHtml).
 export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, projects = [] } = {}) {
   if (!l?.enabled) return '';
-  const bot = l.bot?.on ? l.bot : null;
+  const bot = botOn(l.bot) ? l.bot : null;
   if (!l.demo && !l.folder && !bot) return `<p class="empty">Not set up yet. Choose the folder you save LINE chats into, or connect your LINE bot.</p>${settingsBtn}`;
   // The exports folder's trouble hides nothing the bot brings in: it is said above.
   const botReading = Boolean(bot?.groups?.some((g) => g.read));
@@ -217,7 +217,7 @@ const LEFT = {
   secret: 'its secret could not be deleted',
   secretCopy: 'a half-written copy of its secret could not be deleted',
   storeCopy: 'a half-written copy of its saved data (kept messages and relay link) could not be deleted',
-  unlisted: 'the app’s data folder could not be listed, so half-written copies of its saved data or secret may be left there',
+  unlisted: 'the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there',
 };
 function offWords(state) {
   const left = (state.left ?? []).filter((k) => LEFT[k]);
@@ -227,14 +227,17 @@ function offWords(state) {
   const deleted = [copies ? '' : 'relay link', secretGone ? 'secret' : '', copies ? '' : 'kept messages'].filter(Boolean);
   const list = deleted.length > 2 ? `${deleted.slice(0, -1).join(', ')} and ${deleted.at(-1)}` : deleted.join(' and ');
   if (!left.length) return `<p class="hint" role="status">Turned off: the app deleted the bot’s ${list}.</p>`;
-  return `<p class="form-error" role="alert">${deleted.length ? `Turned off: the app deleted the bot’s ${list}; ` : 'Turned off, but '}${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
+  return `<p class="form-error" role="alert">${deleted.length ? `Turned off: the app deleted the bot’s ${list}; ` : 'Turned the bot off, but '}${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
 }
-// LINE chats off whose bot part could not even be started (its record could not be written).
-const NOT_STARTED = '<p class="form-error" role="alert">LINE chats is off, but turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so its kept messages, relay link and secret are still on this computer. Turn LINE chats on and off again to try again.</p>';
+// LINE chats off whose bot part could not even be started (its record
+// could not be written; the snapshot's bot.notStarted, tried again by the app).
+const NOT_STARTED = '<p class="form-error" role="status">LINE chats is off, but turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute; to try again now, restart Agent’s Home (or turn LINE chats on and then off).</p>';
+// The bot part as on: not while an off of it is not finished or not started.
+const botOn = (b) => Boolean(b?.on) && !b?.unfinished && !b?.notStarted;
 // The user's off, not finished (BotKeeper.unfinished: 'held' or 'failed'):
 // nothing of the bot's was deleted yet. lineOff: said under LINE chats' switch.
-const notFinished = (why, lineOff) => `<p class="form-error" role="status">${lineOff ? 'LINE chats is off. ' : ''}Turning the bot off is not finished: its kept messages, relay link and secret are still on this computer because ${why === 'failed'
-  ? 'its file could not be removed (the system log has the reason). The app tries again within a minute'
+const notFinished = (why, lineOff) => `<p class="form-error" role="status">${lineOff ? 'LINE chats is off. ' : ''}Turning the bot off is not finished; its kept messages, relay link and secret are still on this computer because ${why === 'failed'
+  ? 'its file could not be deleted (the system log has the reason). The app tries again within a minute'
   : 'another program has its file open. Close any app using the app’s data folder; the app finishes within a minute of the file being freed'} (see Needs attention).</p>`;
 // Off stops the app collecting, not LINE sending to the relay.
 const STOP_WORDS = '<p class="hint" role="status">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history (it can hold past messages).</p>';
@@ -267,7 +270,7 @@ const STORAGE_NOTE = 'see the note under Collect from my LINE bot';
 function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   // An off not finished is off to the user: nothing to change until it is.
   const unfinished = b?.unfinished;
-  const on = Boolean(b?.on) && !unfinished;
+  const on = botOn(b);
   const noStore = on && b.secretStorage ? String(b.secretStorage) : '';
   const head = `<h5 class="line-part-h" id="line-bot-h">Your LINE bot</h5>
     <p class="hint">For groups only: a LINE Official Account bot you invite to a group passes on what is said there, after it joins, through a relay of yours (a Google Sheet and a script). It cannot see one-to-one chats.</p>
@@ -365,7 +368,10 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   // it, as the bot's own switch says. The bot's off not finished is said
   // from the snapshot, so it stays said after Settings is reopened.
   if (!l?.enabled) {
-    const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : state.notStarted ? NOT_STARTED : state.stopped && !state.unfinished ? offWords(state) : '';
+    // From the snapshot, so a window opened afresh says the same; an off's
+    // words only for an off taken (never while its data is still there).
+    const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : l?.bot?.notStarted ? NOT_STARTED
+      : state.stopped && !state.unfinished && !state.notStarted ? offWords(state) : '';
     return `${switchErr}${said}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
   }
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
@@ -400,12 +406,12 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
       </form>`;
   }
   // With no folder and no bot nothing has been read: no time to give.
-  const reading = Boolean(l.folder || l.bot?.on || l.demo);
+  const reading = Boolean(l.folder || botOn(l.bot) || l.demo);
   const status = [reading ? (l.scannedAt ? `Read ${boardTime(l.scannedAt, now)}` : 'Not read yet') : '', reading ? `items from the last ${l.windowDays ?? 14} days` : '', state.note].filter(Boolean).join(' · ');
   const statusP = status ? `<p class="hint" role="status">${esc(status)}</p>` : '';
   const exportsPart = `${exportsHead}${folder}${how}${err}${list}${privacy ? '' : ERR(state.tickError)}`;
   // Names and keywords count for both parts.
-  const groups = l.bot?.on && l.bot.groups?.length;
+  const groups = botOn(l.bot) && l.bot.groups?.length;
   const hidden = privacy && reading
     ? `<p class="hint">Turn off ${PRIVACY_SWITCH} to choose chats${groups ? ' and groups' : ''} and to change your names and keywords. <button type="button" class="link-btn inline" data-line="privacy" data-key="line-settings-privacy">Privacy settings</button></p>` : '';
   const shared = reading ? `${wordsHead}${words}` : '';
@@ -421,7 +427,7 @@ export function keepFileNames(html) {
 // The closed Connections group's words for LINE: on or off, and counts only.
 export function lineSummary(l) {
   if (!l?.enabled) return 'LINE off';
-  if (!l.demo && !l.folder && !l.bot?.on) return 'LINE on · no folder yet';
+  if (!l.demo && !l.folder && !botOn(l.bot)) return 'LINE on · no folder yet';
   return `LINE on · ${plural(l.readCount ?? 0, 'chat')} read`;
 }
 

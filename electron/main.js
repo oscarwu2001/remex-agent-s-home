@@ -1466,8 +1466,9 @@ app.whenReady().then(() => {
     const stuck = lineBot.removeSecret({ file: botSecretFile });
     const named = stuck.filter((s) => s.name !== '.');
     if (named.length) problem(lineBot.secretLeftWords(named, path.basename(botSecretFile)), stuckWhere(botSecretFile, named));
-    // A folder that could not be listed: the keeper's one row for it.
-    if (named.length < stuck.length) botKeeper.note({ what: 'unlisted', detail: stuckWhere(botSecretFile, stuck.filter((s) => s.name === '.')) });
+    // A folder it could not list: its own row, until a removal that lists it.
+    if (named.length < stuck.length) botKeeper.note({ what: 'secretUnlisted', detail: stuckWhere(botSecretFile, stuck.filter((s) => s.name === '.')) });
+    else botKeeper.forget('secretUnlisted');
     botSecretSaved = fs.existsSync(botSecretFile);
     if (!botSecretSaved) botSecretFor = null;
     return stuck;
@@ -1477,21 +1478,34 @@ app.whenReady().then(() => {
   // could not finish: its code to the system log, when it changes.
   let botOffCode = null;
   function botDropped(res) {
-    if (res.drop) dropBotSecret();
-    if (res.code && res.code !== botOffCode) lineLog('bot off not finished', { code: res.code });
-    botOffCode = res.code ?? null;
+    if (res.drop) botGone();
+    const code = [res.code, res.markCode].filter(Boolean).join(', ') || null;
+    if (code && code !== botOffCode) lineLog('bot off not finished', { code });
+    botOffCode = code;
+  }
+  // The store is gone: the secret goes, then the off's record (a record
+  // that would not go is the keeper's to say and try again). -> the
+  // secret's files that would not go (removeSecret).
+  function botGone() {
+    const stuck = dropBotSecret();
+    const rec = botKeeper.unmarkOff();
+    if (!rec.ok) lineLog('bot off record not deleted', { code: rec.code });
+    return stuck;
   }
   // An off that finished later (the half-minute retry, or LINE chats turned
   // on): what it deleted, for Settings to say as for an off finished at once.
   let botOffDone = null; // { n, left }
   function botFinishedLater() {
-    const left = lineBot.offLeft({ storeProblems: botKeeper.problems(), secretStuck: dropBotSecret(), secretBase: path.basename(botSecretFile) });
+    const left = lineBot.offLeft({ storeProblems: botKeeper.problems(), secretStuck: botGone(), secretBase: path.basename(botSecretFile) });
     botOffDone = { n: (botOffDone?.n ?? 0) + 1, left };
     botOffCode = null;
   }
   // LINE chats off, as read cleanly from its own file, is the user's off (a removal that failed then is done now).
   const lineStartOff = lineRead === 'ok' && !line.enabled;
-  botDropped(botKeeper.load({ lineOff: lineStartOff, secretFor: botSecretFor }));
+  const botStart = botKeeper.load({ lineOff: lineStartOff, secretFor: botSecretFor });
+  // An off left from the last run, finished now: Settings says what it deleted.
+  if (botStart.later) botFinishedLater();
+  else botDropped(botStart);
   // A secret with the part off is what an earlier off left: it goes now, or is said.
   if (!botKeeper.on && botSecretSaved) dropBotSecret();
   function scanLine() {
@@ -1666,16 +1680,19 @@ app.whenReady().then(() => {
   function botOff(writeLine = null) {
     const stop = Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck;
     const res = writeLine ? botKeeper.offWithLine(writeLine) : botKeeper.remove();
-    // Its record could not be written: not started, and said so.
+    botOffDone = null; // an earlier off's words are not this one's
+    // Its record could not be written: not started, said, and tried again.
     if (res.notStarted) {
       lineLog('bot off not started', { code: res.code });
+      botOffCode = res.code;
       return { ok: true, stop, notStarted: true };
     }
     if (!res.drop) {
       lineLog('bot store not removed', { code: res.code });
+      botOffCode = res.code;
       if (!writeLine) return { ok: false, error: res.error };
     }
-    const left = res.drop ? lineBot.offLeft({ storeProblems: botKeeper.problems(), secretStuck: dropBotSecret(), secretBase: path.basename(botSecretFile) }) : [];
+    const left = res.drop ? lineBot.offLeft({ storeProblems: botKeeper.problems(), secretStuck: botGone(), secretBase: path.basename(botSecretFile) }) : [];
     [botError, botTriedAt, botCollectedAt, botMore] = [null, null, null, false];
     return { ok: true, stop, ...(res.drop ? {} : { unfinished: botKeeper.unfinished }), ...(left.length ? { left } : {}) };
   }
@@ -1739,10 +1756,13 @@ app.whenReady().then(() => {
   function botTick() {
     // While the part is on, LINE chats on or not: a stuck store is read
     // again, text past 14 days removed, the folder tidied.
+    // An off's record left behind: tried again, whatever the part is.
+    if (botKeeper.recordLeft) botKeeper.unmarkOff();
     if (!botRun && botKeeper.on) {
       const was = botKeeper.state;
+      const pending = was === 'unremoved' || botKeeper.notStarted;
       const res = botKeeper.housekeep({ secretFor: botSecretFor, lineOff: lineStartOff && !line.enabled });
-      if (res.drop && was === 'unremoved') botFinishedLater();
+      if (res.drop && pending) botFinishedLater();
       else botDropped(res);
       if (botKeeper.state !== was) scanLine();
     }
@@ -1766,7 +1786,10 @@ app.whenReady().then(() => {
         return { ok: true, ...offReply(off) };
       }
       res = botKeeper.turnOn();
-      if (res.ok) botAgain();
+      if (res.ok) {
+        botAgain();
+        botOffDone = null;
+      }
     } else if ('link' in c) {
       res = botKeeper.setLink(c.link);
       if (res.ok && res.changed) {
@@ -1994,7 +2017,7 @@ app.whenReady().then(() => {
   });
   function lineState() {
     // Off: only whether a relay link is set (never the link), for the words on how to stop LINE sending to it.
-    if (!line.enabled) return { enabled: false, bot: { on: false, linkSet: Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck, unfinished: botKeeper.unfinished, offDone: botOffDone } };
+    if (!line.enabled) return { enabled: false, bot: { on: false, linkSet: Boolean(botKeeper.settings.link) || botSecretSaved || botKeeper.stuck, unfinished: botKeeper.unfinished, notStarted: botKeeper.notStarted, offDone: botOffDone } };
     const byChat = new Map();
     for (const f of lineScan?.files ?? []) {
       const c = byChat.get(f.chat) ?? { chat: f.chat, files: 0, read: line.read.includes(f.chat), problems: 0 };

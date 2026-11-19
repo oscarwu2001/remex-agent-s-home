@@ -795,8 +795,8 @@ const writeWhy = (code) => (['EBUSY', 'EPERM', 'EACCES'].includes(code) ? 'anoth
   : code === 'ENOSPC' ? 'the disk is full' : 'the system log has the reason');
 const CLOSE = 'close any app using the app’s data folder';
 // The user's off, not finished, by why (BotKeeper.unfinished), as Settings says it.
-const UNFINISHED = (why) => `turning the bot off is not finished: its kept messages, relay link and secret are still on this computer because ${why === 'failed'
-  ? 'its file could not be removed (the system log has the reason). The app tries again within a minute'
+const UNFINISHED = (why) => `turning the bot off is not finished; its kept messages, relay link and secret are still on this computer because ${why === 'failed'
+  ? 'its file could not be deleted (the system log has the reason). The app tries again within a minute'
   : `another program has its file open. Close any app using the app’s data folder; the app finishes within a minute of the file being freed`}`;
 // Where the app's data folder is (Electron's userData), without the user's name, for what to delete by hand.
 function dataDir(platform = process.platform) {
@@ -813,8 +813,13 @@ const STORE_WORDS = {
   legacyLeft: () => `the bot’s settings file from before the update (line-bot.json) could not be removed; ${CLOSE} and delete it from ${DATA_DIR}`,
   legacyUnread: () => `the bot’s settings file from before the update (line-bot.json) could not be read, so its ticks and relay link were not kept and ${SWITCH} is off; to use the bot, turn it on in ${SETTINGS} and paste the relay link and secret`,
   damaged: (sp) => `${sp.count} of the bot’s saved entries could not be read and were left out; the rest are kept`,
-  unlisted: (sp, on) => (on ? `the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there; collecting goes on. The app tries again within a minute`
-    : `the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp and line-bot-secret.json.*.tmp files from ${DATA_DIR}`),
+  unlisted: (sp, on) => (on ? `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; collecting goes on. The app tries again within a minute`
+    : `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp files from ${DATA_DIR}`),
+  // Listed by removeSecret only: cleared by the next removeSecret that lists the folder.
+  secretUnlisted: () => `the app’s data folder could not be listed, so half-written copies of the bot’s secret may be left there; ${CLOSE} and delete any line-bot-secret.json.*.tmp files from ${DATA_DIR}`,
+  untickLeft: () => `the bot’s file from an earlier version, line-bot-store.untick.json, could not be deleted; ${CLOSE} and delete it from ${DATA_DIR}`,
+  recordLeft: () => `the bot’s off is finished, but its note line-bot-store-off.json could not be deleted; ${CLOSE} and delete it from ${DATA_DIR}. The app tries again within a minute`,
+  notStarted: () => 'turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute',
   leftover: (sp, on) => (on ? `a half-written copy of the bot’s saved data could not be deleted; ${CLOSE}. The app tries again within a minute`
     : `a half-written copy of the bot’s saved data could not be deleted; ${CLOSE} and delete line-bot-store.json.*.tmp from ${DATA_DIR}`),
   prune: () => `messages older than ${WINDOW_DAYS} days could not be removed from the bot’s file just now; ${CLOSE}. The app tries again every half minute`,
@@ -842,7 +847,15 @@ const NEW_DEPLOYMENT = `in the relay script, Deploy → New deployment; put its 
 function botProblems({ on, store, error = null, notCollecting: why = null, storeProblems = [], ticked = new Set(store?.settings?.read ?? []), now }) {
   const out = [];
   const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
-  for (const sp of storeProblems) if (STORE_WORDS[sp.what]) add(STORE_WORDS[sp.what](sp, on), sp.detail ?? '', ['invalid', 'legacyUnread'].includes(sp.what) ? 'line' : null);
+  const kinds = new Set(storeProblems.map((sp) => sp.what));
+  const secretList = storeProblems.find((sp) => sp.what === 'secretUnlisted');
+  for (const sp of storeProblems) {
+    if (!STORE_WORDS[sp.what] || (sp.what === 'secretUnlisted' && kinds.has('unlisted'))) continue;
+    // One row for a folder that could not be listed, for the store's copies and the secret's.
+    if (sp.what === 'unlisted' && secretList) {
+      add(`the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp and line-bot-secret.json.*.tmp files from ${DATA_DIR}`, [sp.detail, secretList.detail].filter(Boolean).join(', '));
+    } else add(STORE_WORDS[sp.what](sp, on), sp.detail ?? '', ['invalid', 'legacyUnread', 'notStarted'].includes(sp.what) ? 'line' : null);
+  }
   // Kept in the store until the user changes a tick or the link.
   if (store?.rebuilt) add(REBUILT_WORDS(store), '', 'line');
   if (!on) return out;
@@ -947,6 +960,7 @@ const PRUNE_SAY = 2; // failed prunes in a row before it is said
 // LINE chats, or the bot, turned on while the bot's off is not finished (Settings says why, below).
 const ON_WAITS = 'LINE chats can’t be turned on until turning the bot off is finished (see below).';
 const BOT_WAITS = `${SWITCH} can’t be turned on until turning the bot off is finished (see below).`;
+const RECORD_WAITS = `Not turned on: the note of the bot’s earlier off (line-bot-store-off.json) could not be deleted; ${CLOSE} and try again.`;
 
 class BotKeeper {
   // file: the store; legacyFile: 67909b5's settings file (line-bot.json),
@@ -969,6 +983,7 @@ class BotKeeper {
     // The user's off, recorded before its removal starts and removed last:
     // while it is there the off is pending, whatever a settings file says.
     this.offFile = path.join(this.dir, `${this.stem}-off.json`);
+    this.unstarted = null; // LINE chats' off whose record could not be written: its code
     this.found = []; // { what, detail, count } for botProblems
   }
 
@@ -985,6 +1000,14 @@ class BotKeeper {
   // open) or 'failed' (the system log has why); else null.
   get unfinished() {
     return this.state === 'unremoved' ? this.offWhy : null;
+  }
+  // LINE chats' off whose record could not be written: not started, said,
+  // and tried again every half minute until it starts or LINE chats is on.
+  get notStarted() {
+    return Boolean(this.unstarted);
+  }
+  get recordLeft() {
+    return this.found.some((p) => p.what === 'recordLeft');
   }
   // The user's ticks and link; none while the store is not read.
   get settings() {
@@ -1063,9 +1086,13 @@ class BotKeeper {
       names = [];
     }
     this.forget('unlisted');
-    const stuck = this.removeAll([...names.filter((n) => this.temp.test(n)), ...extra.filter((n) => names.includes(n))]);
+    const stuck = this.removeAll(names.filter((n) => this.temp.test(n)));
     if (stuck.length) this.note({ what: 'leftover', detail: this.where(stuck) });
     else this.forget('leftover');
+    if (!extra.length) return;
+    const old = this.removeAll(extra.filter((n) => names.includes(n)));
+    if (old.length) this.note({ what: 'untickLeft', detail: this.where(old) });
+    else this.forget('untickLeft');
   }
 
   // The older settings file: null when there is none; { busy: code } when
@@ -1193,19 +1220,39 @@ class BotKeeper {
   // An off the user made (read from a file at start, or LINE chats') that
   // must finish: taken once the files are gone, else 'unremoved'
   // (unfinished says why), tried again every half minute whatever the
-  // switches show. -> { drop: true }, or { drop: false, code } (the file and
-  // its error code, for the system log).
+  // switches show. -> { drop: true, later? (at load: an off from the last
+  // run whose store was still there) }, or { drop: false, code (the file
+  // and its error code, for the system log), markCode? (its record could not
+  // be written either) }. Once dropped, the caller removes the secret, then
+  // the record (unmarkOff).
   offAtLoad() {
-    // Recorded here too where it can be; else the file it was read from records it.
-    if (this.fsys.existsSync(this.file)) this.markOff();
-    return this.retryOff();
+    const had = this.fsys.existsSync(this.file);
+    const res = this.retryOff();
+    return res.drop && had ? { ...res, later: true } : res;
   }
   retryOff() {
+    // Recorded first wherever the store is still there, so a restart
+    // finishes it whatever a settings file says; tried again with the off.
+    const f = this.fsys;
+    const mark = f.existsSync(this.file) && !f.existsSync(this.offFile) ? this.markOff() : { ok: true };
     const res = this.remove();
     if (res.ok) return { drop: true };
     this.offWhy = HELD.some((c) => res.code.endsWith(` ${c}`)) ? 'held' : 'failed';
     this.become('unremoved', { what: 'unremoved', detail: `${this.dir} (${res.code})`, why: this.offWhy });
-    return { drop: false, code: res.code };
+    return { drop: false, code: res.code, ...(mark.ok ? {} : { markCode: mark.code }) };
+  }
+  // The off's record, removed last (after the store and the secret). One
+  // that would not go blocks nothing but a new on: said, and tried again
+  // every half minute. -> { ok } or { ok: false, code }.
+  unmarkOff() {
+    try {
+      this.fsys.rmSync(this.offFile, { force: true });
+      this.forget('recordLeft');
+      return { ok: true };
+    } catch (err) {
+      this.note({ what: 'recordLeft', detail: `${this.offFile} (${err.code || 'error'})` });
+      return { ok: false, code: `${path.basename(this.offFile)} ${err.code || 'error'}` };
+    }
   }
   // The off's record (offFile), written and flushed -> { ok } or { ok:
   // false, code }. One that is there, however written, records the off.
@@ -1232,15 +1279,25 @@ class BotKeeper {
     write();
     if (this.on) {
       const mark = this.markOff();
-      if (!mark.ok) return { drop: false, notStarted: true, code: mark.code };
+      if (!mark.ok) {
+        this.unstarted = mark.code;
+        this.note({ what: 'notStarted', detail: `${this.dir} (${mark.code})` });
+        return { drop: false, notStarted: true, code: mark.code };
+      }
     }
     return this.retryOff();
+  }
+  forgetUnstarted() {
+    this.unstarted = null;
+    this.forget('notStarted');
   }
   // LINE chats turned on: while an off is not finished it is tried once
   // more, and LINE chats is refused if it still can't be (its record keeps
   // it pending for the next start). -> { ok, drop? (the off finished now:
   // the caller removes the secret) } or { ok: false, error, code }.
   lineOn() {
+    // An off not started is given up: LINE chats is on again.
+    if (this.unstarted) this.forgetUnstarted();
     if (this.state !== 'unremoved') return { ok: true };
     const res = this.retryOff();
     if (res.drop) return { ok: true, drop: true };
@@ -1266,6 +1323,13 @@ class BotKeeper {
   // off from a file tried again), one that reads is pruned and its folder
   // tidied. -> as load().
   housekeep({ secretFor = null, lineOff = false } = {}) {
+    // An off not started: its record tried again, then the off.
+    if (this.unstarted) {
+      const mark = this.markOff();
+      if (!mark.ok) return { drop: false, code: mark.code };
+      this.forgetUnstarted();
+      return this.retryOff();
+    }
     if (this.state === 'unremoved') return this.retryOff();
     if (this.stuck) return this.load({ secretFor, lineOff });
     if (!this.ready) return { drop: false };
@@ -1280,6 +1344,8 @@ class BotKeeper {
   turnOn() {
     if (this.state === 'unremoved') return { ok: false, error: BOT_WAITS };
     if (this.on) return { ok: true };
+    // An earlier off's record left behind would take the new store at the next start.
+    if (this.fsys.existsSync(this.offFile) && !this.unmarkOff().ok) return { ok: false, error: RECORD_WAITS };
     this.forget('legacyUnread');
     const store = emptyStore();
     try {
@@ -1362,8 +1428,7 @@ class BotKeeper {
     // Whichever would bring the part back at a restart goes first: the
     // store when the older file says off, else the older file.
     const order = this.legacy?.on === false ? [this.file, this.legacyFile] : [this.legacyFile, this.file];
-    // The off's record goes last: until then the off is pending.
-    for (const file of [...order, this.offFile]) {
+    for (const file of order) {
       if (!file) continue;
       try {
         this.fsys.rmSync(file, { force: true });
@@ -1375,6 +1440,7 @@ class BotKeeper {
     this.legacy = null;
     this.epoch += 1;
     this.pruneFails = 0;
+    this.unstarted = null;
     this.found = [];
     this.become('off');
     this.tidy([`${this.stem}.untick.json`]);
