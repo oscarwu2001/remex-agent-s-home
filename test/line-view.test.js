@@ -653,9 +653,11 @@ test('the words name the switch the user sees, never “the bot part”', async 
 test('a taken off says what it deleted, then how to stop LINE sending, as status; LINE chats off carries it; a refused off says only why', async () => {
   const { lineSettingsHtml } = await view();
   const off = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true } });
-  assert.match(off, /<p class="hint" role="status">Turned off: the app deleted its relay link, secret and the messages it kept\.<\/p><p class="hint" role="status">Stopped using the bot\?/);
-  const lineOff = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, bot: { stopped: true } });
-  assert.match(lineOff, /Turned off: the app deleted its relay link, secret and the messages it kept\.[\s\S]*turn off Use webhook/);
+  assert.match(off, /<p class="hint" role="status">Turned off: the app deleted the bot’s relay link, secret and kept messages\.<\/p><p class="hint" role="status">Stopped using the bot\?/);
+  const lineOff = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, state: { stopped: true } });
+  assert.match(lineOff, /Turned off: the app deleted the bot’s relay link, secret and kept messages\.[\s\S]*turn off Use webhook/);
+  // Said under the switch that took it, not again elsewhere.
+  assert.doesNotMatch(lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, bot: { stopped: true } }), /Turned off/);
   const error = 'Not turned off: the bot’s file could not be removed (another program has it open). Close any app using the app’s data folder and try again.';
   const refused = lineSettingsHtml(line({ bot: botPart() }), { privacy: true, online: true, now: NOW, bot: { error } });
   assert.match(refused, /id="opt-line-bot" checked[^>]*> <span>Collect from my LINE bot \(goes online, to my relay only\)<\/span><\/label><p class="form-error" role="alert">Not turned off: the bot’s file could not be removed/);
@@ -669,4 +671,13 @@ test('a stuck store: the switch names no storage note that is not drawn, and Set
   assert.doesNotMatch(html, /aria-describedby="line-bot-storage"/);
   assert.match(html, /Not collecting: the bot’s saved data is not in a shape the app reads\. To start afresh, turn Collect from my LINE bot off and on again; that deletes its saved messages, relay link and secret\./);
   assert.doesNotMatch(html, /nothing is collected/);
+});
+
+// ---- review round 6 ---------------------------------------------------------------------------
+
+test('a taken off says only what it deleted: a secret that stayed is not claimed', async () => {
+  const { lineSettingsHtml } = await view();
+  const left = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true, secretLeft: true } });
+  assert.match(left, /Turned off: the app deleted the bot’s relay link and kept messages; its secret could not be deleted \(see Needs attention\)\./);
+  assert.doesNotMatch(left, /relay link, secret and kept messages/);
 });

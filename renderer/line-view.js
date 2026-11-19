@@ -209,8 +209,10 @@ export function dropLineDrafts(state) {
   return Object.assign(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '', names: null, keywords: null, stopped: false });
 }
 
-// What an off deleted, said first once it is taken.
-const OFF_WORDS = '<p class="hint" role="status">Turned off: the app deleted its relay link, secret and the messages it kept.</p>';
+// What an off deleted, said first once it is taken, under the switch that took it.
+const offWords = (state) => `<p class="hint" role="status">${state.secretLeft
+  ? 'Turned off: the app deleted the bot’s relay link and kept messages; its secret could not be deleted (see Needs attention).'
+  : 'Turned off: the app deleted the bot’s relay link, secret and kept messages.'}</p>`;
 // Off stops the app collecting, not LINE sending to the relay.
 const STOP_WORDS = '<p class="hint" role="status">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history (it can hold past messages).</p>';
 
@@ -249,7 +251,7 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
     // Off stops the app collecting, not LINE sending to the relay: said
     // once the switch removed a relay link (state.stopped), until Settings closes.
     const stop = state.stopped ? `
-    ${OFF_WORDS}${STOP_WORDS}` : '';
+    ${offWords(state)}${STOP_WORDS}` : '';
     return `${head}${stop}`;
   }
   // Its saved data can't be read: nothing here can change until it can, but the switch can turn it off.
@@ -331,9 +333,7 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   // Under the "Read my LINE chats" switch, on or off: why turning it on or off failed.
   const switchErr = ERR(state.switchError);
   // Off, with a relay link set or just removed: how to stop LINE sending to it, as the bot's own switch says.
-  // The bot's own switch turned off just before is said here too.
-  const stopped = state.stopped || botState.stopped;
-  if (!l?.enabled) return `${switchErr}${stopped ? OFF_WORDS : ''}${l?.bot?.linkSet || stopped ? STOP_WORDS : ''}`;
+  if (!l?.enabled) return `${switchErr}${state.stopped ? offWords(state) : ''}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
   const folder = l.folder
     ? `<p class="field-set"><span>${privacy ? 'A folder is chosen.' : `Folder: <span class="field-path">${esc(l.folder)}</span>`}</span>

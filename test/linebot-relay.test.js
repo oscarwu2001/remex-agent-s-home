@@ -611,7 +611,7 @@ test('when counting the Gone rows fails, nothing newer is sent, and the next cal
     const first = env.app(0);
     delete env.hooks.setProperties;
     delete env.hooks.read;
-    assert.deepEqual(first, { ok: false, error: 'not counted' }, failure);
+    assert.deepEqual(first, { ok: false, error: 'not counted', step: 'count' }, failure);
     const cursor = cursorOf(first, 0);
     const second = env.app(cursor);
     assert.equal(second.missed, 2, failure);
@@ -682,7 +682,7 @@ test('an old row not yet recorded in Gone holds back every newer one: counted as
   ageRows(env, 15, 2); // 1 and 2 are past 14 days; 3 is newer
   env.sheets.get('Gone').failWrites = 1;
   const first = env.app(0);
-  assert.deepEqual(first, { ok: false, error: 'not counted' });
+  assert.deepEqual(first, { ok: false, error: 'not counted', step: 'record' });
   let cursor = cursorOf(first, 0);
   const second = env.app(cursor);
   assert.equal(second.missed, 2);
@@ -722,4 +722,23 @@ test('events that came while the key could not be read are still counted when th
   env.sheetsFail = false;
   delete env.hooks.getProperty;
   assert.equal(env.app(0).unchecked, 2);
+});
+
+// ---- review round 6 ------------------------------------------------------------------------
+
+test('a “not counted” that repeats because the Inbox removal keeps failing names that step', () => {
+  const env = appsScript();
+  env.line({ events: Array.from({ length: 600 }, (_, i) => text(`old${i}`)) });
+  ageRows(env, 15);
+  // Fails every time (a hook that throws is otherwise taken once).
+  const failing = (sheet) => {
+    if (sheet.name !== 'Inbox') return false;
+    env.hooks.remove = failing;
+    throw new Error('Service Spreadsheets failed');
+  };
+  env.hooks.remove = failing;
+  env.line({ events: [text('new')] });
+  const reply = env.app(0);
+  assert.deepEqual(reply, { ok: false, error: 'not counted', step: 'removal' });
+  assert.throws(() => B.relayReply(reply), (e) => /The relay could not remove its events older than 14 days from its Inbox tab just now, so it is holding back newer ones until it can \(they are not lost\)/.test(e.message));
 });

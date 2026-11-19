@@ -253,12 +253,12 @@ function toApp_(e, props) {
     removeTop_(sheet, 2, drop, rows.length);
     rows = rows.slice(drop);
     // Then rows past KEEP_DAYS, and the count of those the app never saved.
-    let aged = true;
+    let failedStep = ''; // which step of ageOut_ failed: 'record' (to Gone) or 'removal' (from the Inbox)
     try {
       ageOut_(sheet);
     } catch (err) {
-      aged = false;
-      console.error('Old rows not removed: ' + err); // tried again at the next call
+      failedStep = (err && err.step) || 'record';
+      console.error('Old rows not removed (' + failedStep + '): ' + err); // tried again at the next call
     }
     try {
       countGone_(props, upTo);
@@ -266,7 +266,7 @@ function toApp_(e, props) {
       // Their numbers wait in the Gone tab. Nothing newer is sent until they
       // are counted: past them, the app's cursor would hide them.
       console.error('Missed events not counted yet: ' + err);
-      return reply_({ ok: false, error: 'not counted' });
+      return reply_({ ok: false, error: 'not counted', step: 'count' });
     }
     // A row past KEEP_DAYS is never sent. One whose number is counted
     // (GONE_TO) waits only for its removal; one not counted yet (ageOut_
@@ -278,7 +278,7 @@ function toApp_(e, props) {
     let old = 0;
     while (old < rows.length && new Date(rows[old][1]).getTime() < cutoff) old++;
     const waiting = rows.slice(0, old).some((r) => Number(r[0]) > counted);
-    if (waiting && !aged) return reply_({ ok: false, error: 'not counted' });
+    if (waiting && failedStep) return reply_({ ok: false, error: 'not counted', step: failedStep });
     const rest = waiting ? [] : rows.slice(old);
     const events = rest.slice(0, BATCH).map((r) => {
       try {
@@ -553,8 +553,16 @@ function ageOut_(sheet) {
   let drop = 0;
   while (drop < rows.length && new Date(rows[drop][1]).getTime() < cutoff) drop++;
   if (!drop) return 0;
-  appendRows_(sheetNamed_(GONE), rows.slice(0, drop).map((r) => [r[0]]));
-  removeTop_(sheet, 2, drop, last - 1);
+  try {
+    appendRows_(sheetNamed_(GONE), rows.slice(0, drop).map((r) => [r[0]]));
+  } catch (err) {
+    throw Object.assign(err, { step: 'record' });
+  }
+  try {
+    removeTop_(sheet, 2, drop, last - 1);
+  } catch (err) {
+    throw Object.assign(err, { step: 'removal' });
+  }
   return drop;
 }
 
