@@ -208,6 +208,8 @@ function relayReply(body) {
   if (!Array.isArray(body.events)) throw wrongShape('no events');
   if (typeof body.more !== 'boolean') throw wrongShape('no more');
   if (!COUNTERS.every((k) => isCount(body[k]) || (k === 'lost' && body[k] === undefined))) throw wrongShape('no counts');
+  // From version 2: the refused count was capped (a flood), so it is at least what it says.
+  if (body.capped !== undefined && typeof body.capped !== 'boolean') throw wrongShape('capped');
   const events = [];
   let last = 0;
   for (const e of body.events) {
@@ -217,7 +219,7 @@ function relayReply(body) {
     if (e.broken === true || !e.event || typeof e.event !== 'object' || Array.isArray(e.event)) events.push({ seq: e.seq, broken: true });
     else events.push({ seq: e.seq, event: e.event });
   }
-  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k] ?? 0])) };
+  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k] ?? 0])), capped: body.capped === true };
 }
 
 // ---- events -> messages --------------------------------------------------------------
@@ -305,10 +307,12 @@ function readEvent(ev) {
 
 function emptyStore() {
   return {
-    version: STORE_VERSION, link: null, relay: null, cursor: 0, counts: null, groups: {}, messages: [], seen: {}, unsent: {}, notes: [], nameProblem: null, namedMs: 0,
+    version: STORE_VERSION, link: null, relay: null, cursor: 0, counts: null, baselines: {}, groups: {}, messages: [], seen: {}, unsent: {}, notes: [], nameProblem: null, namedMs: 0,
   };
 }
-const NOTES = ['missed', 'refused', 'notJson', 'lost', 'broken', 'unusable', 'future', 'ahead', 'restarted'];
+const NOTES = ['missed', 'refused', 'notJson', 'lost', 'capped', 'broken', 'unusable', 'future', 'ahead', 'restarted'];
+// The relays whose counts are remembered (the last answer of each), newest kept.
+const BASELINES = 8;
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
 const STRINGS = ['kind', 'text', 'who'];
 // A store read from its file -> { store, invalid, damaged }. One the app
@@ -344,6 +348,8 @@ function readStore(text) {
   const counts = c && typeof c.relay === 'string' && RELAY_ID.test(c.relay) && COUNTERS.every((k) => isCount(c[k]))
     ? { relay: c.relay, link: typeof c.link === 'string' ? c.link : null, ...Object.fromEntries(COUNTERS.map((k) => [k, c[k]])) } : null;
   if (raw.counts != null && !counts) damaged += 1;
+  const baselines = Object.fromEntries(Object.entries(obj(raw.baselines) ?? {}).filter(([id, b]) => keepIf(RELAY_ID.test(id) && obj(b) && COUNTERS.every((k) => isCount(b[k])) && Number.isFinite(b.at)))
+    .map(([id, b]) => [id, { ...Object.fromEntries(COUNTERS.map((k) => [k, b[k]])), at: b.at }]));
   const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter((n) => keepIf(obj(n) && NOTES.includes(n.what) && isCount(n.n) && Number.isFinite(n.at)));
   const np = obj(raw.nameProblem);
   return {
@@ -351,7 +357,7 @@ function readStore(text) {
       version: STORE_VERSION,
       link: typeof raw.link === 'string' ? raw.link : null,
       relay: typeof raw.relay === 'string' && RELAY_ID.test(raw.relay) ? raw.relay : null,
-      cursor: raw.cursor, counts, groups, messages, seen: stamps(raw.seen), unsent: stamps(raw.unsent), notes,
+      cursor: raw.cursor, counts, baselines, groups, messages, seen: stamps(raw.seen), unsent: stamps(raw.unsent), notes,
       nameProblem: np && typeof np.code === 'string' && PROBLEM.test(np.code) && Number.isFinite(np.ms) ? { code: np.code, ms: np.ms } : null,
       namedMs: Number(raw.namedMs) || 0,
     },
@@ -429,10 +435,15 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
   if (next.counts && next.counts.relay !== reply.relay && next.counts.link === link) note('restarted');
   next.relay = reply.relay;
   // The relay's counters only grow: a rise since its last answer is what
-  // happened in between, said whatever the app did meanwhile. Another
-  // relay's counts are where it starts.
-  if (next.counts?.relay === reply.relay) for (const k of COUNTERS) note(k, reply.counts[k] - next.counts[k]);
+  // happened in between, said whatever the app did meanwhile, and after
+  // answers from other relays too (each relay id keeps its own). A relay
+  // never heard from: its counts are where it starts.
+  const base = next.baselines?.[reply.relay] ?? (next.counts?.relay === reply.relay ? next.counts : null);
+  if (base) for (const k of COUNTERS) note(k, reply.counts[k] - base[k]);
+  if (reply.capped) note('capped');
   next.counts = { relay: reply.relay, link, ...reply.counts };
+  const known = Object.entries({ ...(next.baselines ?? {}), [reply.relay]: { ...reply.counts, at: now } }).sort((a, b) => b[1].at - a[1].at).slice(0, BASELINES);
+  next.baselines = Object.fromEntries(known);
   let broken = 0;
   let unusable = 0;
   let future = 0;
@@ -735,7 +746,7 @@ function storeWords(sp, add) {
     add(`an untick or a new secret could not be written to the app’s file yet (${sp.code ?? 'error'}), so the file still holds what it removes; close any app using the app’s data folder. The app tries again within a minute`, sp.detail ?? '');
   }
 }
-const AGAIN_SCRIPT = 'if it keeps happening, press Copy relay script in Settings, paste it over the relay’s script and deploy it as a new version';
+const AGAIN_SCRIPT = `if it keeps happening, press Copy relay script in ${SETTINGS}, paste it over the relay’s script and deploy it as a new version`;
 
 // What goes under Needs attention, as counts and next steps; no group or
 // sender name, message or link. error: the last collection's failure
@@ -755,7 +766,7 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   const days = `in the last ${WINDOW_DAYS} days`;
   const refused = sum('refused');
   if (refused) {
-    add(`${plural(refused, 'call')} to the relay’s webhook ${were(refused)} refused ${days}: a wrong key in LINE’s webhook link, or someone else calling the relay. Check that the webhook link in the LINE Developers console ends in ?k= and the relay’s WEBHOOK_KEY (the relay script’s Project Settings → Script properties)`);
+    add(`${sum('capped') ? 'at least ' : ''}${plural(refused, 'call')} to the relay’s webhook ${were(refused)} refused ${days}: a wrong key in LINE’s webhook link, or someone else calling the relay. Check that the webhook link in the LINE Developers console ends in ?k= and the relay’s WEBHOOK_KEY (the relay script’s Project Settings → Script properties)`);
   }
   const missed = sum('missed');
   if (missed) add(`${plural(missed, 'event')} waited on the relay over ${WINDOW_DAYS} days and ${were(missed)} deleted before the app collected ${missed === 1 ? 'it' : 'them'} ${days}: keep Collect from my LINE bot on and open the app at least every ${WINDOW_DAYS} days`);
@@ -764,16 +775,19 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   const notJson = sum('notJson');
   if (notJson) add(`${plural(notJson, 'call')} to the relay’s webhook could not be read ${days}; if this goes on, check that only LINE has the webhook link`);
   const broken = sum('broken');
-  if (broken) add(`${plural(broken, 'event')} on the relay could not be read and ${were(broken)} left out ${days}; ${AGAIN_SCRIPT}`);
+  if (broken) add(`${plural(broken, 'event')} on the relay could not be read and ${were(broken)} left out ${days}; ${AGAIN_SCRIPT}`, '', 'line');
   const unusable = sum('unusable');
-  if (unusable) add(`${plural(unusable, 'event')} from the relay lacked a group, a time or a message and ${were(unusable)} left out ${days}; ${AGAIN_SCRIPT}`);
+  if (unusable) add(`${plural(unusable, 'event')} from the relay lacked a group, a time or a message and ${were(unusable)} left out ${days}; ${AGAIN_SCRIPT}`, '', 'line');
   const future = sum('future');
   if (future) add(`${plural(future, 'event')} from the relay ${were(future)} dated in the future and ${were(future)} left out ${days}; check this computer’s date and time`);
-  if (sum('ahead')) add('the relay held fewer events than the app had collected (it was reset or replaced), so the app started counting afresh; what is still on the relay comes in again and is kept once', '', 'line');
-  if (sum('restarted')) add('the relay at this link is a new one (its id changed), so messages the old one still held may be missing', '', 'line');
+  if (sum('ahead')) add('the relay held fewer events than the app had collected (it was reset or replaced), so the app started counting afresh; what is still on the relay comes in again and is kept once');
+  if (sum('restarted')) add('the relay at this link is a new one (its id changed), so messages the old one still held may be missing');
   if (store?.nameProblem) add(NAME_WORDS(store.nameProblem.code));
+  // The fix is in the relay's Script properties, or with LINE: no Settings link.
   if (store && standInCount(store, ticked) > 0) {
-    add('senders in your bot’s groups show as stand-ins, because the relay sends no names, so your own promises there can’t be found and your own messages may show as mentions; put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on', '', 'line');
+    add(store.namedMs > 0
+      ? 'some senders in your bot’s groups show as stand-ins because LINE gave no name for them, so your own promises there can’t be found and your own messages may show as mentions'
+      : 'senders in your bot’s groups show as stand-ins, because the relay sends no names, so your own promises there can’t be found and your own messages may show as mentions; put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on');
   }
   return out;
 }

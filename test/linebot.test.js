@@ -58,7 +58,7 @@ function fakeRelay({ relay = RELAY_A, secret = SECRET, batch = 500 } = {}) {
     r.rows = r.rows.filter((row) => row.seq > upTo);
     const out = r.rows.slice(0, r.batch);
     if (r.busy) return { ok: false, error: 'busy' };
-    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson, ...(r.lost !== undefined ? { lost: r.lost } : {}) };
+    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson, ...(r.lost !== undefined ? { lost: r.lost } : {}), ...(r.capped ? { capped: true } : {}) };
   };
   // Google's way: the POST is answered with a redirect, the answer fetched from the echo host.
   let pending = null;
@@ -386,7 +386,7 @@ test('events missing what the app needs are counted and left out', async () => {
 test('an answer not in the relay’s shape is refused whole: nothing is taken and the cursor stays', () => {
   const good = { ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 };
   const shape = (body) => assert.throws(() => B.relayReply(body), (e) => e.kind === 'reader' && /not in the shape the app reads.*Copy relay script/.test(e.message));
-  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0 } });
+  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0 }, capped: false });
   shape({ ...good, ok: undefined });
   shape({ ...good, relay: undefined });
   shape({ ...good, events: 'none' });
@@ -1191,4 +1191,66 @@ test('the saved secret goes with its half-written copies; one that will not go i
   fs.writeFileSync(`${file}.9.tmp`, 'sealed');
   const fsys = { ...fs, rmSync: () => { throw Object.assign(new Error('in use'), { code: 'EBUSY' }); } };
   assert.deepEqual(B.removeSecret({ file, fsys }).map((s) => s.code), ['EBUSY', 'EBUSY']);
+});
+
+// ---- review round 2: counts and words --------------------------------------------------------
+
+const OTHER_LINK = { deploymentId: OTHER_DEPLOY, url: `https://script.google.com/macros/s/${OTHER_DEPLOY}/exec` };
+const said = (store, extra = {}) => B.botProblems({ on: true, store, now: NOW, ...extra });
+
+test('count baselines are kept per relay id: going back to a relay seen before says what rose meanwhile', async () => {
+  const relayA = fakeRelay();
+  relayA.refused = 2;
+  const h = harness({ relay: relayA });
+  await h.collect();
+  assert.deepEqual(said(h.store), []);
+  h.relay = fakeRelay({ relay: RELAY_B });
+  await h.collect(OTHER_LINK);
+  relayA.refused = 5;
+  h.relay = relayA;
+  await h.collect();
+  assert.ok(said(h.store).some((p) => /^LINE chats: 3 calls to the relay’s webhook were refused/.test(p.label)), said(h.store).map((p) => p.label).join('\n'));
+});
+
+test('a refused count the relay had to cap is said as “at least”', async () => {
+  const h = harness();
+  await h.collect();
+  h.relay.refused = 100_000;
+  h.relay.capped = true;
+  await h.collect();
+  assert.match(said(h.store).map((p) => p.label).join('\n'), /at least 100000 calls to the relay’s webhook were refused/);
+  // An older relay's answer has no `capped`; one that is not true or false is not the relay's.
+  assert.equal(B.relayReply({ ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 }).capped, false);
+  assert.throws(() => B.relayReply({ ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0, capped: 'yes' }), (e) => e.kind === 'reader');
+});
+
+test('stand-in senders: the LINE_TOKEN step only when the relay sends no names at all; else LINE gave no name for some', async () => {
+  const none = harness();
+  none.relay.add(message({ id: 'S1', text: 'hello there' }));
+  await none.collect();
+  const noNames = said(none.store, { ticked: none.ticked }).map((p) => p.label).join('\n');
+  assert.match(noNames, /the relay sends no names[^\n]*LINE_TOKEN/);
+  const some = harness();
+  some.relay.add(message({ id: 'S2', text: 'named', groupName: 'Ward', senderName: 'Ken' }), message({ id: 'S3', user: 'Uuser-demo-quiet', text: 'not named' }));
+  await some.collect();
+  const someNames = said(some.store, { ticked: some.ticked }).map((p) => p.label).join('\n');
+  assert.match(someNames, /some senders in your bot’s groups show as stand-ins because LINE gave no name for them, so your own promises there can’t be found and your own messages may show as mentions/);
+  assert.doesNotMatch(someNames, /LINE_TOKEN/);
+  const view = B.botView({ settings: { on: true, link: '', read: [...some.ticked] }, store: some.store });
+  assert.equal(view.named, true);
+  assert.equal(view.standIns, true);
+});
+
+test('Needs attention offers Settings only where the fix is, and names it in full', () => {
+  const notes = ['ahead', 'restarted', 'broken', 'unusable'].map((what) => ({ what, n: 1, at: NOW }));
+  const out = said({ ...B.emptyStore(), notes });
+  const fixOf = (re) => out.find((p) => re.test(p.label))?.fix ?? null;
+  assert.equal(fixOf(/fewer events than the app had collected/), null);
+  assert.equal(fixOf(/is a new one/), null);
+  assert.equal(fixOf(/could not be read and was left out/), 'line');
+  assert.equal(fixOf(/lacked a group/), 'line');
+  assert.match(out.find((p) => /lacked a group/.test(p.label)).label, /press Copy relay script in Settings → Connections → LINE chats/);
+  const unnamed = harness();
+  assert.equal(said({ ...B.emptyStore(), groups: { [idOf('Cgroup-demo-1')]: { kind: 'group', name: null, namedMs: 0, lastMs: NOW, count: 1 } },
+    messages: [{ chat: idOf('Cgroup-demo-1'), hash: 'a'.repeat(16), ms: NOW, kind: 'text', text: 'x', who: 'b'.repeat(16) }] }, { ticked: unnamed.ticked })[0].fix ?? null, null);
 });
