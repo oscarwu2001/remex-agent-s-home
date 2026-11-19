@@ -375,6 +375,9 @@ function parseWebAppLink(text, { noun, script, help }) {
   if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The id in that link looks cut short. ${help}`);
   return { deploymentId: m[1], url: `https://${READER_HOST}/macros/s/${m[1]}/exec` };
 }
+// A web app's link rebuilt from its deployment id alone, checked as a pasted
+// one is (LINE's bot part rebuilds its relay link this way). Throws RangeError.
+const webAppLink = (deploymentId) => parseWebAppLink(`https://${READER_HOST}/macros/s/${deploymentId}/exec`, { noun: 'web app', script: 'script', help: '' });
 const parseReaderLink = (text) => parseWebAppLink(text, { noun: 'reader', script: 'reader script', help: READER_HELP });
 
 // Whether the system's own protection can encrypt a secret: available
@@ -1761,7 +1764,7 @@ module.exports = {
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
   READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretGoes, secretNote, secretFileError, secretLocked,
   readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
-  parseWebAppLink, canProtect, secretRecord, webAppRequest, callWebApp,
+  parseWebAppLink, webAppLink, canProtect, secretRecord, webAppRequest, callWebApp,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, startPlan, changeSettings, fieldProblems, inSettings, settingsWords,
 };

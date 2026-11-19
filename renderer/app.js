@@ -3277,7 +3277,7 @@ $('line-settings').addEventListener('change', async (e) => {
     const res = await bridge.lineBotSet({ on: e.target.checked }).catch(lineNoAnswer);
     Object.assign(lineBotUi, {
       linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', tickError: '', refreshError: '',
-      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot',
+      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot', stopped: Boolean(res.stop),
     });
     renderLineSettings();
     setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3372,7 +3372,7 @@ $('opt-line').addEventListener('change', async (e) => {
   // Said under the switch, even while LINE chats stays off.
   lineSettingsUi.switchError = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
-  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', ...(res.ok ? { error: '' } : {}) });
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', stopped: Boolean(res.stop), ...(res.ok ? { error: '' } : {}) });
   Object.assign(lineBotUi, {
     linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', tickError: '', refreshError: '', pendingOn: null,
   });

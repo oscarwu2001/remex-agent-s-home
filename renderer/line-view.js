@@ -132,7 +132,7 @@ export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, project
   const tickedFailed = !l.readCount && l.tickedFailed;
   const troubles = [
     !bot ? '' : bot.notCollecting ? 'Your LINE bot is not collecting.' : bot.error ? 'The bot’s messages could not be collected.' : '',
-    l.scanFailed ? 'The chats could not be read just now.' : '',
+    l.scanFailed ? 'The saved chats could not be read just now.' : '',
     tickedFailed ? 'The ticked chats could not be read.' : '',
   ].filter(Boolean);
   const errors = `${folderNote}${troubles.length ? `<p class="form-error">${troubles.join(' ')} See Needs attention.</p>` : ''}`;
@@ -166,8 +166,8 @@ export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, project
 // Why senders in the bot's groups show as stand-ins, the same words on the
 // board and in Settings (Needs attention has the next step).
 function standInWords(b) {
-  const why = b.tokenRefused ? 'Senders in your bot’s groups show as stand-ins because LINE refused the relay’s LINE_TOKEN (see Needs attention)'
-    : b.named ? 'Some senders in your bot’s groups show as stand-ins because LINE gave no name for them'
+  const why = b.tokenRefused ? 'Senders in your bot’s groups show as stand-ins because LINE refused the relay’s LINE_TOKEN'
+    : b.named || b.nameProblem ? 'Some senders in your bot’s groups show as stand-ins because LINE gave no name for them'
       : 'Senders in your bot’s groups show as stand-ins (the relay sends no names)';
   return `${why}, so your own promises there can’t be found and your own messages may show as mentions.`;
 }
@@ -204,8 +204,9 @@ function entryForm({ id, label, input, value = null, error, hint = '', button = 
 // over from before. Changes state in place and returns it.
 // The same for the exports part and the LINE chats switch: their errors
 // go when Settings closes or privacy mode turns on.
+// Names and keywords typed but not saved go too: reopened, the fields show what is saved.
 export function dropLineDrafts(state) {
-  return Object.assign(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '' });
+  return Object.assign(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '', names: null, keywords: null, stopped: false });
 }
 
 // Off stops the app collecting, not LINE sending to the relay.
@@ -213,7 +214,7 @@ const STOP_WORDS = '<p class="hint">Stopped using the bot? In the LINE Developer
 
 export function dropLineBotDrafts(state) {
   return Object.assign(state, {
-    linkDraft: null, linkError: '', secretError: '', secretNote: '', note: '', scriptNote: '', scriptError: '', error: '', tickError: '', refreshError: '',
+    linkDraft: null, linkError: '', secretError: '', secretNote: '', note: '', scriptNote: '', scriptError: '', error: '', tickError: '', refreshError: '', stopped: false,
   });
 }
 
@@ -243,11 +244,15 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
     <p class="hint">For groups only: a LINE Official Account bot you invite to a group passes on what is said there, after it joins, through a relay of yours (a Google Sheet and a script). It cannot see one-to-one chats.</p>
     <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}${noStore ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
   if (!on) {
-    // Off stops the app collecting, not LINE sending to the relay.
-    const stop = b?.link ? `
+    // Off stops the app collecting, not LINE sending to the relay: said
+    // once the switch removed a relay link (state.stopped), until Settings closes.
+    const stop = state.stopped ? `
     ${STOP_WORDS}` : '';
     return `${head}${stop}`;
   }
+  // Its saved data can't be read: nothing here can change until it can, but the switch can turn it off.
+  if (b.stuck) return `${head}
+    <p class="form-error" role="status">Not collecting: ${esc(b.notCollectingHere ?? '')}.</p>`;
   const steps = `<ol class="field-steps">
       <li>Press Copy relay script. In a new Google Sheet, open Extensions → Apps Script, paste it, and run makeSecrets once.</li>
       <li>Deploy it as a web app (Execute as: Me; Who has access: Anyone), and copy the Web app link into Relay link.</li>
@@ -255,7 +260,7 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
       <li>${noStore ? `Once this computer can keep the secret (${STORAGE_NOTE}), copy` : 'Copy'} READER_SECRET from the script’s Project Settings → Script properties into Secret.</li>
     </ol>
     <div class="form-actions"><button type="button" class="link-btn" id="line-bot-copy-script" data-line="bot-copy-script">Copy relay script</button></div>${b.relayOld ? `
-    <p class="hint">Your relay is an older version. To update it, press Copy relay script, paste it over the relay’s script, then Deploy → Manage deployments → edit → Version: New version → Deploy. The link stays the same.</p>` : ''}${state.scriptNote ? `
+    <p class="hint">Your relay is an older version. To update it, press Copy relay script, paste it over the relay’s script, then Deploy → Manage deployments → Edit → Version: New version → Deploy. The link stays the same.</p>` : ''}${state.scriptNote ? `
     <p class="hint" role="status">${esc(state.scriptNote)}</p>` : ''}${state.scriptError ? `
     <p class="form-error" role="alert">${esc(state.scriptError)}</p>` : ''}`;
   const linkOpen = !b.link || Boolean(state.linkEditing);
@@ -304,8 +309,8 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
         <label class="check" for="line-bot-read-${i}"><input type="checkbox" id="line-bot-read-${i}" data-group="${esc(g.id)}"${g.read ? ' checked' : ''}> <span class="line-chat-name">${esc(g.name)}</span></label>
         <span class="line-chat-what">${g.read ? `${plural(g.messages ?? 0, 'message')} kept` : `${plural(g.count ?? 0, 'message')}, not kept`}${g.lastMs ? ` · last ${esc(boardTime(g.lastMs, now))}` : ''}</span>
       </li>`).join('')}</ul></fieldset>${b.tokenRefused && (b.standIns || groups.some((g) => !g.named)) ? `
-    <p class="hint">${standInWords(b)}</p>`
-    : groups.some((g) => !g.named) && !b.named ? `
+    <p class="hint">${standInWords(b)} See Needs attention.</p>`
+    : groups.some((g) => !g.named) && !b.named && !b.nameProblem ? `
     <p class="hint">The relay sends no names (no LINE_TOKEN in its Script properties): groups and senders show as stand-ins, so your own promises there can’t be found and your own messages may show as mentions. Put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on.</p>`
     : b.standIns ? `
     <p class="hint">Some senders show as stand-ins because LINE gave no name for them, so your own promises there can’t be found and your own messages may show as mentions.</p>` : ''}`;
@@ -323,8 +328,8 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   if (!l?.demo && !online) return '<p class="hint">The desktop app reads the folder; this preview cannot.</p>';
   // Under the "Read my LINE chats" switch, on or off: why turning it on or off failed.
   const switchErr = ERR(state.switchError);
-  // Off, with a relay link kept: how to stop LINE sending to it, as the bot part's own switch says.
-  if (!l?.enabled) return `${switchErr}${l?.bot?.link ? STOP_WORDS : ''}`;
+  // Off, with a relay link set or just removed: how to stop LINE sending to it, as the bot's own switch says.
+  if (!l?.enabled) return `${switchErr}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
   const folder = l.folder
     ? `<p class="field-set"><span>${privacy ? 'A folder is chosen.' : `Folder: <span class="field-path">${esc(l.folder)}</span>`}</span>

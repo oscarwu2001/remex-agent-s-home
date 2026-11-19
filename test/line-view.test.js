@@ -249,7 +249,7 @@ test('a long message has its own Show all, and the add form writes its time as t
 test('when the ticked chats could not be read the board sends the user to Needs attention, not to Settings', async () => {
   const { lineHtml } = await view();
   assert.match(lineHtml(line({ items: [], readCount: 0, tickedFailed: 2 }), { privacy: true, now: NOW }), /The ticked chats could not be read\. See Needs attention\./);
-  assert.match(lineHtml(line({ items: [], scanFailed: true }), { privacy: true, now: NOW }), /The chats could not be read just now\. See Needs attention\./);
+  assert.match(lineHtml(line({ items: [], scanFailed: true }), { privacy: true, now: NOW }), /The saved chats could not be read just now\. See Needs attention\./);
 });
 
 // ---- round 3 -------------------------------------------------------------------------
@@ -476,17 +476,17 @@ test('Save, Cancel and Privacy settings keep focus across redraws; the bot part�
   assert.match(html, /id="line-bot-secret-cancel" data-line="bot-cancel-secret"/);
   const state = { linkDraft: 'x', linkError: 'x', note: 'n', scriptNote: 's', scriptError: 'e', error: 'e', tickError: 't', refreshError: 'r', secretNote: 'sn', secretError: 'se' };
   dropLineBotDrafts(state);
-  for (const k of Object.keys(state)) assert.ok(state[k] === '' || state[k] === null, k);
+  for (const k of Object.keys(state)) assert.ok(state[k] === '' || state[k] === null || state[k] === false, k);
 });
 
-test('the bot part, off: the switch reads “to my relay only”; with a relay set up before, it says how to stop LINE sending and clear the sheet', async () => {
+test('the bot part, off: the switch reads “to my relay only”; when turning it off removed a relay link, it says how to stop LINE sending and clear the sheet', async () => {
   const { lineSettingsHtml, lineHtml } = await view();
-  const off = lineSettingsHtml(line({ bot: { on: false, link: RELAY_LINK, groups: [] } }), { privacy: true, online: true, now: NOW });
+  const off = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true } });
   assert.match(off, /<span>Collect from my LINE bot \(goes online, to my relay only\)<\/span>/);
   assert.match(off, /LINE Developers console, turn off Use webhook \(or remove the bot from its groups\)/);
   assert.match(off, /delete the relay’s Google Sheet[^<]*version history/);
   assert.ok(!off.includes('relay.example'));
-  assert.doesNotMatch(lineSettingsHtml(line({ bot: { on: false, link: '', groups: [] } }), { privacy: true, online: true, now: NOW }), /Use webhook/);
+  assert.doesNotMatch(lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW }), /Use webhook/);
   const unticked = lineHtml(line({ folder: '', chats: [], bot: botPart({ groups: [botPart().groups[1]] }), items: [], readCount: 0 }), { privacy: true, now: NOW });
   assert.match(unticked, /1 chat found\. Tick the chats and groups to read in Settings\./);
 });
@@ -521,7 +521,7 @@ test('stand-in senders: board and Settings give the LINE_TOKEN step only when th
 
 test('off, Settings says to delete the relay’s sheet and then empty Drive’s trash, which clears its version history', async () => {
   const { lineSettingsHtml } = await view();
-  const off = lineSettingsHtml(line({ bot: { on: false, link: RELAY_LINK, groups: [] } }), { privacy: true, online: true, now: NOW });
+  const off = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true } });
   assert.match(off, /delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history/);
 });
 
@@ -567,41 +567,83 @@ test('when LINE refused the relay’s token, the board and Settings say so inste
   const { lineHtml, lineSettingsHtml } = await view();
   const refused = line({ bot: botPart({ named: true, standIns: true, tokenRefused: true, groups: [{ ...botPart().groups[0], named: false }] }), items: [botItem], readCount: 1 });
   const board = lineHtml(refused, { privacy: true, now: NOW });
-  assert.match(board, /stand-ins because LINE refused the relay’s LINE_TOKEN \(see Needs attention\)/);
+  assert.match(board, /stand-ins because LINE refused the relay’s LINE_TOKEN, so your own promises there can’t be found and your own messages may show as mentions\. See Needs attention\./);
+  assert.equal(board.split(/needs attention/i).length, 2, 'one pointer to Needs attention');
   const settings = lineSettingsHtml(refused, { privacy: false, online: true, now: NOW });
-  assert.match(settings, /stand-ins because LINE refused the relay’s LINE_TOKEN \(see Needs attention\)/);
+  assert.match(settings, /stand-ins because LINE refused the relay’s LINE_TOKEN, so your own promises there can’t be found and your own messages may show as mentions\. See Needs attention\./);
   assert.doesNotMatch(settings, /Put the channel access token/);
 });
 
 test('an older relay is said in Settings with how to update it, keeping the link', async () => {
   const { lineSettingsHtml } = await view();
   const html = lineSettingsHtml(line({ bot: botPart({ relayOld: true }) }), { privacy: true, online: true, now: NOW });
-  assert.match(html, /Your relay is an older version\. To update it, press Copy relay script, paste it over the relay’s script, then Deploy → Manage deployments → edit → Version: New version → Deploy\. The link stays the same\./);
+  assert.match(html, /Your relay is an older version\. To update it, press Copy relay script, paste it over the relay’s script, then Deploy → Manage deployments → Edit → Version: New version → Deploy\. The link stays the same\./);
   assert.doesNotMatch(lineSettingsHtml(line({ bot: botPart() }), { privacy: true, online: true, now: NOW }), /older version/);
 });
 
-test('LINE chats off with a relay link kept: the same words on how to stop LINE sending to it', async () => {
+test('LINE chats off with a relay link set, or one its switch just removed: the same words on how to stop LINE sending to it', async () => {
   const { lineSettingsHtml } = await view();
-  const off = lineSettingsHtml({ enabled: false, bot: { on: false, link: RELAY_LINK } }, { privacy: true, online: true, now: NOW });
+  const off = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: true } }, { privacy: true, online: true, now: NOW });
   assert.match(off, /turn off Use webhook \(or remove the bot from its groups\)/);
   assert.match(off, /delete the relay’s Google Sheet, then empty Drive’s trash, which clears its version history/);
   assert.ok(!off.includes('relay.example'));
-  assert.equal(lineSettingsHtml({ enabled: false, bot: { on: false, link: '' } }, { privacy: true, online: true, now: NOW }), '');
+  assert.equal(lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW }), '');
+  assert.match(lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, state: { stopped: true } }), /turn off Use webhook/);
 });
 
 test('the export tick’s and the LINE switch’s errors go when Settings closes or privacy turns on', async () => {
   const { dropLineDrafts } = await view();
   const state = { tickError: 'x', switchError: 'y', wordsError: 'z', error: 'w', note: 'n' };
   dropLineDrafts(state);
-  assert.deepEqual(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '' });
+  assert.deepEqual(state, { tickError: '', switchError: '', wordsError: '', error: '', note: '', names: null, keywords: null, stopped: false });
 });
 
 test('the board says its troubles together first, with one “See Needs attention”, and the stand-in hint last', async () => {
   const { lineHtml } = await view();
   const html = lineHtml(line({ bot: botPart({ notCollecting: 'no secret is saved', standIns: true, named: false }), scanFailed: true }), { privacy: true, now: NOW });
-  assert.match(html, /^<p class="form-error">Your LINE bot is not collecting\. The chats could not be read just now\. See Needs attention\.<\/p>/);
+  assert.match(html, /^<p class="form-error">Your LINE bot is not collecting\. The saved chats could not be read just now\. See Needs attention\.<\/p>/);
   assert.equal(html.split('See Needs attention').length, 2);
   const listed = lineHtml(line({ bot: botPart({ error: { message: 'x', kind: 'network' }, standIns: true, named: false }), items: [botItem], readCount: 1 }), { privacy: true, now: NOW });
   assert.ok(listed.indexOf('stand-ins') > listed.indexOf('1 item for you'));
   assert.equal(listed.split('See Needs attention').length, 2);
+});
+
+// ---- review round 4 ---------------------------------------------------------------------------
+
+test('names and keywords not saved go when Settings closes or privacy turns on, so the fields show what is saved', async () => {
+  const { dropLineDrafts, lineSettingsHtml } = await view();
+  const state = { names: 'A draft name', keywords: 'draft words', wordsError: 'The setting could not be saved. Try again.' };
+  dropLineDrafts(state);
+  assert.equal(state.names, null);
+  assert.equal(state.keywords, null);
+  assert.equal(state.wordsError, '');
+  const html = lineSettingsHtml(line(), { privacy: false, online: true, now: NOW, state });
+  assert.doesNotMatch(html, /A draft name|draft words/);
+});
+
+test('names on with a failed lookup: the stand-in words say some senders, never the LINE_TOKEN step', async () => {
+  const { lineHtml, lineSettingsHtml } = await view();
+  const failing = line({ bot: botPart({ named: false, nameProblem: true, standIns: true, groups: [{ ...botPart().groups[0], named: false }] }), items: [botItem], readCount: 1 });
+  assert.match(lineHtml(failing, { privacy: true, now: NOW }), /Some senders in your bot’s groups show as stand-ins because LINE gave no name for them/);
+  assert.doesNotMatch(lineHtml(failing, { privacy: true, now: NOW }), /relay sends no names/);
+  assert.doesNotMatch(lineSettingsHtml(failing, { privacy: false, online: true, now: NOW }), /LINE_TOKEN/);
+});
+
+test('a bot whose saved data can’t be read: Settings says so and offers no field that would refuse', async () => {
+  const { lineSettingsHtml } = await view();
+  const why = 'the bot’s saved data can’t be read yet, so nothing is collected or changed; see Needs attention';
+  const html = lineSettingsHtml(line({ bot: botPart({ stuck: true, link: '', notCollecting: why, notCollectingHere: why }) }), { privacy: false, online: true, now: NOW });
+  assert.match(html, /Not collecting: the bot’s saved data can’t be read yet, so nothing is collected or changed; see Needs attention\./);
+  assert.match(html, /id="opt-line-bot" checked/);
+  assert.doesNotMatch(html, /line-bot-link|line-bot-secret|no relay link/);
+});
+
+test('the words name the switch the user sees, never “the bot part”', async () => {
+  const { lineSettingsHtml, lineHtml } = await view();
+  const states = [
+    lineSettingsHtml(line({ bot: botPart() }), { privacy: false, online: true, now: NOW }),
+    lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true } }),
+    lineHtml(line({ bot: botPart({ notCollecting: 'x', standIns: true }) }), { privacy: true, now: NOW }),
+  ];
+  for (const html of states) assert.doesNotMatch(html, /bot part/i);
 });
