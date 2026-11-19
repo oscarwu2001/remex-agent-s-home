@@ -624,7 +624,7 @@ test('names and keywords not saved go when Settings closes or privacy turns on, 
 test('names on with a failed lookup: the stand-in words say some senders, never the LINE_TOKEN step', async () => {
   const { lineHtml, lineSettingsHtml } = await view();
   const failing = line({ bot: botPart({ named: false, nameProblem: true, standIns: true, groups: [{ ...botPart().groups[0], named: false }] }), items: [botItem], readCount: 1 });
-  assert.match(lineHtml(failing, { privacy: true, now: NOW }), /Some senders in your bot’s groups show as stand-ins because LINE gave no name for them/);
+  assert.match(lineHtml(failing, { privacy: true, now: NOW }), /<p class="hint">Some senders show as stand-ins; see Needs attention\.<\/p>/);
   assert.doesNotMatch(lineHtml(failing, { privacy: true, now: NOW }), /relay sends no names/);
   assert.doesNotMatch(lineSettingsHtml(failing, { privacy: false, online: true, now: NOW }), /LINE_TOKEN/);
 });
@@ -706,14 +706,14 @@ test('a taken off with something left says what was deleted and what was not, th
   const { lineSettingsHtml } = await view();
   const off = (left) => lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: true, online: true, now: NOW, bot: { stopped: true, left } });
   assert.match(off([]), /<p class="hint" role="status">Turned off: the app deleted the bot’s relay link, secret and kept messages\.<\/p>/);
-  assert.match(off(['storeCopy']), /<p class="form-error" role="alert">Turned off: the app deleted the bot’s relay link and secret; a half-written copy of its kept messages could not be deleted \(see Needs attention\)\.<\/p>/);
+  assert.match(off(['storeCopy']), /<p class="form-error" role="alert">Turned off: the app deleted the bot’s secret; a half-written copy of its saved data \(kept messages and relay link\) could not be deleted \(see Needs attention\)\.<\/p>/);
   assert.match(off(['secretCopy']), /<p class="form-error" role="alert">Turned off: the app deleted the bot’s relay link and kept messages; a half-written copy of its secret could not be deleted \(see Needs attention\)\.<\/p>/);
   assert.match(off(['secret']), /<p class="form-error" role="alert">Turned off: the app deleted the bot’s relay link and kept messages; its secret could not be deleted \(see Needs attention\)\.<\/p>/);
-  assert.match(off(['unlisted']), /<p class="form-error" role="alert">Turned off: the app deleted the bot’s relay link, secret and kept messages; the app’s data folder could not be listed, so half-written copies may be left there \(see Needs attention\)\.<\/p>/);
-  assert.match(off(['secret', 'storeCopy']), /Turned off: the app deleted the bot’s relay link; its secret could not be deleted; a half-written copy of its kept messages could not be deleted \(see Needs attention\)\./);
+  assert.match(off(['unlisted']), /<p class="form-error" role="alert">Turned off, but the app’s data folder could not be listed, so half-written copies of its saved data or secret may be left there \(see Needs attention\)\.<\/p>/);
+  assert.match(off(['secret', 'storeCopy']), /Turned off, but its secret could not be deleted; a half-written copy of its saved data \(kept messages and relay link\) could not be deleted \(see Needs attention\)\./);
   // The same words under LINE chats' switch.
   const lineOff = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: false } }, { privacy: true, online: true, now: NOW, state: { stopped: true, left: ['storeCopy'] } });
-  assert.match(lineOff, /<p class="form-error" role="alert">Turned off: the app deleted the bot’s relay link and secret; a half-written copy of its kept messages could not be deleted/);
+  assert.match(lineOff, /<p class="form-error" role="alert">Turned off: the app deleted the bot’s secret; a half-written copy of its saved data \(kept messages and relay link\) could not be deleted/);
 });
 
 test('while the bot’s off is not finished, its switch is drawn off and disabled, with the one not-finished line', async () => {
@@ -732,4 +732,13 @@ test('file names in errors are kept whole; with a name lookup problem Settings p
   const settings = lineSettingsHtml(line({ bot: botPart({ named: true, standIns: true, nameProblem: true }) }), { privacy: false, online: true, now: NOW });
   assert.match(settings, /<p class="hint">Some senders show as stand-ins; see Needs attention\.<\/p>/);
   assert.doesNotMatch(settings, /because LINE gave no name/);
+});
+
+// ---- review round 8 ---------------------------------------------------------------------------
+
+test('LINE chats off whose bot part could not be started says so and claims no deletion', async () => {
+  const { lineSettingsHtml } = await view();
+  const html = lineSettingsHtml({ enabled: false, bot: { on: false, linkSet: true } }, { privacy: true, online: true, now: NOW, state: { stopped: true, notStarted: true } });
+  assert.match(html, /<p class="form-error" role="alert">LINE chats is off, but turning the bot off could not be started: the app could not write to its data folder \(the system log has the reason\), so its kept messages, relay link and secret are still on this computer\. Turn LINE chats on and off again to try again\.<\/p>/);
+  assert.doesNotMatch(html, /Turned off/);
 });

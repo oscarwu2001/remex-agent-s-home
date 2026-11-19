@@ -136,7 +136,9 @@ export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, project
     tickedFailed ? 'The ticked chats could not be read.' : '',
   ].filter(Boolean);
   const errors = `${folderNote}${troubles.length ? `<p class="form-error">${troubles.join(' ')} See Needs attention.</p>` : ''}`;
-  const standIns = bot?.standIns ? `<p class="hint">${standInWords(bot)}${troubles.length ? '' : ' See Needs attention.'}</p>` : '';
+  // A failed name lookup: Needs attention says why, as Settings points there.
+  const standIns = !bot?.standIns ? '' : bot.nameProblem && !bot.tokenRefused ? '<p class="hint">Some senders show as stand-ins; see Needs attention.</p>'
+    : `<p class="hint">${standInWords(bot)}${troubles.length ? '' : ' See Needs attention.'}</p>`;
   if (folderNote && !botReading) return `${errors}${settingsBtn}${standIns}`;
   if (l.scanFailed || tickedFailed) return `${errors}${standIns}`;
   if (!l.readCount) {
@@ -214,16 +216,21 @@ export function dropLineDrafts(state) {
 const LEFT = {
   secret: 'its secret could not be deleted',
   secretCopy: 'a half-written copy of its secret could not be deleted',
-  storeCopy: 'a half-written copy of its kept messages could not be deleted',
-  unlisted: 'the app’s data folder could not be listed, so half-written copies may be left there',
+  storeCopy: 'a half-written copy of its saved data (kept messages and relay link) could not be deleted',
+  unlisted: 'the app’s data folder could not be listed, so half-written copies of its saved data or secret may be left there',
 };
 function offWords(state) {
   const left = (state.left ?? []).filter((k) => LEFT[k]);
-  const deleted = ['relay link', left.includes('secret') || left.includes('secretCopy') ? '' : 'secret', left.includes('storeCopy') ? '' : 'kept messages'].filter(Boolean);
+  // A copy of its saved data holds the relay link and kept messages too.
+  const copies = left.includes('storeCopy') || left.includes('unlisted');
+  const secretGone = !['secret', 'secretCopy', 'unlisted'].some((k) => left.includes(k));
+  const deleted = [copies ? '' : 'relay link', secretGone ? 'secret' : '', copies ? '' : 'kept messages'].filter(Boolean);
   const list = deleted.length > 2 ? `${deleted.slice(0, -1).join(', ')} and ${deleted.at(-1)}` : deleted.join(' and ');
   if (!left.length) return `<p class="hint" role="status">Turned off: the app deleted the bot’s ${list}.</p>`;
-  return `<p class="form-error" role="alert">Turned off: the app deleted the bot’s ${list}; ${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
+  return `<p class="form-error" role="alert">${deleted.length ? `Turned off: the app deleted the bot’s ${list}; ` : 'Turned off, but '}${left.map((k) => LEFT[k]).join('; ')} (see Needs attention).</p>`;
 }
+// LINE chats off whose bot part could not even be started (its record could not be written).
+const NOT_STARTED = '<p class="form-error" role="alert">LINE chats is off, but turning the bot off could not be started: the app could not write to its data folder (the system log has the reason), so its kept messages, relay link and secret are still on this computer. Turn LINE chats on and off again to try again.</p>';
 // The user's off, not finished (BotKeeper.unfinished: 'held' or 'failed'):
 // nothing of the bot's was deleted yet. lineOff: said under LINE chats' switch.
 const notFinished = (why, lineOff) => `<p class="form-error" role="status">${lineOff ? 'LINE chats is off. ' : ''}Turning the bot off is not finished: its kept messages, relay link and secret are still on this computer because ${why === 'failed'
@@ -358,7 +365,7 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   // it, as the bot's own switch says. The bot's off not finished is said
   // from the snapshot, so it stays said after Settings is reopened.
   if (!l?.enabled) {
-    const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : state.stopped && !state.unfinished ? offWords(state) : '';
+    const said = l?.bot?.unfinished ? notFinished(l.bot.unfinished, true) : state.notStarted ? NOT_STARTED : state.stopped && !state.unfinished ? offWords(state) : '';
     return `${switchErr}${said}${l?.bot?.linkSet || state.stopped ? STOP_WORDS : ''}`;
   }
   const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';

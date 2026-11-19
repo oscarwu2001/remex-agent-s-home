@@ -2928,6 +2928,7 @@ const lineBotUi = {
   linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '',
   tickError: '', refreshError: '', pendingOn: null, pendingAt: 0, focusAfter: '',
 };
+let lineOffSeen = null; // the last later-finished off said (snapshot bot.offDone.n)
 const lineDemoMarks = new Set(); // the demo's added and dismissed items, until it is turned off
 // Items added or dismissed whose mark is saved but which the snapshot still
 // lists: hidden at once, and no longer pending once a snapshot drops them.
@@ -3001,6 +3002,12 @@ function renderLineSettings() {
   if (Date.now() - lineSwitchedAt > 1500) $('opt-line').checked = Boolean(l?.enabled);
   $('opt-line').disabled = !online || Boolean(l?.demo);
   if (lineBotUi.pendingOn != null && (l?.bot?.on === lineBotUi.pendingOn || Date.now() - lineBotUi.pendingAt > 1500)) lineBotUi.pendingOn = null;
+  // An off that finished later: said as one finished at once, under the switch in view, until Settings closes.
+  const done = l?.bot?.offDone;
+  if (done && done.n !== lineOffSeen) {
+    lineOffSeen = done.n;
+    Object.assign(l.enabled ? lineBotUi : lineSettingsUi, { stopped: true, left: done.left ?? [], unfinished: '', notStarted: false });
+  }
   const shown = l?.enabled ? {
     ...l,
     ...(l.bot && lineBotUi.pendingOn != null ? { bot: { ...l.bot, on: lineBotUi.pendingOn } } : {}),
@@ -3284,7 +3291,7 @@ $('line-settings').addEventListener('change', async (e) => {
     const res = await bridge.lineBotSet({ on: e.target.checked }).catch(lineNoAnswer);
     Object.assign(lineBotUi, {
       linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', tickError: '', refreshError: '',
-      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '',
+      error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '', notStarted: Boolean(res.notStarted),
     });
     renderLineSettings();
     setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3379,7 +3386,7 @@ $('opt-line').addEventListener('change', async (e) => {
   // Said under the switch, even while LINE chats stays off.
   lineSettingsUi.switchError = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
-  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '', ...(res.ok ? { error: '' } : {}) });
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '', tickError: '', stopped: Boolean(res.stop), left: res.left ?? [], unfinished: res.unfinished ?? '', notStarted: Boolean(res.notStarted), ...(res.ok ? { error: '' } : {}) });
   Object.assign(lineBotUi, {
     linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', tickError: '', refreshError: '', pendingOn: null,
   });
