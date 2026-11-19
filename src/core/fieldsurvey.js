@@ -282,6 +282,12 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
 // hop, to that one host, over https, and no other. Messages name the next
 // step and carry no codes; a `code` beside them (never the secret or the
 // link) is for the system log.
+//
+// LINE chats' relay (docs/line-bot-relay.gs, src/core/linebot.js) is the
+// same kind of web app, so it goes through this same transport: the
+// functions named webApp… take a `voice`, the caller's error class and the
+// words its messages are told in (READER_VOICE here, the relay's in
+// linebot.js). The hosts stay here, the one place that names them.
 
 const READER_HELP = 'In the reader script, Deploy → Manage deployments and copy the Web app link; it looks like https://script.google.com/macros/s/…/exec';
 const SECRET_HELP = 'Copy READER_SECRET from the reader script’s Project Settings → Script properties';
@@ -343,39 +349,44 @@ const readerError = (kind, message, code) => Object.assign(new FieldSurveyError(
 // An answer that is not the reader's shape: the reader script is not the
 // one the app ships (or Google said something odd). Waiting will not mend
 // it, so it waits for the user, pointing at Settings.
-const wrongShape = (code) => readerError('reader', `The reader’s answer is not in the shape the app reads. In ${SETTINGS}, press Copy reader script, paste it over the old one in the sheet’s Apps Script and ${NEW_VERSION}.`, code);
+const wrongShape = (code) => readerError('reader', READER_WORDS.shape, code);
 
-// The web app's link -> { deploymentId, url }: url is the link rebuilt from
+// A web app's link -> { deploymentId, url }: url is the link rebuilt from
 // its id alone, so nothing else typed into it (a query, a fragment, a
-// Google Workspace domain) is kept or sent.
-function parseReaderLink(text) {
+// Google Workspace domain) is kept or sent. words: { noun ('reader'),
+// script ('reader script'), help (where to copy the link from) }.
+function parseWebAppLink(text, { noun, script, help }) {
   const raw = String(text ?? '').trim();
-  if (!raw) throw new RangeError(`No reader link yet. ${READER_HELP}`);
+  if (!raw) throw new RangeError(`No ${noun} link yet. ${help}`);
   let u;
   try {
     u = new URL(raw);
   } catch {
-    throw new RangeError(`That is not a link. ${READER_HELP}`);
+    throw new RangeError(`That is not a link. ${help}`);
   }
-  if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(`That link is not an Apps Script web app. ${READER_HELP}`);
-  if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(`That is the script editor’s link, not the web app’s. ${READER_HELP}`);
+  if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(`That link is not an Apps Script web app. ${help}`);
+  if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(`That is the script editor’s link, not the web app’s. ${help}`);
   // A Google Workspace link names its domain (/a/macros/<domain>/s/…).
   const m = /^\/(?:a\/macros\/[^/]+|macros)\/s\/([^/]+)\/(exec|dev)\/?$/.exec(u.pathname);
   if (m?.[2] === 'dev') {
-    throw new RangeError('That is the test link (it ends in /dev), which works only in your own signed-in browser. In the reader script, Deploy → Manage deployments and copy the Web app link that ends in /exec.');
+    throw new RangeError(`That is the test link (it ends in /dev), which works only in your own signed-in browser. In the ${script}, Deploy → Manage deployments and copy the Web app link that ends in /exec.`);
   }
-  if (!m) throw new RangeError(`That link is not a reader web app. ${READER_HELP}`);
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The id in that link looks cut short. ${READER_HELP}`);
+  if (!m) throw new RangeError(`That link is not a ${noun} web app. ${help}`);
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The id in that link looks cut short. ${help}`);
   return { deploymentId: m[1], url: `https://${READER_HOST}/macros/s/${m[1]}/exec` };
 }
+const parseReaderLink = (text) => parseWebAppLink(text, { noun: 'reader', script: 'reader script', help: READER_HELP });
+
+// Whether the system's own protection can encrypt a secret: available
+// (Electron's safeStorage says so) and, on Linux, a backend other than
+// 'basic_text', which is no protection at all.
+const canProtect = ({ available = false, backend } = {}) => Boolean(available && backend !== 'basic_text' && backend !== 'unknown');
 
 // Whether the secret can be kept here, before anything is typed: null, or
-// why not. available: the system's own protection can encrypt it
-// (Electron's safeStorage); backend: which one on Linux, where 'basic_text'
-// is no protection at all. Without it the secret is refused, never kept as
-// plain text.
+// why not. Without protection the secret is refused, never kept as plain
+// text.
 function secretStorage({ available = false, backend } = {}) {
-  if (available && backend !== 'basic_text' && backend !== 'unknown') return null;
+  if (canProtect({ available, backend })) return null;
   return 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring, then restart Agent’s Home.';
 }
 
@@ -462,46 +473,86 @@ function secretLocked() {
   return readerError('secret', `The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in ${SETTINGS}.`, 'secret not decrypted');
 }
 
-// The POST to the reader: the secret as JSON text in the body (Apps Script
-// reads it from e.postData.contents).
-function readerRequest(link, secret) {
+// The POST to a web app: its JSON as text in the body (Apps Script reads it
+// from e.postData.contents). The reader's is the secret alone.
+function webAppRequest(link, body) {
   return {
     url: link.url,
-    init: { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8', accept: 'application/json' }, body: JSON.stringify({ secret }) },
+    init: { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8', accept: 'application/json' }, body: JSON.stringify(body) },
   };
 }
+const readerRequest = (link, secret) => webAppRequest(link, { secret });
 
 const isRedirect = (status) => [301, 302, 303, 307, 308].includes(status);
 
-// Where Google sent the reader's answer -> the one address the app fetches
+// The reader's words for each failure of the transport. A voice: { Error:
+// the caller's error class, made as new Error(kind, message) with a `code`
+// beside it; check(url): the gate every request passes (checkUrl here;
+// without one, checkWebAppUrl); words }.
+const READER_WORDS = {
+  shape: `The reader’s answer is not in the shape the app reads. In ${SETTINGS}, press Copy reader script, paste it over the old one in the sheet’s Apps Script and ${NEW_VERSION}.`,
+  noLocation: `Google passed the reader’s call on without saying where to. ${RELINK}`,
+  hopUnreadable: `The reader’s answer was sent to an address that could not be read, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
+  hopSignIn: `Google asked for a sign-in instead of letting the reader answer. ${ANYONE}`,
+  hopElsewhere: (where, echo) => `The reader’s answer was sent to ${where}, which the app does not follow: it takes the answer only from ${echo} over https.`,
+  timeout: 'The reader did not answer in time; check the internet connection, then press Refresh now.',
+  offline: 'No network: the reader could not be reached; check the internet connection or proxy, then press Refresh now.',
+  secondRedirect: `Google redirected the reader’s answer a second time, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
+  tooLarge: `The reader’s answer is larger than 20 MB, more than the app reads. Point TAB in the reader script at the answers’ tab alone, then ${NEW_VERSION}.`,
+  busy: 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.',
+  down: 'Google’s Apps Script service had a problem; it tries again in half an hour.',
+  denied: `Google did not let the reader answer. ${ANYONE}`,
+  missing: `No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in ${SETTINGS}.`,
+  refused: `Google refused the reader’s call. ${RELINK}`,
+  signInPage: `Google showed its sign-in page instead of the reader’s answer. ${ANYONE}`,
+  scriptFailed: `The reader script failed instead of answering. Open it (the sheet’s Extensions → Apps Script), look under Executions for what went wrong, then press Copy reader script in ${SETTINGS}, paste it over the old one and ${NEW_VERSION}.`,
+};
+const READER_VOICE = { Error: FieldSurveyError, check: checkUrl, words: READER_WORDS };
+const voiceError = (voice, kind, message, code) => Object.assign(new voice.Error(kind, message), { code });
+
+// The gate for a web app's own requests: https, the web app's host or the
+// one host Google hands its answer over from, the default port, no user
+// name. words.blocked(host) says why one was refused.
+const WEB_APP_HOSTS = new Set([READER_HOST, ECHO_HOST]);
+function checkWebAppUrl(url, voice) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    throw voiceError(voice, 'blocked', voice.words.blocked('an address that could not be read'), 'url not readable');
+  }
+  if (u.protocol !== 'https:' || !WEB_APP_HOSTS.has(u.host) || u.username || u.password) {
+    throw voiceError(voice, 'blocked', voice.words.blocked(u.host || 'an unknown host'), `refused ${u.protocol}//${u.host}`);
+  }
+  return url;
+}
+
+// Where Google sent the web app's answer -> the one address the app fetches
 // next. Only https on script.googleusercontent.com; Google's sign-in page
 // means the web app is not open to Anyone.
-function readerHop(location) {
-  if (typeof location !== 'string' || !location.trim()) {
-    throw readerError('reader', `Google passed the reader’s call on without saying where to. ${RELINK}`, 'redirect without location');
-  }
+function webAppHop(location, voice) {
+  const { words } = voice;
+  if (typeof location !== 'string' || !location.trim()) throw voiceError(voice, 'reader', words.noLocation, 'redirect without location');
   let u;
   try {
     u = new URL(location.trim());
   } catch {
-    throw readerError('blocked', `The reader’s answer was sent to an address that could not be read, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`, 'redirect not a url');
+    throw voiceError(voice, 'blocked', words.hopUnreadable, 'redirect not a url');
   }
-  if (u.host === 'accounts.google.com') throw readerError('access', `Google asked for a sign-in instead of letting the reader answer. ${ANYONE}`, 'redirect to sign-in');
+  if (u.host === 'accounts.google.com') throw voiceError(voice, 'access', words.hopSignIn, 'redirect to sign-in');
   if (u.protocol !== 'https:' || u.host !== ECHO_HOST || u.username || u.password) {
-    throw readerError('blocked', `The reader’s answer was sent to ${u.protocol === 'https:' ? u.host || 'an unknown host' : 'an address without https'}, which the app does not follow: it takes the answer only from script.googleusercontent.com over https.`, `redirect to ${u.protocol}//${u.host}`);
+    throw voiceError(voice, 'blocked', words.hopElsewhere(u.protocol === 'https:' ? u.host || 'an unknown host' : 'an address without https', ECHO_HOST), `redirect to ${u.protocol}//${u.host}`);
   }
   return u.toString();
 }
+const readerHop = (location) => webAppHop(location, READER_VOICE);
 
-// The reader could not be reached: the network's trouble, retried in half an
-// hour. The words of the error go to the log only, without any address in
-// them.
-function readerUnreachable(err) {
-  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-    return readerError('network', 'The reader did not answer in time; check the internet connection, then press Refresh now.', 'timeout');
-  }
+// The web app could not be reached: the network's trouble, retried later.
+// The words of the error go to the log only, without any address in them.
+function webAppUnreachable(err, voice) {
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return voiceError(voice, 'network', voice.words.timeout, 'timeout');
   const said = String(err?.message ?? err).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 120);
-  return readerError('network', 'No network: the reader could not be reached; check the internet connection or proxy, then press Refresh now.', said);
+  return voiceError(voice, 'network', voice.words.offline, said);
 }
 
 // The reader sends the sheet's own values (getValues): text, numbers,
@@ -533,32 +584,37 @@ function pageTitle(text) {
   }
   return out || 'other';
 }
-function htmlReply(text) {
-  if (SIGN_IN.test(text)) return readerError('access', `Google showed its sign-in page instead of the reader’s answer. ${ANYONE}`, 'html sign-in');
-  return readerError('reader', `The reader script failed instead of answering. Open it (the sheet’s Extensions → Apps Script), look under Executions for what went wrong, then press Copy reader script in ${SETTINGS}, paste it over the old one and ${NEW_VERSION}.`, `html ${pageTitle(text)}`.trim());
+function webAppPage(text, voice) {
+  if (SIGN_IN.test(text)) return voiceError(voice, 'access', voice.words.signInPage, 'html sign-in');
+  return voiceError(voice, 'reader', voice.words.scriptFailed, `html ${pageTitle(text)}`.trim());
 }
 
-// The reader's last answer -> { rows, tab, timeZone } in fetchRows' shape,
-// and zoneMissing when an older reader named no zone (its text dates are
-// then read in this computer's zone, and Needs attention says so).
-function readerReply(status, contentType, raw) {
-  if (status === 429) throw readerError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.', 'http 429');
-  if (status >= 500) throw readerError('google', 'Google’s Apps Script service had a problem; it tries again in half an hour.', `http ${status}`);
-  if (status === 401 || status === 403) throw readerError('access', `Google did not let the reader answer. ${ANYONE}`, `http ${status}`);
-  if (status === 404) {
-    throw readerError('missing', `No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in ${SETTINGS}.`, 'http 404');
-  }
+// The web app's last answer -> its JSON object, or the failure its status
+// or its page says. What the object must hold is the caller's to check.
+function webAppAnswer(status, contentType, raw, voice) {
+  const { words } = voice;
+  if (status === 429) throw voiceError(voice, 'busy', words.busy, 'http 429');
+  if (status >= 500) throw voiceError(voice, 'google', words.down, `http ${status}`);
+  if (status === 401 || status === 403) throw voiceError(voice, 'access', words.denied, `http ${status}`);
+  if (status === 404) throw voiceError(voice, 'missing', words.missing, 'http 404');
   // Any other refusal will not pass by itself.
-  if (!(status >= 200 && status < 300)) throw readerError('reader', `Google refused the reader’s call. ${RELINK}`, `http ${status}`);
+  if (!(status >= 200 && status < 300)) throw voiceError(voice, 'reader', words.refused, `http ${status}`);
   const text = typeof raw === 'string' ? raw : '';
-  if (/text\/html/i.test(String(contentType ?? '')) || /^\s*</.test(text)) throw htmlReply(text);
+  if (/text\/html/i.test(String(contentType ?? '')) || /^\s*</.test(text)) throw webAppPage(text, voice);
   let body;
   try {
     body = JSON.parse(text);
   } catch {
-    throw wrongShape('not json');
+    throw voiceError(voice, 'reader', words.shape, 'not json');
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw wrongShape('not an object');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw voiceError(voice, 'reader', words.shape, 'not an object');
+  return body;
+}
+
+// The reader's answer -> { rows, tab, timeZone } in fetchRows' shape, and
+// zoneMissing when an older reader named no zone (its text dates are then
+// read in this computer's zone, and Needs attention says so).
+function readerBody(body) {
   if (body.ok === false) {
     if (body.error === 'not allowed') {
       throw readerError('secret', `The reader refused the secret: it does not match the reader’s. ${SECRET_HELP}, then save it in ${SETTINGS}.`, 'not allowed');
@@ -580,41 +636,44 @@ function readerReply(status, contentType, raw) {
     ...(zone ? {} : { zoneMissing: true }),
   };
 }
+const readerReply = (status, contentType, raw) => readerBody(webAppAnswer(status, contentType, raw, READER_VOICE));
 
-// Posts the secret to the reader, follows Google's one redirect and reads
-// the answer. `send(url, init)` is the caller's (Electron's net.request in
-// the app) and never follows a redirect itself: it resolves { status,
-// location, contentType, text() }. Every URL passes checkUrl first.
-// -> { rows, tab, timeZone }. Throws FieldSurveyError.
-async function fetchReaderRows({ link, secret, send }) {
+// Posts a request to a web app, follows Google's one redirect and reads the
+// answer. `send(url, init)` is the caller's (Electron's net.request in the
+// app) and never follows a redirect itself: it resolves { status,
+// location, contentType, text() }. Every URL passes the voice's gate first.
+// -> the answer's JSON object (webAppAnswer). Throws the voice's error.
+async function callWebApp({ request, send, voice }) {
+  const check = voice.check ?? ((url) => checkWebAppUrl(url, voice));
   const call = async (url, init) => {
-    checkUrl(url);
+    check(url);
     try {
       return await send(url, init);
     } catch (err) {
-      if (err instanceof FieldSurveyError) throw err;
-      throw readerUnreachable(err);
+      if (err instanceof voice.Error) throw err;
+      throw webAppUnreachable(err, voice);
     }
   };
-  const req = readerRequest(link, secret);
-  let res = await call(req.url, req.init);
+  let res = await call(request.url, request.init);
   if (isRedirect(res.status)) {
-    res = await call(readerHop(res.location), { method: 'GET', headers: { accept: 'application/json' } });
-    if (isRedirect(res.status)) {
-      throw readerError('blocked', `Google redirected the reader’s answer a second time, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`, 'second redirect');
-    }
+    res = await call(webAppHop(res.location, voice), { method: 'GET', headers: { accept: 'application/json' } });
+    if (isRedirect(res.status)) throw voiceError(voice, 'blocked', voice.words.secondRedirect, 'second redirect');
   }
   let raw;
   try {
     raw = await res.text();
   } catch (err) {
     // Cut off past READER_MAX_BYTES by the caller: not an answer to read.
-    if (err?.name === 'TooLargeError') {
-      throw readerError('reader', `The reader’s answer is larger than 20 MB, more than the app reads. Point TAB in the reader script at the answers’ tab alone, then ${NEW_VERSION}.`, 'answer over 20 MB');
-    }
-    throw readerUnreachable(err);
+    if (err?.name === 'TooLargeError') throw voiceError(voice, 'reader', voice.words.tooLarge, 'answer over 20 MB');
+    throw webAppUnreachable(err, voice);
   }
-  return readerReply(res.status, res.contentType, raw);
+  return webAppAnswer(res.status, res.contentType, raw, voice);
+}
+
+// Posts the secret to the reader and reads its rows -> { rows, tab,
+// timeZone }. Throws FieldSurveyError.
+async function fetchReaderRows({ link, secret, send }) {
+  return readerBody(await callWebApp({ request: readerRequest(link, secret), send, voice: READER_VOICE }));
 }
 
 // ---- summarising the table -------------------------------------------------------------
@@ -1702,6 +1761,7 @@ module.exports = {
   parseSheetLink, readKey, jwtAssertion, tokenRequest, metadataUrl, valuesUrl, checkUrl, pickTab, fetchRows,
   READER_MAX_BYTES, tooLarge, parseReaderLink, secretStorage, checkSecret, sealSecret, openSecret, secretFor, secretStale, secretGoes, secretNote, secretFileError, secretLocked,
   readerRequest, readerHop, readerReply, fetchReaderRows, sourceOf, sourceLink,
+  parseWebAppLink, canProtect, secretRecord, webAppRequest, callWebApp,
   summarise, unreadableText, checkRoles, checkSubmission, columnsReply, lowMark, fieldFlags, keyFileError, redactRows, nextRun, dateOf,
   planFetch, afterFetch, afterFailure, reroleCache, summariseCache, validCache, startPlan, changeSettings, fieldProblems, inSettings, settingsWords,
 };
