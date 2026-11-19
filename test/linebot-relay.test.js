@@ -673,3 +673,53 @@ test('after a new secret (cursor 0), the app’s saved cursor beside this relay�
   assert.equal(r2.missed, 0);
   assert.deepEqual(r2.events.map((e) => e.seq), [3]);
 });
+
+// ---- review round 5 ------------------------------------------------------------------------
+
+test('an old row not yet recorded in Gone holds back every newer one: counted as missed once, never passed by the app’s cursor', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b'), text('c')] });
+  ageRows(env, 15, 2); // 1 and 2 are past 14 days; 3 is newer
+  env.sheets.get('Gone').failWrites = 1;
+  const first = env.app(0);
+  assert.deepEqual(first, { ok: false, error: 'not counted' });
+  let cursor = cursorOf(first, 0);
+  const second = env.app(cursor);
+  assert.equal(second.missed, 2);
+  assert.deepEqual(second.events.map((e) => e.seq), [3]);
+  cursor = cursorOf(second, cursor);
+  assert.equal(env.app(cursor).missed, 2);
+});
+
+test('1,200 old rows and a newer one: the app is asked back until each old row is counted, then gets the newer one; missed ends at 1,200', () => {
+  const env = appsScript();
+  env.line({ events: Array.from({ length: 1200 }, (_, i) => text(`old${i}`)) });
+  ageRows(env, 15);
+  env.line({ events: [text('new')] });
+  let cursor = 0;
+  let reply;
+  const got = [];
+  for (let round = 0; round < 20; round += 1) {
+    reply = env.app(cursor);
+    got.push(...reply.events.map((e) => e.seq));
+    cursor = cursorOf(reply, cursor);
+    if (!reply.more) break;
+  }
+  assert.equal(reply.missed, 1200);
+  assert.deepEqual(got, [1201]);
+  assert.equal(env.app(cursor).missed, 1200);
+});
+
+test('events that came while the key could not be read are still counted when the Tally tab fails, through the bounded spare', () => {
+  const env = appsScript();
+  env.cache.clear();
+  env.hooks.getProperty = (k) => {
+    if (k === 'WEBHOOK_KEY') throw new Error('Service unavailable');
+    return false;
+  };
+  env.sheetsFail = true;
+  env.line({ events: [text('x'), text('y')] });
+  env.sheetsFail = false;
+  delete env.hooks.getProperty;
+  assert.equal(env.app(0).unchecked, 2);
+});

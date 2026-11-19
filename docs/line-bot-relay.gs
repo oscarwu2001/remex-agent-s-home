@@ -75,8 +75,11 @@ const TYPES = ['message', 'unsend', 'memberJoined', 'memberLeft', 'join', 'leave
 // Tally rows -> the counts they add to. 'unchecked': LINE-looking events
 // that came when the key could not be read at all.
 const TALLIED = { refused: 'REFUSED', denied: 'DENIED', notJson: 'NOT_JSON', lost: 'LOST', unchecked: 'UNCHECKED', capped: 'CAPPED' };
-// Kinds anyone can cause: capped, and never written to a property.
+// Kinds anyone can cause: capped in the Tally tab, and never written to a
+// property. 'unchecked' and 'capped' come only while the key cannot be
+// read, so they may wait in the bounded spare like LINE's own counts.
 const OUTSIDE = { refused: true, denied: true, unchecked: true, capped: true };
+const NO_SPARE = { refused: true, denied: true };
 
 function doPost(e) {
   const props = PropertiesService.getScriptProperties();
@@ -250,17 +253,13 @@ function toApp_(e, props) {
     removeTop_(sheet, 2, drop, rows.length);
     rows = rows.slice(drop);
     // Then rows past KEEP_DAYS, and the count of those the app never saved.
+    let aged = true;
     try {
       ageOut_(sheet);
     } catch (err) {
+      aged = false;
       console.error('Old rows not removed: ' + err); // tried again at the next call
     }
-    // A row past KEEP_DAYS is never sent, even one whose removal failed: its
-    // number is counted from the Gone tab, now or once it goes.
-    const cutoff = Date.now() - KEEP_DAYS * 86400000;
-    let old = 0;
-    while (old < rows.length && new Date(rows[old][1]).getTime() < cutoff) old++;
-    rows = rows.slice(old);
     try {
       countGone_(props, upTo);
     } catch (err) {
@@ -269,7 +268,18 @@ function toApp_(e, props) {
       console.error('Missed events not counted yet: ' + err);
       return reply_({ ok: false, error: 'not counted' });
     }
-    const rest = rows;
+    // A row past KEEP_DAYS is never sent. One whose number is counted
+    // (GONE_TO) waits only for its removal; one not counted yet (ageOut_
+    // moves BATCH at a time, or failed) holds back every newer row, since
+    // past it the app's cursor would hide it: the app asks again (more) and
+    // each call moves the next batch, or, after a failure, it is told so.
+    const cutoff = Date.now() - KEEP_DAYS * 86400000;
+    const counted = count_(props, 'GONE_TO');
+    let old = 0;
+    while (old < rows.length && new Date(rows[old][1]).getTime() < cutoff) old++;
+    const waiting = rows.slice(0, old).some((r) => Number(r[0]) > counted);
+    if (waiting && !aged) return reply_({ ok: false, error: 'not counted' });
+    const rest = waiting ? [] : rows.slice(old);
     const events = rest.slice(0, BATCH).map((r) => {
       try {
         return { seq: Number(r[0]), received: String(r[1]), event: JSON.parse(String(r[3])) };
@@ -284,7 +294,7 @@ function toApp_(e, props) {
       version: VERSION,
       relay: relay,
       events: events,
-      more: rest.length > BATCH,
+      more: waiting || rest.length > BATCH,
       missed: count('MISSED'),
       refused: count('REFUSED'),
       denied: count('DENIED'),
@@ -443,8 +453,8 @@ function sheetNamed_(name) {
 // When the sheet fails, LINE's own counts wait as TALLY_<what>_<id>
 // properties (unique names: no count is lost to another call), at most
 // SPARE_MAX, then one TALLY_OVER_<id> marker at a time (its own name, so
-// each is counted once); the kinds anyone can cause never touch the
-// properties.
+// each is counted once); calls with a wrong key, none or a wrong secret
+// never touch the properties.
 function tally_(what, n) {
   if (!n) return;
   try {
@@ -459,7 +469,7 @@ function tally_(what, n) {
   } catch (err) {
     console.error('Not counted in the Tally tab (' + what + ' ' + n + '): ' + err); // shown under Executions
   }
-  if (OUTSIDE[what]) return;
+  if (NO_SPARE[what]) return;
   try {
     const p = PropertiesService.getScriptProperties();
     const waiting = p.getKeys().filter((k) => k.indexOf('TALLY_') === 0);
