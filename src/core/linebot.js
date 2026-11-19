@@ -181,7 +181,9 @@ const secretLocked = () => fail('secret', `The saved secret cannot be unlocked o
 
 // The relay's counters, all cumulative. lost came with the relay's second
 // version; an answer without it (the first version) counts as 0.
-const COUNTERS = ['missed', 'refused', 'notJson', 'lost'];
+const COUNTERS = ['missed', 'refused', 'notJson', 'lost', 'capped'];
+// Counters an older relay does not send: read as 0.
+const LATER = new Set(['lost', 'capped']);
 const isCount = (n) => Number.isSafeInteger(n) && n >= 0;
 const isSeq = (n) => Number.isSafeInteger(n) && n > 0;
 
@@ -207,9 +209,7 @@ function relayReply(body) {
   if (typeof body.relay !== 'string' || !RELAY_ID.test(body.relay)) throw wrongShape('no relay');
   if (!Array.isArray(body.events)) throw wrongShape('no events');
   if (typeof body.more !== 'boolean') throw wrongShape('no more');
-  if (!COUNTERS.every((k) => isCount(body[k]) || (k === 'lost' && body[k] === undefined))) throw wrongShape('no counts');
-  // From version 2: the refused count was capped (a flood), so it is at least what it says.
-  if (body.capped !== undefined && typeof body.capped !== 'boolean') throw wrongShape('capped');
+  if (!COUNTERS.every((k) => isCount(body[k]) || (LATER.has(k) && body[k] === undefined))) throw wrongShape('no counts');
   const events = [];
   let last = 0;
   for (const e of body.events) {
@@ -219,7 +219,7 @@ function relayReply(body) {
     if (e.broken === true || !e.event || typeof e.event !== 'object' || Array.isArray(e.event)) events.push({ seq: e.seq, broken: true });
     else events.push({ seq: e.seq, event: e.event });
   }
-  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k] ?? 0])), capped: body.capped === true };
+  return { relay: body.relay, events, more: body.more, counts: Object.fromEntries(COUNTERS.map((k) => [k, body[k] ?? 0])) };
 }
 
 // ---- events -> messages --------------------------------------------------------------
@@ -345,11 +345,13 @@ function readStore(text) {
     && STRINGS.every((k) => typeof m[k] === 'string')));
   const stamps = (v) => Object.fromEntries(Object.entries(obj(v) ?? {}).filter(([k, ms]) => keepIf(ID.test(k) && Number.isFinite(ms))));
   const c = obj(raw.counts);
-  const counts = c && typeof c.relay === 'string' && RELAY_ID.test(c.relay) && COUNTERS.every((k) => isCount(c[k]))
-    ? { relay: c.relay, link: typeof c.link === 'string' ? c.link : null, ...Object.fromEntries(COUNTERS.map((k) => [k, c[k]])) } : null;
+  const counted = (b) => COUNTERS.every((k) => isCount(b[k]) || (LATER.has(k) && b[k] === undefined));
+  const counters = (b) => Object.fromEntries(COUNTERS.map((k) => [k, b[k] ?? 0]));
+  const counts = c && typeof c.relay === 'string' && RELAY_ID.test(c.relay) && counted(c)
+    ? { relay: c.relay, link: typeof c.link === 'string' ? c.link : null, ...counters(c) } : null;
   if (raw.counts != null && !counts) damaged += 1;
-  const baselines = Object.fromEntries(Object.entries(obj(raw.baselines) ?? {}).filter(([id, b]) => keepIf(RELAY_ID.test(id) && obj(b) && COUNTERS.every((k) => isCount(b[k])) && Number.isFinite(b.at)))
-    .map(([id, b]) => [id, { ...Object.fromEntries(COUNTERS.map((k) => [k, b[k]])), at: b.at }]));
+  const baselines = Object.fromEntries(Object.entries(obj(raw.baselines) ?? {}).filter(([id, b]) => keepIf(RELAY_ID.test(id) && obj(b) && counted(b) && Number.isFinite(b.at)))
+    .map(([id, b]) => [id, { ...counters(b), at: b.at }]));
   const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter((n) => keepIf(obj(n) && NOTES.includes(n.what) && isCount(n.n) && Number.isFinite(n.at)));
   const np = obj(raw.nameProblem);
   return {
@@ -439,8 +441,7 @@ function takeReply(store, reply, { link, upTo = 0, ticked = new Set(), now }) {
   // answers from other relays too (each relay id keeps its own). A relay
   // never heard from: its counts are where it starts.
   const base = next.baselines?.[reply.relay] ?? (next.counts?.relay === reply.relay ? next.counts : null);
-  if (base) for (const k of COUNTERS) note(k, reply.counts[k] - base[k]);
-  if (reply.capped) note('capped');
+  if (base) for (const k of COUNTERS) note(k, reply.counts[k] - (base[k] ?? 0));
   next.counts = { relay: reply.relay, link, ...reply.counts };
   const known = Object.entries({ ...(next.baselines ?? {}), [reply.relay]: { ...reply.counts, at: now } }).sort((a, b) => b[1].at - a[1].at).slice(0, BASELINES);
   next.baselines = Object.fromEntries(known);

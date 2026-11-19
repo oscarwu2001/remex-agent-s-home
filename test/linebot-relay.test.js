@@ -57,6 +57,9 @@ class Sheet {
     if (typeof row === 'string') return { setNumberFormat: () => undefined };
     const sheet = this;
     return {
+      getValue() {
+        return this.getValues()[0][0];
+      },
       getValues() {
         sheet.env.hook('read', sheet);
         return Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => sheet.cells[row - 1 + i]?.[col - 1 + j] ?? ''));
@@ -91,6 +94,10 @@ function appsScript() {
     props,
     sheets,
     propWrites: 0,
+    propReads: 0, // every call that reads the script's properties (Google counts reads and writes together)
+    cacheFails: false,
+    sheetsFail: false,
+    fetch: () => assert.fail('the relay looks up names only with a token'),
     lockBusy: false,
     errors: [],
     hooks: {},
@@ -113,14 +120,30 @@ function appsScript() {
     },
   };
   const store = {
-    getProperty: (k) => (props.has(k) ? props.get(k) : null),
+    getProperty(k) {
+      env.propReads += 1;
+      return props.has(k) ? props.get(k) : null;
+    },
+    getProperties() {
+      env.propReads += 1;
+      return Object.fromEntries(props);
+    },
     setProperty(k, v) {
       env.hook('setProperty', k);
       env.propWrites += 1;
       props.set(k, String(v));
     },
+    deleteProperty(k) {
+      env.propWrites += 1;
+      props.delete(k);
+    },
   };
   const cache = new Map();
+  env.cache = cache;
+  const cacheCall = (fn) => (...a) => {
+    if (env.cacheFails) throw new Error('Service Cache failed');
+    return fn(...a);
+  };
   const context = vm.createContext({
     PropertiesService: { getScriptProperties: () => store },
     LockService: {
@@ -132,10 +155,15 @@ function appsScript() {
         releaseLock: () => undefined,
       }),
     },
-    SpreadsheetApp: { getActiveSpreadsheet: () => book },
+    SpreadsheetApp: {
+      getActiveSpreadsheet() {
+        if (env.sheetsFail) throw new Error('Service Spreadsheets failed while accessing document');
+        return book;
+      },
+    },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (text) => ({ text, setMimeType() { return this; } }) },
-    CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) ?? null, put: (k, v) => cache.set(k, v) }) },
-    UrlFetchApp: { fetch: () => assert.fail('the relay looks up names only with a token') },
+    CacheService: { getScriptCache: () => ({ get: cacheCall((k) => cache.get(k) ?? null), put: cacheCall((k, v) => cache.set(k, v)), remove: cacheCall((k) => cache.delete(k)) }) },
+    UrlFetchApp: { fetch: (...a) => env.fetch(...a) },
     Utilities: { getUuid: () => crypto.randomUUID() },
     Logger: { log: () => undefined },
     console: { error: (m) => env.errors.push(String(m)), log: () => undefined },
@@ -149,6 +177,9 @@ function appsScript() {
     JSON.parse(context.doPost({ parameter: { k }, postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).text);
   env.app = (upTo = 0, secret = env.secret) =>
     JSON.parse(context.doPost({ parameter: {}, postData: { contents: JSON.stringify({ secret, upTo }) } }).text);
+  // A post to the link with no ?k= at all.
+  env.post = (body) => JSON.parse(context.doPost({ parameter: {}, postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).text);
+  env.context = context;
   return env;
 }
 
@@ -298,9 +329,10 @@ test('the reply keeps the shape the app has always read, with lost added; a repl
   const env = appsScript();
   env.line({ events: [text('a')] });
   const reply = env.app(0);
-  assert.deepEqual(Object.keys(reply).sort(), ['events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay']);
-  const { lost, ...v1 } = reply;
+  assert.deepEqual(Object.keys(reply).sort(), ['capped', 'events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay']);
+  const { lost, capped, ...v1 } = reply;
   assert.equal(lost, 0);
+  assert.equal(capped, 0);
   assert.equal(B.relayReply(v1).counts.lost, 0);
   // Collected: the app's next call lets the relay forget it.
   assert.deepEqual(env.app(reply.events[0].seq).events, []);
@@ -313,15 +345,125 @@ test('a flood of wrong-key calls stops adding Tally rows at the cap, and LINE’
   const tally = env.sheets.get('Tally');
   for (let i = tally.getLastRow(); i < 100_000; i++) tally.cells[i] = ['refused', 1, 'then'];
   env.line({ events: [] }, 'wrong-key');
-  assert.equal(tally.getLastRow(), 100_000);
+  // No more refused rows: one 'capped' row marks it.
+  assert.equal(tally.getLastRow(), 100_001);
+  env.line({ events: [] }, 'wrong-key');
+  assert.equal(tally.getLastRow(), 100_001);
   // LINE's own events lost meanwhile are still counted.
   env.lockBusy = true;
   assert.deepEqual(env.line({ events: [text('lost')] }), { ok: false, error: 'busy' });
   env.lockBusy = false;
   assert.deepEqual(env.line({ events: [text('a')] }), { ok: true });
-  for (let i = 0; i < 25 && env.sheets.get('Tally').getLastRow(); i++) env.line({ events: [] });
-  const reply = env.app(0);
+  // The app's calls add the Tally up, at most FOLD rows each.
+  let reply;
+  for (let i = 0; i < 25 && (i === 0 || env.sheets.get('Tally').getLastRow()); i++) reply = env.app(0);
   assert.equal(reply.events.length, 1);
   assert.equal(reply.lost, 1);
   assert.equal(reply.refused, 100_000);
+});
+
+// ---- review round 2 ---------------------------------------------------------------------------
+
+test('a flood of calls with a wrong key or none reads the script’s properties at most once per cache period and writes none; new keys from makeSecrets work at once', () => {
+  const env = appsScript();
+  env.cache.clear(); // the cache period has run out
+  const reads = env.propReads;
+  const writes = env.propWrites;
+  for (let i = 0; i < 40; i++) {
+    assert.deepEqual(env.line({ events: [text('x')] }, 'wrong-key'), { ok: false, error: 'not allowed' });
+    assert.deepEqual(env.post({ destination: 'Ubot', events: [text('y')] }), { ok: false, error: 'not allowed' });
+    assert.deepEqual(env.app(0, 'not-the-secret-not-the-secret-not-the-secret'), { ok: false, error: 'not allowed' });
+  }
+  assert.ok(env.propReads - reads <= 2, `${env.propReads - reads} reads`);
+  assert.equal(env.propWrites, writes);
+  const oldKey = env.key;
+  env.context.makeSecrets();
+  const newKey = env.props.get('WEBHOOK_KEY');
+  assert.deepEqual(env.line({ events: [text('kept')] }, newKey), { ok: true });
+  assert.deepEqual(env.line({ events: [text('refused')] }, oldKey), { ok: false, error: 'not allowed' });
+  assert.equal(env.app(0, env.props.get('READER_SECRET')).events.length, 1);
+});
+
+test('LINE’s events are counted as lost even when the Spreadsheet service itself fails, busy or not', () => {
+  const env = appsScript();
+  env.sheetsFail = true;
+  assert.deepEqual(env.line({ events: [text('a'), text('b')] }), { ok: false, error: 'not kept' });
+  env.lockBusy = true;
+  assert.deepEqual(env.line({ events: [text('c')] }), { ok: false, error: 'busy' });
+  env.lockBusy = false;
+  env.sheetsFail = false;
+  assert.equal(env.app(0).lost, 3);
+});
+
+test('a keyed call whose events are not a list is counted as unreadable, not thrown', () => {
+  const env = appsScript();
+  assert.deepEqual(env.line({ events: 'nope' }), { ok: false, error: 'not json' });
+  assert.deepEqual(env.line({ events: { a: 1 } }), { ok: false, error: 'not json' });
+  assert.deepEqual(env.line('null'), { ok: false, error: 'not json' });
+  assert.equal(env.app(0).notJson, 3);
+});
+
+test('a name lookup or a cache that fails keeps the event and marks its names missing; the key is still checked', () => {
+  const env = appsScript();
+  env.props.set('LINE_TOKEN', 'token-token');
+  env.cache.clear();
+  env.fetch = () => {
+    throw new Error('Address unavailable');
+  };
+  assert.deepEqual(env.line({ events: [text('a')] }), { ok: true });
+  env.cacheFails = true;
+  assert.deepEqual(env.line({ events: [text('b')] }), { ok: true });
+  assert.deepEqual(env.line({ events: [text('c')] }, 'wrong-key'), { ok: false, error: 'not allowed' });
+  env.cacheFails = false;
+  const reply = env.app(0);
+  assert.deepEqual(reply.events.map((e) => [e.event.message.text, e.event._nameProblem]), [['a', 'lookup failed'], ['b', 'lookup failed']]);
+  assert.equal(reply.refused, 1);
+});
+
+test('rows the app has already been sent age out without being counted as missed; rows it never got are', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b')] });
+  const first = env.app(0);
+  assert.deepEqual(first.events.map((e) => e.seq), [1, 2]);
+  env.line({ events: [text('c')] });
+  for (const r of env.inbox().cells.slice(1)) if (r && r[0] !== '') r[1] = new Date(Date.now() - 15 * DAY).toISOString();
+  env.line({ events: [text('d')] });
+  const second = env.app(2);
+  assert.equal(second.missed, 1);
+  assert.deepEqual(second.events.map((e) => e.event.message.text), ['d']);
+});
+
+test('LINE’s body posted to the link without ?k= is counted as refused', () => {
+  const env = appsScript();
+  assert.deepEqual(env.post({ destination: 'Ubot', events: [text('a')] }), { ok: false, error: 'not allowed' });
+  assert.deepEqual(env.post('<html>'), { ok: false, error: 'not allowed' });
+  assert.equal(env.app(0).refused, 2);
+});
+
+test('the Tally is added up on the app’s calls only: LINE’s calls never read it', () => {
+  const env = appsScript();
+  for (let i = 0; i < 3; i++) env.line({ events: [] }, 'wrong-key');
+  let read = false;
+  env.hooks.read = (sheet) => {
+    if (sheet.name === 'Tally') read = true;
+    return false;
+  };
+  env.line({ events: [text('a')] });
+  assert.equal(read, false);
+  delete env.hooks.read;
+  assert.equal(env.app(0).refused, 3);
+});
+
+test('when the Tally is full the relay marks it, and the app is told the refused count is a floor', () => {
+  const env = appsScript();
+  env.line({ events: [] }, 'wrong-key');
+  const tally = env.sheets.get('Tally');
+  for (let i = tally.getLastRow(); i < 100_000; i++) tally.cells[i] = ['refused', 1, 'then'];
+  env.line({ events: [] }, 'wrong-key');
+  env.line({ events: [] }, 'wrong-key');
+  let reply;
+  for (let i = 0; i < 30 && (i === 0 || tally.getLastRow()); i++) reply = env.app(0);
+  assert.equal(tally.getLastRow(), 0);
+  assert.equal(reply.refused, 100_000);
+  assert.equal(reply.capped, 1);
 });

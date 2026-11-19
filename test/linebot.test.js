@@ -58,7 +58,7 @@ function fakeRelay({ relay = RELAY_A, secret = SECRET, batch = 500 } = {}) {
     r.rows = r.rows.filter((row) => row.seq > upTo);
     const out = r.rows.slice(0, r.batch);
     if (r.busy) return { ok: false, error: 'busy' };
-    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson, ...(r.lost !== undefined ? { lost: r.lost } : {}), ...(r.capped ? { capped: true } : {}) };
+    return { ok: true, relay: r.relay, events: out, more: r.rows.length > r.batch, missed: r.missed, refused: r.refused, notJson: r.notJson, ...(r.lost !== undefined ? { lost: r.lost } : {}), ...(r.capped !== undefined ? { capped: r.capped } : {}) };
   };
   // Google's way: the POST is answered with a redirect, the answer fetched from the echo host.
   let pending = null;
@@ -386,7 +386,7 @@ test('events missing what the app needs are counted and left out', async () => {
 test('an answer not in the relay’s shape is refused whole: nothing is taken and the cursor stays', () => {
   const good = { ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 };
   const shape = (body) => assert.throws(() => B.relayReply(body), (e) => e.kind === 'reader' && /not in the shape the app reads.*Copy relay script/.test(e.message));
-  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0 }, capped: false });
+  assert.deepEqual(B.relayReply(good), { relay: RELAY_A, events: [], more: false, counts: { missed: 0, refused: 0, notJson: 0, lost: 0, capped: 0 } });
   shape({ ...good, ok: undefined });
   shape({ ...good, relay: undefined });
   shape({ ...good, events: 'none' });
@@ -1216,11 +1216,11 @@ test('a refused count the relay had to cap is said as “at least”', async () 
   const h = harness();
   await h.collect();
   h.relay.refused = 100_000;
-  h.relay.capped = true;
+  h.relay.capped = 1;
   await h.collect();
   assert.match(said(h.store).map((p) => p.label).join('\n'), /at least 100000 calls to the relay’s webhook were refused/);
-  // An older relay's answer has no `capped`; one that is not true or false is not the relay's.
-  assert.equal(B.relayReply({ ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 }).capped, false);
+  // An older relay's answer has no `capped`; one that is not a count is not the relay's.
+  assert.equal(B.relayReply({ ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0 }).counts.capped, 0);
   assert.throws(() => B.relayReply({ ok: true, relay: RELAY_A, events: [], more: false, missed: 0, refused: 0, notJson: 0, capped: 'yes' }), (e) => e.kind === 'reader');
 });
 

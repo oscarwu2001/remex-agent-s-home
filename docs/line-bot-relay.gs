@@ -17,23 +17,35 @@
  *   LINE_TOKEN     optional: your channel access token. With it this script
  *                  looks up group and member names at api.line.me (the only
  *                  place it connects to). Without it events carry ids only.
+ * This script keeps them in its cache for KEY_CACHE_S seconds, so a flood of
+ * calls with a wrong key or none reads the script's properties at most once
+ * in that time. Keys made by makeSecrets take effect at once; one you edit
+ * by hand under Script properties takes up to KEY_CACHE_S seconds (or run
+ * makeSecrets again for new keys).
  *
  * Only group and multi-person chat events of the kinds Agent's Home reads
- * are kept; one-to-one chats with the bot are not. Reply tokens are dropped.
- * This script never sends messages.
+ * are kept; one-to-one chats with the bot are not. Reply tokens are dropped,
+ * and so are names a caller sends. This script never sends messages.
  *
- * Counts (shown by status, and to the app): MISSED events deleted unread
- * after KEEP_DAYS, REFUSED calls with a wrong key, NOT_JSON calls that were
- * not LINE's JSON, LOST events that could not be kept (the script was busy,
- * or the sheet failed). Calls from outside are counted in the Tally tab,
- * with no lock and no property write, so they cannot hold up LINE's calls
- * or use up the script's property quota; they are added up while the lock
- * is held.
+ * Counts (shown by status, and to the app): MISSED events deleted after
+ * KEEP_DAYS before the app was sent them, REFUSED calls with a wrong key or
+ * none, NOT_JSON calls with the key that were not LINE's JSON, LOST events
+ * that could not be kept (the script was busy, or the sheet failed), and
+ * CAPPED, how often refused calls came so fast that the Tally tab was full
+ * (then the refused count is at least what it says). Calls are counted in
+ * the Tally tab, with no lock and, for refused ones, no property read or
+ * write; when the sheet itself fails, LINE's own counts wait as TALLY_
+ * properties. The app's calls add them up.
+ *
+ * A flood of calls can still delay or drop LINE's events: Apps Script runs
+ * at most 30 calls of a script at once. If that happens, make a new
+ * deployment (Deploy > New deployment) and give its link to LINE's webhook
+ * (with ?k=) and to Agent's Home's Relay link; the old link then stops.
  *
  * To stop: in the LINE Developers console turn off Use webhook (or remove
  * the bot from its groups), so LINE stops sending here. Google Sheets keeps
  * a version history, which can hold past messages: to remove them all,
- * delete this spreadsheet (and empty Drive's trash).
+ * delete this spreadsheet, then empty Drive's trash.
  */
 const TAB = 'Inbox';
 const TALLY = 'Tally';
@@ -41,8 +53,13 @@ const KEEP_DAYS = 14;
 const BATCH = 500;
 const FOLD = 5000;
 const TALLY_MAX = 100000;
+const KEY_CACHE_S = 600;
 const TYPES = ['message', 'unsend', 'memberJoined', 'memberLeft', 'join', 'leave'];
-const TALLIED = { refused: 'REFUSED', notJson: 'NOT_JSON', lost: 'LOST' };
+// Tally rows -> the counts they add to. 'unchecked': LINE-looking events
+// that came when the key could not be read at all.
+const TALLIED = { refused: 'REFUSED', notJson: 'NOT_JSON', lost: 'LOST', unchecked: 'LOST', capped: 'CAPPED' };
+// Kinds anyone can cause: capped, and never written to a property.
+const OUTSIDE = { refused: true, unchecked: true };
 
 function doPost(e) {
   const props = PropertiesService.getScriptProperties();
@@ -56,20 +73,39 @@ function doGet() {
 
 // LINE's webhook: keep the group events.
 function fromLine_(e, props) {
-  const key = props.getProperty('WEBHOOK_KEY') || '';
+  let key;
+  try {
+    key = secret_('WEBHOOK_KEY', props);
+  } catch (err) {
+    console.error('Webhook key not read: ' + err); // shown under Executions
+    tally_('unchecked', eventsIn_(e));
+    return reply_({ ok: false, error: 'busy' });
+  }
   if (key.length < 32 || !same_(String(e.parameter.k), key)) {
     tally_('refused', 1);
     return reply_({ ok: false, error: 'not allowed' });
   }
-  let events = [];
+  let events = null;
   try {
-    events = JSON.parse(e.postData.contents).events || [];
+    events = JSON.parse(e.postData.contents).events;
   } catch (err) {
-    tally_('notJson', 1); // counted, shown by status() and to the app
+    events = null; // counted just below, with any body whose events are not a list
+  }
+  if (!Array.isArray(events)) {
+    tally_('notJson', 1);
     return reply_({ ok: false, error: 'not json' });
   }
   const kept = events.filter((ev) => ev && ev.source && (ev.source.type === 'group' || ev.source.type === 'room') && TYPES.indexOf(ev.type) >= 0);
-  const token = kept.length ? props.getProperty('LINE_TOKEN') || '' : '';
+  let token = '';
+  let nameless = false;
+  if (kept.length) {
+    try {
+      token = secret_('LINE_TOKEN', props);
+    } catch (err) {
+      console.error('LINE_TOKEN not read: ' + err);
+      nameless = true;
+    }
+  }
   const ready = kept.map((ev) => {
     const copy = Object.assign({}, ev);
     delete copy.replyToken;
@@ -77,11 +113,25 @@ function fromLine_(e, props) {
     delete copy._groupName;
     delete copy._senderName;
     delete copy._nameProblem;
-    if (token) addNames_(copy, token);
+    if (nameless) copy._nameProblem = 'lookup failed';
+    else if (token) {
+      try {
+        addNames_(copy, token);
+      } catch (err) {
+        copy._nameProblem = 'lookup failed'; // the app says names are missing
+      }
+    }
     return copy;
   });
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(25000)) {
+  let lock = null;
+  try {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) lock = null;
+  } catch (err) {
+    console.error('Lock not taken: ' + err);
+    lock = null;
+  }
+  if (!lock) {
     if (!ready.length) return reply_({ ok: true }); // nothing to keep (LINE's Verify button sends no events)
     tally_('lost', ready.length);
     return reply_({ ok: false, error: 'busy' });
@@ -89,7 +139,11 @@ function fromLine_(e, props) {
   let pending = ready.length; // events not kept yet
   try {
     const sheet = inbox_();
-    tidy_(sheet, props);
+    try {
+      ageOut_(sheet, props);
+    } catch (err) {
+      console.error('Old rows not removed: ' + err); // tried again at the next call
+    }
     if (!ready.length) return reply_({ ok: true });
     const seen = recentIds_(sheet);
     const now = new Date().toISOString();
@@ -113,8 +167,8 @@ function fromLine_(e, props) {
     sheet.getRange(start, 1, out.length, 4).setValues(out);
     pending = 0;
   } catch (err) {
-    console.error('Events not kept: ' + err); // shown under Executions
-    if (pending) tally_('lost', pending);
+    console.error('Events not kept: ' + err);
+    tally_('lost', pending);
     return reply_({ ok: false, error: 'not kept' });
   } finally {
     lock.releaseLock();
@@ -124,19 +178,41 @@ function fromLine_(e, props) {
 
 // Agent's Home: forget what it has saved (seq up to upTo), send the rest.
 function toApp_(e, props) {
-  const secret = props.getProperty('READER_SECRET') || '';
-  let body = {};
+  let body = null;
   try {
-    body = JSON.parse(e.postData.contents) || {};
+    body = JSON.parse(e.postData.contents);
   } catch (err) {
-    body = {}; // a request that is not JSON is refused just below
+    body = null; // refused just below
   }
-  if (secret.length < 32 || !same_(String(body.secret || ''), secret)) return reply_({ ok: false, error: 'not allowed' });
-  const upTo = Math.max(0, Math.floor(Number(body.upTo) || 0));
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(25000)) return reply_({ ok: false, error: 'busy' }); // the app asks again soon
+  // Not the app's call (LINE's body at a link without ?k=, or anything else): counted, with no property read.
+  if (!body || typeof body !== 'object' || typeof body.secret !== 'string') {
+    tally_('refused', 1);
+    return reply_({ ok: false, error: 'not allowed' });
+  }
+  let secret;
   try {
-    tidy_(null, props);
+    secret = secret_('READER_SECRET', props);
+  } catch (err) {
+    console.error('Reader secret not read: ' + err);
+    return reply_({ ok: false, error: 'busy' }); // the app asks again soon
+  }
+  if (secret.length < 32 || !same_(body.secret, secret)) return reply_({ ok: false, error: 'not allowed' });
+  const upTo = Math.max(0, Math.floor(Number(body.upTo) || 0));
+  let lock = null;
+  try {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) lock = null;
+  } catch (err) {
+    console.error('Lock not taken: ' + err);
+    lock = null;
+  }
+  if (!lock) return reply_({ ok: false, error: 'busy' }); // the app asks again soon
+  try {
+    try {
+      fold_(props);
+    } catch (err) {
+      console.error('Counts not added up: ' + err); // they wait for the next call
+    }
     const relay = relayId_(props);
     const next = Number(props.getProperty('NEXT_SEQ') || '1');
     if (upTo >= next) return reply_({ ok: false, error: 'cursor ahead', relay: relay });
@@ -147,7 +223,7 @@ function toApp_(e, props) {
     let drop = 0;
     let missed = 0;
     while (drop < rows.length && (Number(rows[drop][0]) <= upTo || new Date(rows[drop][1]).getTime() < cutoff)) {
-      if (Number(rows[drop][0]) > upTo) missed++;
+      if (Number(rows[drop][0]) > upTo) missed++; // the app asks from before it: not saved
       drop++;
     }
     removeTop_(sheet, 2, drop, rows.length);
@@ -160,15 +236,19 @@ function toApp_(e, props) {
         return { seq: Number(r[0]), received: String(r[1]), broken: true }; // the app counts these
       }
     });
+    if (events.length) props.setProperty('HANDED', String(events[events.length - 1].seq));
+    const all = props.getProperties();
+    const count = (name) => Number(all[name] || '0');
     return reply_({
       ok: true,
       relay: relay,
       events: events,
       more: rest.length > BATCH,
-      missed: count_(props, 'MISSED'),
-      refused: count_(props, 'REFUSED'),
-      notJson: count_(props, 'NOT_JSON'),
-      lost: count_(props, 'LOST'),
+      missed: count('MISSED'),
+      refused: count('REFUSED'),
+      notJson: count('NOT_JSON'),
+      lost: count('LOST'),
+      capped: count('CAPPED'),
     });
   } finally {
     lock.releaseLock();
@@ -179,8 +259,11 @@ function toApp_(e, props) {
 function makeSecrets() {
   const p = PropertiesService.getScriptProperties();
   const make = () => Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  p.setProperty('WEBHOOK_KEY', make());
-  p.setProperty('READER_SECRET', make());
+  const keys = { WEBHOOK_KEY: make(), READER_SECRET: make() };
+  for (const name in keys) p.setProperty(name, keys[name]);
+  // In use at once, not only when the cached ones run out.
+  const cache = cache_();
+  if (cache) for (const name in keys) cache.put(name, keys[name], KEY_CACHE_S);
   relayId_(p);
   inbox_();
   tallySheet_();
@@ -190,18 +273,61 @@ function makeSecrets() {
 /** Run from the editor to see counts only (no message content). */
 function status() {
   const p = PropertiesService.getScriptProperties();
+  const all = p.getProperties();
+  const count = (name) => Number(all[name] || '0');
   const n = Math.max(0, inbox_().getLastRow() - 1);
-  const ever = Number(p.getProperty('NEXT_SEQ') || '1') - 1;
-  const waiting = tallySheet_().getLastRow();
+  const waiting = tallySheet_().getLastRow() + Object.keys(all).filter((k) => k.indexOf('TALLY_') === 0).length;
   Logger.log(
-    'Waiting in Inbox: ' + n + '. Numbered since the start: ' + ever +
-    '. Missed (deleted before collection): ' + count_(p, 'MISSED') +
-    '. LINE calls refused (wrong key): ' + count_(p, 'REFUSED') +
-    '. Unreadable LINE calls: ' + count_(p, 'NOT_JSON') +
-    '. Events not kept (busy or a sheet error): ' + count_(p, 'LOST') +
-    '. Tally rows not added up yet: ' + waiting +
-    '. Names: ' + (p.getProperty('LINE_TOKEN') ? 'token set' : 'no token') + '.'
+    'Waiting in Inbox: ' + n + '. Numbered since the start: ' + (count('NEXT_SEQ') - 1) +
+    '. Missed (deleted before collection): ' + count('MISSED') +
+    '. Calls refused (wrong key or none): ' + count('REFUSED') + (count('CAPPED') ? ' or more' : '') +
+    '. Unreadable LINE calls: ' + count('NOT_JSON') +
+    '. Events not kept (busy or a sheet error): ' + count('LOST') +
+    '. Counts not added up yet: ' + waiting +
+    '. Names: ' + (all.LINE_TOKEN ? 'token set' : 'no token') + '.'
   );
+}
+
+// A key, a secret or the token: from the script's cache, else from its
+// properties (then cached for KEY_CACHE_S). '-' stands for none in the cache.
+function secret_(name, props) {
+  const cache = cache_();
+  if (cache) {
+    try {
+      const hit = cache.get(name);
+      if (hit !== null && hit !== undefined) return hit === '-' ? '' : hit;
+    } catch (err) {
+      console.error('Cache not read: ' + err); // the property is read instead
+    }
+  }
+  const value = props.getProperty(name) || '';
+  if (cache) {
+    try {
+      cache.put(name, value || '-', KEY_CACHE_S);
+    } catch (err) {
+      console.error('Cache not written: ' + err); // read from the properties again next time
+    }
+  }
+  return value;
+}
+
+function cache_() {
+  try {
+    return CacheService.getScriptCache();
+  } catch (err) {
+    console.error('Cache not available: ' + err);
+    return null;
+  }
+}
+
+// How many group events a body holds, when the key could not be checked.
+function eventsIn_(e) {
+  try {
+    const events = JSON.parse(e.postData.contents).events;
+    return Array.isArray(events) ? events.filter((ev) => ev && ev.source && (ev.source.type === 'group' || ev.source.type === 'room')).length : 0;
+  } catch (err) {
+    return 0; // not LINE's: nothing of LINE's lost
+  }
 }
 
 function addNames_(ev, token) {
@@ -223,9 +349,9 @@ function addNames_(ev, token) {
 }
 
 function lookup_(cache, key, url, token, field) {
-  const hit = cache.get(key);
-  if (hit) return { name: hit };
   try {
+    const hit = cache.get(key);
+    if (hit) return { name: hit };
     const r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true, followRedirects: false });
     if (r.getResponseCode() !== 200) return { problem: 'HTTP ' + r.getResponseCode() };
     const name = String(JSON.parse(r.getContentText())[field] || '');
@@ -262,64 +388,81 @@ function tallySheet_() {
 
 // One row per count, appended without the lock: an append is whole on its
 // own, so no count is lost, and nothing waits for LINE's calls. Past
-// TALLY_MAX rows waiting (a flood of wrong-key calls) no more refused ones
-// are added, so the spreadsheet cannot fill up: the count has risen enough
-// to be said. LINE's own (notJson, lost) are always added.
+// TALLY_MAX rows waiting (a flood) no more of the kinds anyone can cause are
+// added, so the spreadsheet cannot fill up; a 'capped' row marks it once.
+// When the sheet fails, LINE's own counts wait as TALLY_<what>_<id>
+// properties (unique names: no count is lost to another call); the kinds
+// anyone can cause never touch the properties.
 function tally_(what, n) {
+  if (!n) return;
   try {
     const sheet = tallySheet_();
-    if (what === 'refused' && sheet.getLastRow() >= TALLY_MAX) return;
+    const last = sheet.getLastRow();
+    if (OUTSIDE[what] && last >= TALLY_MAX) {
+      if (sheet.getRange(last, 1).getValue() !== 'capped') sheet.appendRow(['capped', 1, new Date().toISOString()]);
+      return;
+    }
     sheet.appendRow([what, n, new Date().toISOString()]);
+    return;
   } catch (err) {
-    console.error('Not counted (' + what + ' ' + n + '): ' + err); // shown under Executions
+    console.error('Not counted in the Tally tab (' + what + ' ' + n + '): ' + err); // shown under Executions
+  }
+  if (OUTSIDE[what]) return;
+  try {
+    PropertiesService.getScriptProperties().setProperty('TALLY_' + what + '_' + Utilities.getUuid(), String(n));
+  } catch (err) {
+    console.error('Not counted (' + what + ' ' + n + '): ' + err);
   }
 }
 
-// With the lock held: the counts brought up to date, and (with the Inbox)
-// rows past KEEP_DAYS removed. A failure here never stops events being kept
-// or collected; it is logged and tried again at the next call.
-function tidy_(inbox, props) {
-  try {
-    fold_(props);
-  } catch (err) {
-    console.error('Counts not added up: ' + err);
-  }
-  if (!inbox) return;
-  try {
-    ageOut_(inbox, props);
-  } catch (err) {
-    console.error('Old rows not removed: ' + err);
-  }
-}
-
-// The first Tally rows (at most FOLD at a time) added to the counts, then
-// removed. Rows appended meanwhile come after them and wait for the next.
+// With the lock held, on the app's calls: the counts that wait (TALLY_
+// properties, then the first FOLD Tally rows) added up and removed. Rows
+// appended meanwhile come after them and wait for the next call.
 function fold_(props) {
-  const sheet = tallySheet_();
-  const total = sheet.getLastRow();
-  if (!total) return;
-  const rows = sheet.getRange(1, 1, Math.min(FOLD, total), 2).getValues();
   const sums = {};
-  for (const r of rows) {
-    const name = TALLIED[String(r[0])];
-    if (name) sums[name] = (sums[name] || 0) + (Number(r[1]) || 0);
+  const add = (what, n) => {
+    const name = TALLIED[what];
+    if (name) sums[name] = (sums[name] || 0) + (Number(n) || 0);
+  };
+  const all = props.getProperties();
+  const spare = Object.keys(all).filter((k) => k.indexOf('TALLY_') === 0);
+  for (const k of spare) add(k.split('_')[1], all[k]);
+  let sheet = null;
+  let total = 0;
+  let rows = [];
+  try {
+    sheet = tallySheet_();
+    total = sheet.getLastRow();
+    if (total) rows = sheet.getRange(1, 1, Math.min(FOLD, total), 2).getValues();
+  } catch (err) {
+    console.error('Tally tab not read: ' + err); // its rows wait for the next call
+    rows = [];
   }
+  for (const r of rows) add(String(r[0]), r[1]);
   for (const name in sums) bump_(props, name, sums[name]);
-  removeTop_(sheet, 1, rows.length, total);
+  for (const k of spare) props.deleteProperty(k);
+  if (rows.length) removeTop_(sheet, 1, rows.length, total);
 }
 
-// Inbox rows older than KEEP_DAYS go, counted as missed, on LINE's calls
-// too, so they do not wait for the app to collect.
+// With the lock held, on LINE's calls too: Inbox rows older than KEEP_DAYS
+// go, so they do not wait for the app. Those the app was never sent count as
+// missed; those it was sent (seq up to HANDED) do not: it saves what it is
+// sent before its next call, and asks again within minutes when it could
+// not, so a row it was sent and did not save is only missed if it was also
+// away for KEEP_DAYS just then.
 function ageOut_(sheet, props) {
   const last = sheet.getLastRow();
   if (last < 2) return;
-  const times = sheet.getRange(2, 2, Math.min(BATCH, last - 1), 1).getValues();
+  const rows = sheet.getRange(2, 1, Math.min(BATCH, last - 1), 2).getValues();
   const cutoff = Date.now() - KEEP_DAYS * 86400000;
   let drop = 0;
-  while (drop < times.length && new Date(times[drop][0]).getTime() < cutoff) drop++;
+  while (drop < rows.length && new Date(rows[drop][1]).getTime() < cutoff) drop++;
   if (!drop) return;
+  const handed = Number(props.getProperty('HANDED') || '0');
+  let missed = 0;
+  for (let i = 0; i < drop; i++) if (Number(rows[i][0]) > handed) missed++;
   removeTop_(sheet, 2, drop, last - 1);
-  bump_(props, 'MISSED', drop);
+  if (missed) bump_(props, 'MISSED', missed);
 }
 
 // Removes the first `drop` of the `total` rows from row `first` on. A sheet
