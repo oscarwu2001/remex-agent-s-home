@@ -298,7 +298,7 @@ const BOT_PRIVATE = ['Night Shift Crew', 'Cousins Club', 'Jo', 'cover Friday', '
 test('Settings: the bot part is its own switch; on, it shows the steps, Copy relay script, the link, the secret and Refresh now', async () => {
   const { lineSettingsHtml } = await view();
   const off = lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: false, online: true, now: NOW });
-  assert.match(off, /<input type="checkbox" id="opt-line-bot"> <span>Collect from my LINE bot \(goes online, to your relay only\)<\/span>/);
+  assert.match(off, /<input type="checkbox" id="opt-line-bot"> <span>Collect from my LINE bot \(goes online, to my relay only\)<\/span>/);
   assert.match(off, /cannot see one-to-one chats/);
   assert.doesNotMatch(off, /Copy relay script|Relay link/);
   const fresh = lineSettingsHtml(line({ bot: botPart({ link: '', secretSaved: false, groups: [], collectedAt: null }) }), { privacy: false, online: true, now: NOW });
@@ -310,8 +310,8 @@ test('Settings: the bot part is its own switch; on, it shows the steps, Copy rel
   assert.match(fresh, /<label class="field-entry-label" for="line-bot-link">Relay link<\/label>/);
   assert.match(fresh, /<input id="line-bot-secret" type="password"/);
   // One filled button at a time: the link's Save while it waits; Refresh now only once both are saved.
-  assert.match(fresh, /<button class="button" type="submit">Save link<\/button>/);
-  assert.match(fresh, /<button class="link-btn" type="submit">Save secret<\/button>/);
+  assert.match(fresh, /<button class="button" type="submit" id="line-bot-link-save">Save link<\/button>/);
+  assert.match(fresh, /<button class="link-btn" type="submit" id="line-bot-secret-save">Save secret<\/button>/);
   assert.doesNotMatch(fresh, /Refresh now/);
   const ready = lineSettingsHtml(line({ bot: botPart() }), { privacy: false, online: true, now: NOW });
   assert.match(ready, /Secret saved\.[\s\S]*data-line="bot-replace-secret">Replace secret<\/button>/);
@@ -325,7 +325,7 @@ test('with privacy on the bot part shows counts only: no group name, relay link 
   const l = line({ bot: botPart(), items: [botItem, ...line().items], readCount: 3 });
   const html = lineSettingsHtml(l, { privacy: true, online: true, now: NOW, bot: { linkEditing: true, linkDraft: null } });
   for (const words of [...PRIVATE, ...BOT_PRIVATE]) assert.ok(!html.includes(words), words);
-  assert.match(html, /2 groups found, 1 read\. Turn off/);
+  assert.match(html, /2 groups found, 1 read\.<\/p>/);
   // The link field opened for a change starts empty rather than showing the saved link.
   assert.match(html, /<input id="line-bot-link"[^>]*value=""/);
   const saved = lineSettingsHtml(l, { privacy: true, online: true, now: NOW });
@@ -379,7 +379,7 @@ test('a failed collection names the control in view; with no protected storage t
   const none = lineSettingsHtml(line({ bot: botPart({ secretSaved: false, secretStorage: storage }) }), { privacy: false, online: true, now: NOW });
   assert.equal(none.split('no protected storage').length, 2);
   assert.doesNotMatch(none, /id="line-bot-secret"|Replace secret|Refresh now/);
-  assert.match(none, /This computer can’t keep the secret \(see the line above\)/);
+  assert.match(none, /This computer can’t keep the secret \(see the note under Collect from my LINE bot\)/);
 });
 
 test('the board: the bot alone is a set-up; its groups count as chats; a folder in trouble does not hide what the bot brought', async () => {
@@ -391,9 +391,113 @@ test('the board: the bot alone is a set-up; its groups count as chats; a folder 
   const waiting = lineHtml(line({ folder: '', chats: [], bot: botPart({ groups: [] }), items: [], readCount: 0 }), { privacy: true, now: NOW });
   assert.match(waiting, /Nothing from your bot yet\. Invite it to a group/);
   const unticked = lineHtml(line({ folder: '', chats: [], bot: botPart({ groups: [botPart().groups[1]] }), items: [], readCount: 0 }), { privacy: true, now: NOW });
-  assert.match(unticked, /1 chat found\. Tick the chats to read in Settings\./);
+  assert.match(unticked, /1 chat found\. Tick the chats and groups to read in Settings\./);
   const failing = lineHtml(line({ folder: '', chats: [], bot: botPart({ groups: [], error: { message: 'x', kind: 'network' } }), items: [], readCount: 0 }), { privacy: true, now: NOW });
   assert.match(failing, /The bot’s messages could not be collected\. See Needs attention\./);
   const both = lineHtml(line({ folderError: 'ENOENT', bot: botPart(), items: [botItem], readCount: 1 }), { privacy: true, now: NOW });
   assert.match(both, /The exports folder is missing\. Choose it again in Settings\.[\s\S]*1 item for you/);
+});
+
+// ---- review round 1 ---------------------------------------------------------------------------
+
+test('Settings in parts: saved chats, the bot, then names and keywords under their own heading; with privacy on each part keeps its own count and one line offers Privacy settings', async () => {
+  const { lineSettingsHtml } = await view();
+  const open = lineSettingsHtml(line({ bot: botPart() }), { privacy: false, online: true, now: NOW });
+  const heads = ['id="line-exports-h"', 'id="line-bot-h"', 'id="line-words-h">Your names and keywords</h5>', 'id="line-names"'].map((h) => open.indexOf(h));
+  assert.ok(heads.every((i, k) => i > 0 && (k === 0 || i > heads[k - 1])), String(heads));
+  const hidden = lineSettingsHtml(line({ bot: botPart() }), { privacy: true, online: true, now: NOW });
+  const where = (re) => hidden.search(re);
+  assert.ok(where(/id="line-exports-h"/) < where(/3 chats found, 2 read\./) && where(/3 chats found, 2 read\./) < where(/id="line-bot-h"/));
+  assert.ok(where(/id="line-bot-h"/) < where(/2 groups found, 1 read\./) && where(/2 groups found, 1 read\./) < where(/id="line-words-h"/));
+  assert.ok(where(/id="line-words-h"/) < where(/1 name and 1 keyword saved\./));
+  assert.equal(hidden.match(/data-line="privacy"/g).length, 1);
+  assert.match(hidden, /Turn off [^<]+ to choose chats and groups and to change your names and keywords\. <button type="button" class="link-btn inline" data-line="privacy" data-key="line-settings-privacy">Privacy settings<\/button>/);
+});
+
+test('with no folder and no bot Settings says no “Read” time; a note still shows', async () => {
+  const { lineSettingsHtml } = await view();
+  const bare = line({ folder: '', chats: [], bot: { on: false, groups: [] }, scannedAt: null, readCount: 0, items: [] });
+  const html = lineSettingsHtml(bare, { privacy: false, online: true, now: NOW });
+  assert.doesNotMatch(html, /Not read yet|Read \d|items from the last/);
+  assert.match(lineSettingsHtml(bare, { privacy: false, online: true, now: NOW, state: { note: 'The demo chooses no folder.' } }), /role="status">The demo chooses no folder\.<\/p>/);
+});
+
+test('the bot’s errors sit by what caused them: the switch’s under the switch, a tick’s under the groups, Refresh now’s under it', async () => {
+  const { lineSettingsHtml } = await view();
+  const draw = (state) => lineSettingsHtml(line({ bot: botPart() }), { privacy: false, online: true, now: NOW, bot: state });
+  assert.match(draw({ error: 'Turn LINE chats on first.' }), /Collect from my LINE bot[^<]*<\/span><\/label>\s*<p class="form-error" role="alert">Turn LINE chats on first\.<\/p>/);
+  assert.match(draw({ tickError: 'That group is no longer listed; close and reopen Settings.' }), /<\/fieldset>\s*<p class="form-error" role="alert">That group is no longer listed; close and reopen Settings\.<\/p>/);
+  assert.match(draw({ refreshError: 'The app did not answer. Try again.' }), /data-line="bot-refresh">Refresh now<\/button><\/div>\s*<p class="form-error" role="alert">The app did not answer\. Try again\.<\/p>/);
+  // Off, the switch's error is still under it.
+  assert.match(lineSettingsHtml(line({ bot: { on: false, groups: [] } }), { privacy: false, online: true, now: NOW, bot: { error: 'x' } }), /<\/span><\/label>\s*<p class="form-error" role="alert">x<\/p>/);
+});
+
+test('with no protected storage the switch is described by the note under it, which the steps and the Secret line name', async () => {
+  const { lineSettingsHtml } = await view();
+  const storage = 'This computer has no protected storage for the relay’s secret. Set up a keyring, then restart Agent’s Home.';
+  const none = lineSettingsHtml(line({ bot: botPart({ secretSaved: false, secretStorage: storage }) }), { privacy: false, online: true, now: NOW });
+  assert.match(none, /<input type="checkbox" id="opt-line-bot" checked aria-describedby="line-bot-storage">/);
+  assert.match(none, /<p class="hint" id="line-bot-storage">This computer has no protected storage/);
+  assert.doesNotMatch(none, /line above|into Secret/);
+  assert.match(none, /This computer can’t keep the secret \(see the note under Collect from my LINE bot\)/);
+  assert.match(none, /Keep READER_SECRET[^<]*until this computer can keep it/);
+  const saved = lineSettingsHtml(line({ bot: botPart({ secretStorage: storage }) }), { privacy: false, online: true, now: NOW });
+  assert.match(saved, /can’t open it now \(see the note under Collect from my LINE bot\)/);
+  assert.doesNotMatch(lineSettingsHtml(line({ bot: botPart() }), { privacy: false, online: true, now: NOW }), /aria-describedby="line-bot-storage"/);
+});
+
+test('the bot part says why it is not collecting, on the board and in Settings, and the board notes a failed collection and stand-in senders', async () => {
+  const { lineHtml, lineSettingsHtml } = await view();
+  const why = 'no secret is saved; paste READER_SECRET under Secret in Settings → Connections → LINE chats';
+  const stoppedBot = { secretSaved: false, notCollecting: why, notCollectingHere: 'no secret is saved; paste READER_SECRET under Secret' };
+  const stopped = line({ bot: botPart(stoppedBot), items: [botItem], readCount: 1 });
+  assert.match(lineHtml(stopped, { privacy: true, now: NOW }), /<p class="form-error">Your LINE bot is not collecting\. See Needs attention\.<\/p>[\s\S]*1 item for you/);
+  assert.match(lineSettingsHtml(stopped, { privacy: false, online: true, now: NOW }), /role="status">Collected 12:59 · not collecting: no secret is saved; paste READER_SECRET under Secret\.<\/p>/);
+  const never = line({ bot: botPart({ ...stoppedBot, collectedAt: null }) });
+  assert.match(lineSettingsHtml(never, { privacy: false, online: true, now: NOW }), /role="status">Not collecting: no secret is saved; paste READER_SECRET under Secret\.<\/p>/);
+  // Not collecting and nothing yet: the note, not an invitation to add the bot to a group.
+  const empty = lineHtml(line({ folder: '', chats: [], bot: botPart({ link: '', groups: [], notCollecting: why }), items: [], readCount: 0 }), { privacy: true, now: NOW });
+  assert.match(empty, /Your LINE bot is not collecting\. See Needs attention\./);
+  assert.doesNotMatch(empty, /Invite it to a group/);
+  const failed = lineHtml(line({ bot: botPart({ error: { message: 'x', kind: 'network', at: at(12, 50) } }), items: [botItem], readCount: 1 }), { privacy: true, now: NOW });
+  assert.match(failed, /The bot’s messages could not be collected\. See Needs attention\.[\s\S]*1 item for you/);
+  const standIns = lineHtml(line({ bot: botPart({ named: false, standIns: true }), items: [botItem], readCount: 1 }), { privacy: true, now: NOW });
+  assert.match(standIns, /senders in your bot’s groups show as stand-ins[^<]*your own promises there can’t be found and your own messages may show as mentions[^<]*See Needs attention\./i);
+  assert.doesNotMatch(lineHtml(line({ bot: botPart(), items: [botItem], readCount: 1 }), { privacy: true, now: NOW }), /stand-ins|not collecting|could not be collected/);
+});
+
+test('Save, Cancel and Privacy settings keep focus across redraws; the bot part’s messages go with its drafts', async () => {
+  const { lineSettingsHtml, dropLineBotDrafts } = await view();
+  const html = lineSettingsHtml(line({ bot: botPart({ secretSaved: true }) }), { privacy: false, online: true, now: NOW, bot: { linkEditing: true, secretEditing: true } });
+  assert.match(html, /<button class="[^"]+" type="submit" id="line-bot-link-save">Save link<\/button>/);
+  assert.match(html, /<button type="button" class="link-btn" id="line-bot-link-cancel" data-line="bot-cancel-link"/);
+  assert.match(html, /<button class="[^"]+" type="submit" id="line-bot-secret-save">Save secret<\/button>/);
+  assert.match(html, /id="line-bot-secret-cancel" data-line="bot-cancel-secret"/);
+  const state = { linkDraft: 'x', linkError: 'x', note: 'n', scriptNote: 's', scriptError: 'e', error: 'e', tickError: 't', refreshError: 'r', secretNote: 'sn', secretError: 'se' };
+  dropLineBotDrafts(state);
+  for (const k of Object.keys(state)) assert.ok(state[k] === '' || state[k] === null, k);
+});
+
+test('the bot part, off: the switch reads “to my relay only”; with a relay set up before, it says how to stop LINE sending and clear the sheet', async () => {
+  const { lineSettingsHtml, lineHtml } = await view();
+  const off = lineSettingsHtml(line({ bot: { on: false, link: RELAY_LINK, groups: [] } }), { privacy: true, online: true, now: NOW });
+  assert.match(off, /<span>Collect from my LINE bot \(goes online, to my relay only\)<\/span>/);
+  assert.match(off, /LINE Developers console, turn off Use webhook \(or remove the bot from its groups\)/);
+  assert.match(off, /delete the relay’s Google Sheet[^<]*version history/);
+  assert.ok(!off.includes('relay.example'));
+  assert.doesNotMatch(lineSettingsHtml(line({ bot: { on: false, link: '', groups: [] } }), { privacy: true, online: true, now: NOW }), /Use webhook/);
+  const unticked = lineHtml(line({ folder: '', chats: [], bot: botPart({ groups: [botPart().groups[1]] }), items: [], readCount: 0 }), { privacy: true, now: NOW });
+  assert.match(unticked, /1 chat found\. Tick the chats and groups to read in Settings\./);
+});
+
+test('a switch keeps its size beside long words', () => {
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  assert.match(css, /\.switch input \{[^}]*flex-shrink: 0;/);
+});
+
+test('a names and keywords save the app refused is said under their Save, not under the folder', async () => {
+  const { lineSettingsHtml } = await view();
+  const html = lineSettingsHtml(line(), { privacy: false, online: true, now: NOW, state: { wordsError: 'The setting could not be saved. Try again.' } });
+  assert.match(html, /id="line-words-save">Save<\/button><\/div>\s*<p class="form-error" role="alert">The setting could not be saved\. Try again\.<\/p>\s*<\/form>/);
+  assert.equal(html.split('could not be saved').length, 2);
 });

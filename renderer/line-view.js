@@ -127,22 +127,28 @@ export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, project
   // The exports folder's trouble hides nothing the bot brings in: it is said above.
   const botReading = Boolean(bot?.groups?.some((g) => g.read));
   const folderNote = l.folderError ? `<p class="form-error">${esc(folderWords(l.folderError))}</p>` : '';
-  if (folderNote && !botReading) return `${folderNote}${settingsBtn}`;
+  // What stops or limits the bot is said above whatever is shown; Needs attention has the reason and what to do.
+  const botNote = !bot ? '' : bot.notCollecting ? '<p class="form-error">Your LINE bot is not collecting. See Needs attention.</p>'
+    : bot.error ? '<p class="form-error">The bot’s messages could not be collected. See Needs attention.</p>' : '';
+  const standIns = bot?.standIns
+    ? '<p class="hint">Senders in your bot’s groups show as stand-ins (the relay sends no names), so your own promises there can’t be found and your own messages may show as mentions. See Needs attention.</p>' : '';
+  const top = `${folderNote}${botNote}${standIns}`;
+  if (folderNote && !botReading) return `${top}${settingsBtn}`;
   if (l.scanFailed) return '<p class="form-error">The chats could not be read just now. See Needs attention.</p>';
   if (!l.readCount) {
     if (l.tickedFailed) return '<p class="form-error">The ticked chats could not be read. See Needs attention.</p>';
-    if (bot?.error && !l.chats?.length && !bot.groups?.length) return '<p class="form-error">The bot’s messages could not be collected. See Needs attention.</p>';
     const found = (l.chats?.length ?? 0) + (bot?.groups?.length ?? 0);
-    const words = found ? `${plural(found, 'chat')} found. Tick the chats to read in Settings.`
+    if (botNote && !found) return `${top}${settingsBtn}`;
+    const words = found ? `${plural(found, 'chat')} found. Tick the chats${bot ? ' and groups' : ''} to read in Settings.`
       : l.folder || !bot ? 'No chats in the folder yet. In LINE, open a chat, then ≡ → Save chat, and save it there.'
         : 'Nothing from your bot yet. Invite it to a group: it sees what is sent there after it joins.';
-    return `${folderNote}<p class="empty">${words}</p>${settingsBtn}`;
+    return `${top}<p class="empty">${words}</p>${settingsBtn}`;
   }
   if (!l.names?.length && !l.keywords?.length) {
-    return `${folderNote}<p class="empty">Add your names in LINE, or a few keywords, in Settings, so the app can find what is for you.</p>${settingsBtn}`;
+    return `${top}<p class="empty">Add your names in LINE, or a few keywords, in Settings, so the app can find what is for you.</p>${settingsBtn}`;
   }
   const items = l.items ?? [];
-  if (!items.length) return `${folderNote}<p class="line-head">Nothing for you in the last ${l.windowDays ?? 14} days · ${plural(l.readCount, 'chat')} read</p>`;
+  if (!items.length) return `${top}<p class="line-head">Nothing for you in the last ${l.windowDays ?? 14} days · ${plural(l.readCount, 'chat')} read</p>`;
   const from = new Set(items.map((i) => i.chat)).size;
   const head = `<p class="line-head">${plural(items.length, 'item')} for you · from ${plural(from, 'chat')} · newest ${esc(boardTime(items[0].ms, now))}</p>`;
   const shown = ui.all ? items : items.slice(0, LIMIT);
@@ -151,7 +157,7 @@ export function lineHtml(l, { privacy = true, now = Date.now(), ui = {}, project
     ? `<div class="form-actions"><button type="button" class="link-btn" data-line="${ui.all ? 'fewer' : 'more'}" data-key="line-more">${ui.all ? 'Show fewer' : `Show ${items.length - LIMIT} more`}</button></div>` : '';
   const hidden = privacy
     ? `<p class="hint">Turn off ${PRIVACY_SWITCH} to see the chats, senders and messages and to act on them. <button type="button" class="link-btn inline" data-line="privacy" data-key="line-privacy">Privacy settings</button></p>` : '';
-  return `${folderNote}${head}${list}${more}${hidden}`;
+  return `${top}${head}${list}${more}${hidden}`;
 }
 
 // The section's one status line: what the last button did, with Undo after
@@ -173,18 +179,21 @@ function entryForm({ id, label, input, value = null, error, hint = '', button = 
   const described = [error ? `${id}-err` : '', hint ? `${id}-hint` : ''].filter(Boolean).join(' ');
   const field = `<input id="${id}" ${input}${value != null ? ` value="${esc(value)}"` : ''}${error ? ' aria-invalid="true"' : ''}${described ? ` aria-describedby="${described}"` : ''}>`;
   const cancelBtn = cancel ? `
-        <button type="button" class="link-btn" data-line="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button>` : '';
+        <button type="button" class="link-btn" id="${id}-cancel" data-line="${cancel}" aria-label="${esc(cancelLabel || 'Cancel')}">Cancel</button>` : '';
   return `<form class="field-entry" id="${id}-form" novalidate>
       <label class="field-entry-label" for="${id}">${label}</label>
       <div class="add-row">${field}</div>
-      <div class="form-actions field-entry-actions"><button class="${filled ? 'button' : 'link-btn'}" type="submit">${button}</button>${cancelBtn}</div>${err}${hintP}</form>`;
+      <div class="form-actions field-entry-actions"><button class="${filled ? 'button' : 'link-btn'}" type="submit" id="${id}-save">${button}</button>${cancelBtn}</div>${err}${hintP}</form>`;
 }
 
 // A relay link typed but refused is kept as typed for the next try, but
 // not past privacy mode turning on or Settings closing: it names the
-// user's relay. Changes state in place and returns it.
+// user's relay. The part's notes and errors go with it, so none is left
+// over from before. Changes state in place and returns it.
 export function dropLineBotDrafts(state) {
-  return Object.assign(state, { linkDraft: null, linkError: '' });
+  return Object.assign(state, {
+    linkDraft: null, linkError: '', secretError: '', secretNote: '', note: '', scriptNote: '', scriptError: '', error: '', tickError: '', refreshError: '',
+  });
 }
 
 // A message from the main process as Settings shows it: errorHere names
@@ -201,20 +210,28 @@ const readOn = (m) => (NAMES.test(m) ? m : `${m.charAt(0).toLowerCase()}${m.slic
 // never comes back from the main process: once saved, only "Secret saved"
 // and Replace secret. state: { linkEditing, linkDraft, linkError,
 // secretEditing, secretError, secretNote, scriptNote, scriptError, note,
-// error }.
+// error (the switch's), tickError, refreshError }. Each error sits under
+// what caused it.
+const ERR = (text) => (text ? `<p class="form-error" role="alert">${esc(text)}</p>` : '');
+const STORAGE_NOTE = 'see the note under Collect from my LINE bot';
+
 function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   const on = Boolean(b?.on);
+  const noStore = on && b.secretStorage ? String(b.secretStorage) : '';
   const head = `<h5 class="line-part-h" id="line-bot-h">Your LINE bot</h5>
     <p class="hint">For groups only: a LINE Official Account bot you invite to a group passes on what is said there, after it joins, through a relay of yours (a Google Sheet and a script). It cannot see one-to-one chats.</p>
-    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}> <span>Collect from my LINE bot (goes online, to your relay only)</span></label>`;
-  const err = state.error ? `<p class="form-error" role="alert">${esc(state.error)}</p>` : '';
-  if (!on) return `${head}${err}`;
-  const noStore = b.secretStorage ? String(b.secretStorage) : '';
+    <label class="switch"><input type="checkbox" id="opt-line-bot"${on ? ' checked' : ''}${demo || !online ? ' disabled' : ''}${noStore ? ' aria-describedby="line-bot-storage"' : ''}> <span>Collect from my LINE bot (goes online, to my relay only)</span></label>${ERR(state.error)}`;
+  if (!on) {
+    // Off stops the app collecting, not LINE sending to the relay.
+    const stop = b?.link ? `
+    <p class="hint">Stopped using the bot? In the LINE Developers console, turn off Use webhook (or remove the bot from its groups) so LINE stops sending to your relay, and delete the relay’s Google Sheet: that also clears its version history, which can hold past messages.</p>` : '';
+    return `${head}${stop}`;
+  }
   const steps = `<ol class="field-steps">
       <li>Press Copy relay script. In a new Google Sheet, open Extensions → Apps Script, paste it, and run makeSecrets once.</li>
       <li>Deploy it as a web app (Execute as: Me; Who has access: Anyone), and copy the Web app link into Relay link.</li>
       <li>In the LINE Developers console, set the bot’s webhook link to that link followed by ?k= and WEBHOOK_KEY, turn on Use webhook and turn off redelivery. Verify shows “302 Found”: that is expected.</li>
-      <li>Copy READER_SECRET from the script’s Project Settings → Script properties into Secret.</li>
+      <li>${noStore ? `Keep READER_SECRET (in the script’s Project Settings → Script properties) until this computer can keep it (${STORAGE_NOTE}).` : 'Copy READER_SECRET from the script’s Project Settings → Script properties into Secret.'}</li>
     </ol>
     <div class="form-actions"><button type="button" class="link-btn" id="line-bot-copy-script" data-line="bot-copy-script">Copy relay script</button></div>${state.scriptNote ? `
     <p class="hint" role="status">${esc(state.scriptNote)}</p>` : ''}${state.scriptError ? `
@@ -231,8 +248,8 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   const secretOpen = !b.secretSaved || Boolean(state.secretEditing);
   let secret;
   // No protected storage: no Secret field, one line on what is so; the reason is said once, above.
-  if (noStore && b.secretSaved) secret = '<p class="field-set"><span>A secret is saved, but this computer can’t open it now (see the line above).</span></p>';
-  else if (noStore) secret = '<p class="field-set"><span>This computer can’t keep the secret (see the line above).</span></p>';
+  if (noStore && b.secretSaved) secret = `<p class="field-set"><span>A secret is saved, but this computer can’t open it now (${STORAGE_NOTE}).</span></p>`;
+  else if (noStore) secret = `<p class="field-set"><span>This computer can’t keep the secret (${STORAGE_NOTE}).</span></p>`;
   else if (secretOpen) {
     // The second field's Save is plain until the link is saved: one filled button at a time.
     secret = entryForm({
@@ -247,8 +264,11 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   const shown = { secretOpen: secretOpen && !noStore, linkOpen, noStorage: Boolean(noStore) };
   const ready = Boolean(b.link && b.secretSaved && !noStore);
   const open = linkOpen || (secretOpen && !noStore);
-  const status = b.busy ? 'Collecting…'
-    : [b.collectedAt ? `Collected ${boardTime(b.collectedAt, now)}` : 'Not collected yet', ready && b.nextAt ? `next ${boardTime(Math.max(b.nextAt, now), now)}` : ''].filter(Boolean).join(' · ');
+  // Not collecting: why, in this part's words (with no protected storage the note under the switch says it).
+  const stopped = !b.busy && !noStore && b.notCollectingHere ? `not collecting: ${b.notCollectingHere}.` : '';
+  const said = b.busy ? 'Collecting…'
+    : [b.collectedAt ? `Collected ${boardTime(b.collectedAt, now)}` : stopped ? '' : 'Not collected yet', ready && b.nextAt ? `next ${boardTime(Math.max(b.nextAt, now), now)}` : '', stopped].filter(Boolean).join(' · ');
+  const status = `${said.charAt(0).toUpperCase()}${said.slice(1)}`;
   const failed = b.error ? `<p class="form-error" role="status">Last collection failed${b.error.at ? ` (${esc(boardTime(b.error.at, now))})` : ''}: ${esc(readOn(inView(b.errorHere, b.error.message, shown)))}</p>` : '';
   const refresh = ready ? `<div class="form-actions"><button type="button" class="${open ? 'link-btn' : 'button'}" id="line-bot-refresh" data-line="bot-refresh">Refresh now</button></div>` : '';
   const groups = b.groups ?? [];
@@ -256,7 +276,7 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
   if (!groups.length) list = ready ? '<p class="hint">No group has sent anything yet. Invite the bot to a group: it sees what is sent there after it joins.</p>' : '';
   else if (privacy) {
     const ticked = groups.filter((g) => g.read).length;
-    list = `<p class="hint">${plural(groups.length, 'group')} found, ${ticked} read. Turn off ${PRIVACY_SWITCH} to choose groups. <button type="button" class="link-btn inline" data-line="privacy">Privacy settings</button></p>`;
+    list = `<p class="hint">${plural(groups.length, 'group')} found, ${ticked} read.</p>`;
   } else {
     list = `<fieldset class="line-chats"><legend>Groups your bot is in (only ticked groups keep their messages, from when they are ticked)</legend><ul>${groups.map((g, i) => `<li class="line-chat-row">
         <label class="check" for="line-bot-read-${i}"><input type="checkbox" id="line-bot-read-${i}" data-group="${esc(g.id)}"${g.read ? ' checked' : ''}> <span class="line-chat-name">${esc(g.name)}</span></label>
@@ -265,8 +285,8 @@ function botSettingsHtml(b, { privacy, state, now, demo, online }) {
     <p class="hint">The relay sends no names (no LINE_TOKEN in its Script properties), so groups and senders show as stand-ins.</p>` : ''}`;
   }
   const note = state.note ? `<p class="hint" role="status">${esc(state.note)}</p>` : '';
-  return `${head}${noStore ? `<p class="hint" id="line-bot-storage">${esc(noStore)}</p>` : ''}${steps}${link}${secret}${err}${refresh}
-    <p class="hint field-status" role="status">${esc(status)}</p>${failed}${note}${list}`;
+  return `${head}${noStore ? `<p class="hint" id="line-bot-storage">${esc(noStore)}</p>` : ''}${steps}${link}${secret}${refresh}${ERR(state.refreshError)}
+    <p class="hint field-status" role="status">${esc(status)}</p>${failed}${note}${list}${ERR(state.tickError)}`;
 }
 
 // Settings → Connections → LINE chats, under its switch: the exports part,
@@ -288,11 +308,11 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
   const exportsRead = chats.filter((c) => c.read && c.messages != null).length;
   let list;
   let words;
+  const wordsHead = '<h5 class="line-part-h" id="line-words-h">Your names and keywords</h5>';
   if (privacy) {
-    // One line for what privacy mode hides here.
-    const found = l.folder && chats.length ? `${plural(chats.length, 'chat')} found, ${exportsRead} read; ` : '';
-    list = `<p class="hint">${found}${plural(l.names?.length ?? 0, 'name')} and ${plural(l.keywords?.length ?? 0, 'keyword')} saved. Turn off ${PRIVACY_SWITCH} to choose chats or change them. <button type="button" class="link-btn inline" data-line="privacy">Privacy settings</button></p>`;
-    words = '';
+    // Counts only, each in its own part; one line says what is hidden.
+    list = l.folder && chats.length ? `<p class="hint">${plural(chats.length, 'chat')} found, ${exportsRead} read.</p>` : '';
+    words = `<p class="hint">${plural(l.names?.length ?? 0, 'name')} and ${plural(l.keywords?.length ?? 0, 'keyword')} saved.</p>`;
   } else {
     list = !l.folder ? '' : !chats.length ? `<p class="hint">${l.folderError ? esc(folderWords(l.folderError)) : 'No chats in the folder yet.'}</p>`
       : `<fieldset class="line-chats"><legend>Chats in the folder (only ticked chats are read)</legend><ul>${chats.map((c, i) => `<li class="line-chat-row">
@@ -304,14 +324,20 @@ export function lineSettingsHtml(l, { privacy = true, online = true, now = Date.
           <input id="line-names" autocomplete="off" spellcheck="false" value="${esc((l.names ?? []).join(', '))}"></label>
         <label class="field" for="line-keywords">Keywords (comma-separated, up to 30)
           <input id="line-keywords" autocomplete="off" spellcheck="false" value="${esc((l.keywords ?? []).join(', '))}"></label>
-        <div class="form-actions"><button type="submit" class="button" id="line-words-save">Save</button></div>
+        <div class="form-actions"><button type="submit" class="button" id="line-words-save">Save</button></div>${ERR(state.wordsError)}
       </form>`;
   }
-  const status = [l.scannedAt ? `Read ${boardTime(l.scannedAt, now)}` : 'Not read yet', `items from the last ${l.windowDays ?? 14} days`, state.note].filter(Boolean).join(' · ');
-  const exportsPart = `${exportsHead}${folder}${how}${err}${privacy ? '' : list}`;
-  // Names and keywords count for both parts; with privacy on, one line says what is hidden.
-  const shared = l.folder || l.bot?.on || l.demo ? `${privacy ? list : ''}${words}` : '';
-  return `${sample}${exportsPart}${botPart}${shared}<p class="hint" role="status">${esc(status)}</p>`;
+  // With no folder and no bot nothing has been read: no time to give.
+  const reading = Boolean(l.folder || l.bot?.on || l.demo);
+  const status = [reading ? (l.scannedAt ? `Read ${boardTime(l.scannedAt, now)}` : 'Not read yet') : '', reading ? `items from the last ${l.windowDays ?? 14} days` : '', state.note].filter(Boolean).join(' · ');
+  const statusP = status ? `<p class="hint" role="status">${esc(status)}</p>` : '';
+  const exportsPart = `${exportsHead}${folder}${how}${err}${list}`;
+  // Names and keywords count for both parts.
+  const groups = l.bot?.on && l.bot.groups?.length;
+  const hidden = privacy && reading
+    ? `<p class="hint">Turn off ${PRIVACY_SWITCH} to choose chats${groups ? ' and groups' : ''} and to change your names and keywords. <button type="button" class="link-btn inline" data-line="privacy" data-key="line-settings-privacy">Privacy settings</button></p>` : '';
+  const shared = reading ? `${wordsHead}${words}${hidden}` : '';
+  return `${sample}${exportsPart}${botPart}${shared}${statusP}`;
 }
 
 // The closed Connections group's words for LINE: on or off, and counts only.

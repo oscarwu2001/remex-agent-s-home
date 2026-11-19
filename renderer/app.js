@@ -2920,12 +2920,13 @@ setInterval(() => {
 const lineUi = { adding: null, todo: null, project: null, expanded: new Set(), all: false, error: '', errorKey: null };
 let lineStatus = null; // the section's one status line: { text, undo }
 // names/keywords: what is typed in Settings, kept across redraws until saved.
-const lineSettingsUi = { error: '', note: '', names: null, keywords: null };
+const lineSettingsUi = { error: '', wordsError: '', note: '', names: null, keywords: null };
 // The bot part's Settings: which field is open, a link refused (kept as
 // typed), the last replies, and the switch as pressed until the snapshot
 // agrees (pendingOn). The secret is never kept here.
 const lineBotUi = {
-  linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', pendingOn: null, pendingAt: 0, focusAfter: '',
+  linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '',
+  tickError: '', refreshError: '', pendingOn: null, pendingAt: 0, focusAfter: '',
 };
 const lineDemoMarks = new Set(); // the demo's added and dismissed items, until it is turned off
 // Items added or dismissed whose mark is saved but which the snapshot still
@@ -3050,10 +3051,10 @@ async function lineBotAction(act) {
       renderLineSettings();
       return;
     }
-    Object.assign(lineBotUi, { note: '', error: '' });
+    Object.assign(lineBotUi, { note: '', refreshError: '' });
     renderLineSettings();
     const res = await bridge.lineBotRefresh().catch(lineNoAnswer);
-    if (!res.ok && !res.collected) lineBotUi.error = res.error;
+    if (!res.ok && !res.collected) lineBotUi.refreshError = res.error;
     renderLineSettings();
     renderLine();
   }
@@ -3274,7 +3275,7 @@ $('line-settings').addEventListener('change', async (e) => {
     Object.assign(lineBotUi, { pendingOn: e.target.checked, pendingAt: Date.now() });
     const res = await bridge.lineBotSet({ on: e.target.checked }).catch(lineNoAnswer);
     Object.assign(lineBotUi, {
-      linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '',
+      linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', tickError: '', refreshError: '',
       error: res.ok ? '' : res.error, ...(res.ok ? {} : { pendingOn: null }), focusAfter: 'opt-line-bot',
     });
     renderLineSettings();
@@ -3290,7 +3291,7 @@ $('line-settings').addEventListener('change', async (e) => {
       return;
     }
     const res = await bridge.lineBotSet({ tick: { id: group.dataset.group, on: group.checked } }).catch(lineNoAnswer);
-    Object.assign(lineBotUi, { error: res.ok ? '' : `Not saved. ${res.error}`, note: res.note ?? '' });
+    Object.assign(lineBotUi, { tickError: res.ok ? '' : res.error, note: res.note ?? '' });
     if (!res.ok) group.checked = !group.checked;
     renderLineSettings();
     setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3305,7 +3306,7 @@ $('line-settings').addEventListener('change', async (e) => {
     return;
   }
   const res = await bridge.lineSet({ tick: { chat: tick.dataset.chat, on: tick.checked } }).catch(lineNoAnswer);
-  lineSettingsUi.error = res.ok ? '' : `Not saved. ${res.error}`;
+  lineSettingsUi.error = res.ok ? '' : res.error;
   if (!res.ok) tick.checked = !tick.checked;
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
@@ -3355,7 +3356,8 @@ $('line-settings').addEventListener('submit', async (e) => {
     return;
   }
   const res = await bridge.lineSet({ names: $('line-names').value, keywords: $('line-keywords').value }).catch(lineNoAnswer);
-  lineSettingsUi.error = res.ok ? '' : `Not saved. ${res.error}`;
+  // Said under the form's Save, in the main process's own words (they say it was not saved).
+  lineSettingsUi.wordsError = res.ok ? '' : res.error;
   // "Saved 10 names; the rest were left out." when there were more.
   if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: res.note ?? 'Names and keywords saved.' });
   renderLineSettings();
@@ -3367,9 +3369,9 @@ $('opt-line').addEventListener('change', async (e) => {
   const res = await bridge.lineSet({ enabled: e.target.checked }).catch(lineNoAnswer);
   lineSettingsUi.error = res.ok ? '' : res.error;
   if (!res.ok) lineSwitchedAt = 0;
-  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '' });
+  Object.assign(lineSettingsUi, { names: null, keywords: null, note: '', wordsError: '' });
   Object.assign(lineBotUi, {
-    linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', pendingOn: null,
+    linkEditing: false, linkDraft: null, linkError: '', secretEditing: false, secretError: '', secretNote: '', scriptNote: '', scriptError: '', note: '', error: '', tickError: '', refreshError: '', pendingOn: null,
   });
   Object.assign(lineUi, { adding: null, todo: null, project: null, error: '' });
   lineDrafts.clear();

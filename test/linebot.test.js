@@ -613,6 +613,8 @@ test('in Settings a relay message names the control in view; the board keeps the
   assert.match(w['10'], /, press Change link and paste it\.$/);
   assert.equal(B.settingsWords(null), null);
   assert.match(B.inSettings('No relay secret is saved. Save it in Settings → Connections → LINE chats.', { noStorage: true }), /once this computer can keep it/);
+  // With no protected storage, the note under the bot's switch says why; it is named, not pointed at.
+  assert.match(B.inSettings('No relay secret is saved. Save it in Settings → Connections → LINE chats.', { noStorage: true }), /\(see the note under Collect from my LINE bot\)\.$/);
 });
 
 // ---- the relay script ----------------------------------------------------------------------

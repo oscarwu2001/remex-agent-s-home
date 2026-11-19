@@ -96,7 +96,7 @@ const wrongShape = (code) => fail('reader', RELAY_WORDS.shape, code);
 // "in Settings → Connections → LINE chats", Settings names the control in
 // view there. shown: { secretOpen, linkOpen, noStorage }, as in field
 // feedback (fieldsurvey.js inSettings).
-const NO_STORE_YET = 'once this computer can keep it (see the line above)';
+const NO_STORE_YET = 'once this computer can keep it (see the note under Collect from my LINE bot)';
 const secretWords = (v, open, folded, none) => (v.noStorage ? none : v.secretOpen ? open : folded);
 const IN_SETTINGS = [
   [`In ${SETTINGS}, press Copy relay script,`, () => 'Press Copy relay script,'],
