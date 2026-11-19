@@ -582,10 +582,12 @@ stays the same. An older relay still works with the app, which says once
 that it can be updated. Version 3 keeps only the events the app reads,
 ignores names a caller makes up, removes old rows on LINE's calls too
 (their numbers wait in a **Gone** tab, so the app is told exactly which it
-never saved, and it sends nothing newer until they are counted), counts
-events it could not keep (*lost*) and events that came while it could not
-read its key, and counts calls with a wrong key, none, or a wrong secret
-in a **Tally** tab with its keys
+never saved; an old row not counted yet, because the relay moves 500 at a
+time or a move failed, holds back every newer one until it is counted, so
+each is counted as missed once), counts events it could not keep (*lost*)
+and events that reached it while it could not read its WEBHOOK_KEY, and
+counts calls with a wrong key, none, or a wrong secret in a **Tally** tab
+with its keys
 kept in the script's cache, so a flood of such calls cannot use up the
 script's daily quota for its properties. A key you edit
 by hand under Script properties takes up to 10 minutes to be used (run
@@ -602,15 +604,20 @@ file being there is **Collect from my LINE bot** being on. A change you make
 (a tick, the link) is kept only once it is written; if it cannot be, the
 app says "Not saved" with why, changes nothing, and you try again.
 Turning **Collect from my LINE bot** off, or LINE chats off, deletes that
-file and the saved secret, the ticks and the relay link with them. An
-older version's settings file (`line-bot.json`) is read once, its ticks and
-link moved into the store, then removed; if it cannot be read, nothing is
-deleted: the ticks are rebuilt from the groups with kept messages and the
-link from the saved secret or the last collection, and **Needs attention**
-says so. While the bot's file cannot be read (another program has it
-open), or is not in a shape the app reads, nothing is collected, changed or
-deleted, and **Needs attention** says so: the app reads it again every half
-minute, and turning the switch off and on starts afresh. Turning
+file and the saved secret, the ticks and the relay link with them, and
+says so; if the file cannot be removed (another program has it open),
+nothing is turned off or deleted and the switch says why: close that
+program and try again. The settings file of the version before
+(`line-bot.json`) is moved into the store, then removed; while it cannot be
+read just now the app waits for it, and if it is not settings, or the
+store's own ticks cannot be read, nothing is deleted: the ticks are rebuilt
+from the groups with kept messages and the link from the saved secret or
+the last collection, and **Needs attention** says so until you change them.
+While the bot's file cannot be read (another program has it open), or is
+not in a shape the app reads, nothing is collected, changed or deleted, and
+**Needs attention** says so: the app reads it again every half minute; a
+file not in a shape the app reads stays, with its messages, until you turn
+the switch off, and turning it on again starts afresh. Turning
 **Collect from my LINE bot** off does not stop LINE sending to your relay: in the LINE Developers console also turn
 **Use webhook** off, or remove the bot from its groups. Google Sheets keeps
 a version history that can hold past messages: delete the relay's sheet,
