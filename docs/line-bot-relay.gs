@@ -29,16 +29,24 @@
  *
  * Counts (shown by status, and to the app): MISSED events deleted after
  * KEEP_DAYS that the app never saved (their numbers wait in the Gone tab
- * until the app's next call says how far it saved), REFUSED calls with a
+ * until the app's next call says how far it saved; until they are counted
+ * the app is sent nothing past them), REFUSED calls with a
  * wrong key or none, DENIED calls with a wrong secret (someone other than
  * the app), NOT_JSON calls with the key that were not LINE's JSON, LOST
  * events that could not be kept (the script was busy, or the sheet
- * failed), and CAPPED, how often counts came so fast that they could not
- * all be kept (then the counts are at least what they say). Calls are
+ * failed), UNCHECKED events that came while WEBHOOK_KEY could not be read
+ * (at most UNCHECKED_MAX a call; some may not be LINE's), and CAPPED, how
+ * often counts came so fast that they could not all be kept (then the
+ * counts are at least what they say). Calls are
  * counted in the Tally tab, with no lock and, for the kinds anyone can
  * cause, no property read or write; when the sheet itself fails, LINE's own
  * counts wait as a few TALLY_ properties. The app's calls add them up, each
  * row once.
+ *
+ * The app sends its secret and the number of the last event it saved
+ * (upTo). After a new secret or link it sends 0 instead, with this relay's
+ * id and how far it saved: this script takes that as upTo only when the id
+ * is its own, so nothing the app saved is sent again or counted as missed.
  *
  * A flood of calls can still delay or drop LINE's events: Apps Script runs
  * at most 30 calls of a script at once. If that happens, make a new
@@ -60,15 +68,15 @@ const FOLD = 5000;
 const TALLY_MAX = 100000;
 const GONE = 'Gone';
 const VERSION = 3;
-const SPARE_MAX = 50; // TALLY_ properties waiting at most (then one TALLY_OVER)
+const SPARE_MAX = 50; // TALLY_ properties waiting at most (then one TALLY_OVER_ marker at a time)
 const UNCHECKED_MAX = 100; // events counted from one call whose key could not be checked
 const KEY_CACHE_S = 600;
 const TYPES = ['message', 'unsend', 'memberJoined', 'memberLeft', 'join', 'leave'];
 // Tally rows -> the counts they add to. 'unchecked': LINE-looking events
 // that came when the key could not be read at all.
-const TALLIED = { refused: 'REFUSED', denied: 'DENIED', notJson: 'NOT_JSON', lost: 'LOST', unchecked: 'LOST', capped: 'CAPPED' };
+const TALLIED = { refused: 'REFUSED', denied: 'DENIED', notJson: 'NOT_JSON', lost: 'LOST', unchecked: 'UNCHECKED', capped: 'CAPPED' };
 // Kinds anyone can cause: capped, and never written to a property.
-const OUTSIDE = { refused: true, denied: true, unchecked: true };
+const OUTSIDE = { refused: true, denied: true, unchecked: true, capped: true };
 
 function doPost(e) {
   const props = PropertiesService.getScriptProperties();
@@ -87,7 +95,9 @@ function fromLine_(e, props) {
     key = secret_('WEBHOOK_KEY', props);
   } catch (err) {
     console.error('Webhook key not read: ' + err); // shown under Executions
-    tally_('unchecked', Math.min(UNCHECKED_MAX, eventsIn_(e)));
+    const n = eventsIn_(e);
+    tally_('unchecked', Math.min(UNCHECKED_MAX, n));
+    if (n > UNCHECKED_MAX) tally_('capped', 1); // this call's count is a floor
     return reply_({ ok: false, error: 'settings' });
   }
   if (key.length < 32 || !same_(String(e.parameter.k), key)) {
@@ -209,7 +219,7 @@ function toApp_(e, props) {
     tally_('denied', 1);
     return reply_({ ok: false, error: 'not allowed' });
   }
-  const upTo = Math.max(0, Math.floor(Number(body.upTo) || 0));
+  let upTo = Math.max(0, Math.floor(Number(body.upTo) || 0));
   let lock = null;
   try {
     lock = LockService.getScriptLock();
@@ -227,6 +237,9 @@ function toApp_(e, props) {
     }
     const relay = relayId_(props);
     const next = Number(props.getProperty('NEXT_SEQ') || '1');
+    // How far the app saved, said beside a cursor of 0: this relay's own, so it stands.
+    const saved = Math.floor(Number(body.saved) || 0);
+    if (body.relay === relay && saved > upTo && saved < next) upTo = saved;
     if (upTo >= next) return reply_({ ok: false, error: 'cursor ahead', relay: relay });
     const sheet = inbox_();
     // Saved by the app: what is up to upTo.
@@ -238,15 +251,23 @@ function toApp_(e, props) {
     rows = rows.slice(drop);
     // Then rows past KEEP_DAYS, and the count of those the app never saved.
     try {
-      const aged = ageOut_(sheet);
-      rows = rows.slice(aged);
+      ageOut_(sheet);
     } catch (err) {
       console.error('Old rows not removed: ' + err); // tried again at the next call
     }
+    // A row past KEEP_DAYS is never sent, even one whose removal failed: its
+    // number is counted from the Gone tab, now or once it goes.
+    const cutoff = Date.now() - KEEP_DAYS * 86400000;
+    let old = 0;
+    while (old < rows.length && new Date(rows[old][1]).getTime() < cutoff) old++;
+    rows = rows.slice(old);
     try {
       countGone_(props, upTo);
     } catch (err) {
-      console.error('Missed events not counted yet: ' + err); // their numbers wait in the Gone tab
+      // Their numbers wait in the Gone tab. Nothing newer is sent until they
+      // are counted: past them, the app's cursor would hide them.
+      console.error('Missed events not counted yet: ' + err);
+      return reply_({ ok: false, error: 'not counted' });
     }
     const rest = rows;
     const events = rest.slice(0, BATCH).map((r) => {
@@ -270,6 +291,7 @@ function toApp_(e, props) {
       notJson: count('NOT_JSON'),
       lost: count('LOST'),
       capped: count('CAPPED'),
+      unchecked: count('UNCHECKED'),
     });
   } finally {
     lock.releaseLock();
@@ -306,6 +328,7 @@ function status() {
     '. Calls with a wrong secret: ' + count('DENIED') + (count('CAPPED') ? ' or more' : '') +
     '. Unreadable LINE calls: ' + count('NOT_JSON') +
     '. Events not kept (busy or a sheet error): ' + count('LOST') +
+    '. Events while the webhook key could not be read: ' + count('UNCHECKED') + (count('CAPPED') ? ' or more' : '') +
     '. Counts not added up yet: ' + waiting +
     '. Names: ' + (all.LINE_TOKEN ? 'token set' : 'no token') + '.'
   );
@@ -419,8 +442,9 @@ function sheetNamed_(name) {
 // added, so the spreadsheet cannot fill up; a 'capped' row marks it once.
 // When the sheet fails, LINE's own counts wait as TALLY_<what>_<id>
 // properties (unique names: no count is lost to another call), at most
-// SPARE_MAX, then one TALLY_OVER; the kinds anyone can cause never touch
-// the properties.
+// SPARE_MAX, then one TALLY_OVER_<id> marker at a time (its own name, so
+// each is counted once); the kinds anyone can cause never touch the
+// properties.
 function tally_(what, n) {
   if (!n) return;
   try {
@@ -440,7 +464,7 @@ function tally_(what, n) {
     const p = PropertiesService.getScriptProperties();
     const waiting = p.getKeys().filter((k) => k.indexOf('TALLY_') === 0);
     if (waiting.length >= SPARE_MAX) {
-      if (waiting.indexOf('TALLY_OVER') < 0) p.setProperty('TALLY_OVER', '1'); // counted as capped
+      if (!waiting.some((k) => k.indexOf('TALLY_OVER_') === 0)) p.setProperty('TALLY_OVER_' + Utilities.getUuid(), '1'); // counted as capped
       return;
     }
     p.setProperty('TALLY_' + what + '_' + Utilities.getUuid(), String(n));
@@ -496,7 +520,7 @@ function fold_(props) {
     if (name) sums[name] = (sums[name] || 0) + (Number(n) || 0);
   };
   for (const k of fresh) {
-    if (k === 'TALLY_OVER') add('capped', 1);
+    if (k.indexOf('TALLY_OVER_') === 0) add('capped', 1);
     else add(k.split('_')[1], all[k]);
   }
   for (const r of rows) add(String(r[0]), r[1]);

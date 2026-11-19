@@ -343,8 +343,8 @@ test('the reply keeps the shape the app has always read, with lost added; a repl
   const env = appsScript();
   env.line({ events: [text('a')] });
   const reply = env.app(0);
-  assert.deepEqual(Object.keys(reply).sort(), ['capped', 'denied', 'events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay', 'version']);
-  const { lost, capped, denied, version, ...v1 } = reply;
+  assert.deepEqual(Object.keys(reply).sort(), ['capped', 'denied', 'events', 'lost', 'missed', 'more', 'notJson', 'ok', 'refused', 'relay', 'unchecked', 'version']);
+  const { lost, capped, denied, unchecked, version, ...v1 } = reply;
   assert.equal(lost, 0);
   assert.equal(capped, 0);
   assert.equal(B.relayReply(v1).counts.lost, 0);
@@ -563,7 +563,7 @@ test('counts that wait as properties are bounded, and the overflow says the coun
   assert.equal(reply.capped, 1);
 });
 
-test('LINE-looking events counted while the key could not be read are capped per call', () => {
+test('LINE-looking events counted while the key could not be read are their own count, capped per call, and the cap is marked', () => {
   const env = appsScript();
   env.cache.clear();
   env.hooks.getProperty = (k) => {
@@ -572,7 +572,10 @@ test('LINE-looking events counted while the key could not be read are capped per
   };
   assert.deepEqual(env.line({ events: Array.from({ length: 500 }, (_, i) => text(`u${i}`)) }), { ok: false, error: 'settings' });
   delete env.hooks.getProperty;
-  assert.equal(env.app(0).lost, 100);
+  const r = env.app(0);
+  assert.equal(r.unchecked, 100);
+  assert.equal(r.lost, 0);
+  assert.equal(r.capped, 1);
 });
 
 test('a reader secret the relay cannot read is said as its settings, not as busy', () => {
@@ -583,4 +586,90 @@ test('a reader secret the relay cannot read is said as its settings, not as busy
     return false;
   };
   assert.deepEqual(env.app(0), { ok: false, error: 'settings' });
+});
+
+// ---- review round 4 ------------------------------------------------------------------------
+
+const ageRows = (env, days, n = Infinity) => {
+  let i = 0;
+  for (const row of env.inbox().cells.slice(1)) if (row && row[0] !== '' && i++ < n) row[1] = new Date(Date.now() - days * DAY).toISOString();
+};
+const cursorOf = (reply, upTo) => Math.max(upTo, ...(reply.events ?? []).map((e) => e.seq));
+
+test('when counting the Gone rows fails, nothing newer is sent, and the next call with the app’s real cursor counts them', () => {
+  for (const failure of ['properties write', 'Gone tab read']) {
+    const env = appsScript();
+    env.line({ events: [text('a'), text('b')] }); // 1, 2: the app never gets them
+    ageRows(env, 15);
+    env.line({ events: [text('c')] }); // LINE's call moves 1 and 2 to Gone; 3 waits
+    if (failure === 'properties write') {
+      env.hooks.setProperties = (o) => {
+        if ('GONE_TO' in o) throw new Error('Service invoked too many times: properties');
+        return false;
+      };
+    } else env.hooks.read = (sheet) => (sheet.name === 'Gone' ? (() => { throw new Error('Service Spreadsheets timed out'); })() : false);
+    const first = env.app(0);
+    delete env.hooks.setProperties;
+    delete env.hooks.read;
+    assert.deepEqual(first, { ok: false, error: 'not counted' }, failure);
+    const cursor = cursorOf(first, 0);
+    const second = env.app(cursor);
+    assert.equal(second.missed, 2, failure);
+    assert.deepEqual(second.events.map((e) => JSON.parse(JSON.stringify(e.event)).message.text), ['c'], failure);
+    assert.equal(env.app(cursorOf(second, cursor)).missed, 2, failure);
+  }
+});
+
+test('rows moved to Gone whose removal from the Inbox failed are neither sent nor counted twice', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b'), text('c')] });
+  ageRows(env, 15, 2);
+  let failOnce = true;
+  env.hooks.remove = (sheet) => {
+    if (sheet.name === 'Inbox' && failOnce) {
+      failOnce = false;
+      throw new Error('Service Spreadsheets failed');
+    }
+    return false;
+  };
+  const first = env.app(0);
+  delete env.hooks.remove;
+  assert.deepEqual(first.events.map((e) => e.seq), [3]);
+  assert.equal(first.missed, 2);
+  const second = env.app(cursorOf(first, 0));
+  assert.equal(second.missed, 2);
+  assert.deepEqual(second.events, []);
+});
+
+test('two overflows of the spare counts between the app’s calls are counted as two', () => {
+  const env = appsScript();
+  const flood = (n) => {
+    env.sheetsFail = true;
+    env.lockBusy = true;
+    for (let i = 0; i < n; i += 1) env.line({ events: [text(`e${i}`)] });
+    env.sheetsFail = false;
+    env.lockBusy = false;
+  };
+  flood(60);
+  assert.equal(env.app(0).capped, 1);
+  flood(60);
+  assert.equal(env.app(0).capped, 2);
+});
+
+test('after a new secret (cursor 0), the app’s saved cursor beside this relay’s id stands: what it saved is not counted as missed', () => {
+  const env = appsScript();
+  env.line({ events: [text('a'), text('b')] });
+  const r1 = env.app(0); // the app saves 1 and 2, then stops before its next call
+  ageRows(env, 15);
+  env.line({ events: [text('c')] }); // 1 and 2 age out to Gone
+  const claim = (relay) => JSON.parse(env.context.doPost({ parameter: {}, postData: { contents: JSON.stringify({ secret: env.secret, upTo: 0, relay, saved: 2 }) } }).text);
+  const other = appsScript();
+  other.line({ events: [text('x'), text('y')] });
+  ageRows(other, 15);
+  other.line({ events: [text('z')] });
+  const stranger = JSON.parse(other.context.doPost({ parameter: {}, postData: { contents: JSON.stringify({ secret: other.secret, upTo: 0, relay: r1.relay, saved: 2 }) } }).text);
+  assert.equal(stranger.missed, 2, 'another relay’s id is ignored: its own unsaved rows are missed');
+  const r2 = claim(r1.relay);
+  assert.equal(r2.missed, 0);
+  assert.deepEqual(r2.events.map((e) => e.seq), [3]);
 });
