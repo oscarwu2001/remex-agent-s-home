@@ -1606,7 +1606,7 @@ app.whenReady().then(() => {
       lineItems = hits
         .filter((h) => !line.marks[h.key])
         .sort((a, b) => b.ms - a.ms)
-        .map((h) => ({ ...h, draft: lineChat.draftTodo(h), prompt: lineChat.promptDraft(h) }));
+        .map((h) => ({ ...h, draft: lineChat.draftTodo(h, uiLanguage), prompt: lineChat.promptDraft(h, uiLanguage) }));
       lineScanError = null;
       lineScannedAt = Date.now();
     } catch (err) {
@@ -2282,6 +2282,8 @@ app.whenReady().then(() => {
   ipcMain.handle('home:language', (_event, id, { reload = false } = {}) => {
     if (!Object.hasOwn(i18n.TABLES, id)) return { ok: false, error: en('said.main.unknownLanguage') };
     uiLanguage = id;
+    // Send to agent's prompt and a sticker's to-do are written in the window's language.
+    lineItems = lineItems.map((h) => ({ ...h, draft: lineChat.draftTodo(h, id), prompt: lineChat.promptDraft(h, id) }));
     if (reload) for (const w of [win, mini]) if (w && !w.isDestroyed()) w.webContents.reload();
     return { ok: true };
   });
