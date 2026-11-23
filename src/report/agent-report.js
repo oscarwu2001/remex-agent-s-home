@@ -19,6 +19,16 @@
 // and the first line of a helper's prompt appear only with --details, the
 // way privacy mode works in the app.
 
+// Started by the app: a failure before the answer (a module that will not
+// load) is answered too, as the error's name, code and first line; the app
+// takes the paths out before it logs it.
+if (process.parentPort) {
+  process.on('uncaughtException', (err) => {
+    process.parentPort.postMessage({ ok: false, failure: { name: err?.name, code: err?.code, message: String(err?.message ?? err).split('\n')[0] } });
+    setTimeout(() => process.exit(1), 50);
+  });
+}
+
 const fs = require('fs');
 const path = require('path');
 const { collect, rollUp, summarise, dayKey, totalTokens } = require('../core/metrics');
@@ -28,9 +38,14 @@ const { readLedger } = require('../core/ledger');
 const { execFileSync } = require('child_process');
 const { defaultRoots } = require('../core/watcher');
 const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../core/rooms');
-const { translate, trHtmlIn, raw, sayIn, en, languageInfo, LANGUAGES, DEFAULT_LANGUAGE } = require('../core/i18n');
+const { translate, trHtmlIn, raw, sayIn, en, languageInfo, onMissing, LANGUAGES, DEFAULT_LANGUAGE } = require('../core/i18n');
 const { placeWords } = require('../../renderer/places.js');
 const os = require('os');
+
+// Words this run missed (a key, or a sentence's mark): sent back with the
+// answer, so the app logs them like its own.
+const missedWords = [];
+onMissing((l, key) => { missedWords.push({ lang: l, key }); });
 
 // ---- arguments ---------------------------------------------------------------
 
@@ -942,7 +957,7 @@ function run(argv) {
     runs: all.runs, successRate: all.successRate, medianMs: all.medianMs, days: opt.days,
     notes: data.stats.malformedLines + data.stats.unlinkedHelpers + data.problems.length,
   };
-  const result = { ok: true, html: htmlFile, dir: opt.out, summary, agents };
+  const result = { ok: true, html: htmlFile, dir: opt.out, summary, agents, missingWords: missedWords };
   if (opt.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
@@ -969,7 +984,7 @@ if (process.parentPort) {
   try {
     reply = run(process.argv.slice(2).filter((a) => a !== '--json'));
   } catch (err) {
-    reply = { ok: false, error: err.message };
+    reply = { ok: false, error: err.message, missingWords: missedWords };
   }
   process.parentPort.postMessage(reply);
   setTimeout(() => process.exit(0), 50);

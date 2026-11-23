@@ -37,10 +37,9 @@ function readPrefs() {
   return resolveLanguage({ saved: saved.language, unreadable, system: navigator.languages }).id;
 }
 const shownLanguage = setLanguage(readPrefs());
-onMissing((code, key) => bridge.missingWords?.({ lang: code, key })?.catch(() => {
-  // An older main process without the handler: the word has already fallen
-  // back to English, which is all a missing word can do here.
-}));
+// The main process logs each miss once; one it did not hear (it failed, or
+// it is an older one without the handler) is told again at the next miss.
+onMissing((code, key) => bridge.missingWords?.({ lang: code, key }));
 localise(document);
 addEventListener('storage', (e) => {
   if (e.key === 'agents-home-prefs') {

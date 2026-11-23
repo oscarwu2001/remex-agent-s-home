@@ -81,10 +81,9 @@ try {
 const startLanguage = resolveLanguage({ saved: saved.language, unreadable: prefsUnreadable, system: navigator.languages });
 setLanguage(startLanguage.id);
 if (startLanguage.from !== 'saved') delete prefs.language; // keeps following Windows until one is picked
-onMissing((code, key) => bridge.missingWords?.({ lang: code, key })?.catch(() => {
-  // An older main process without the handler: the word has already fallen
-  // back to English, which is all a missing word can do here.
-}));
+// The main process logs each miss once; one it did not hear (it failed, or
+// it is an older one without the handler) is told again at the next miss.
+onMissing((code, key) => bridge.missingWords?.({ lang: code, key }));
 // The main process draws the system's own dialogs (Choose a folder) in it.
 bridge.useLanguage?.(startLanguage.id)?.catch(() => {
   // An older main process: its dialogs stay English, as every word falls back.

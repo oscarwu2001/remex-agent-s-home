@@ -191,6 +191,36 @@ function sourceOf(file) {
   return { source: 'code', computer: HERE };
 }
 
+// A window that cannot load its own files (a word table, a module) shows
+// empty labels and nothing else: its load failures and script errors go
+// to the system log, once each, as the file's name, the line and the
+// message's first words without paths.
+const windowErrors = new Set();
+function watchWindow(w, name) {
+  const note = (fields) => {
+    const k = JSON.stringify(fields);
+    if (windowErrors.has(k) || windowErrors.size >= 50) return;
+    windowErrors.add(k);
+    syslog?.write('errors', 'window-error', { window: name, ...fields });
+  };
+  const noPaths = (s) => String(s ?? '').split('\n')[0].replace(/(?:file:\/\/\/?)?(?:[A-Za-z]:)?(?:[\\/][^\\/\s'"`]+)+[\\/]?/g, '…').slice(0, 120);
+  w.webContents.on('did-fail-load', (_e, code, desc, url) => note({ load: code, what: desc, file: path.basename(String(url).split('?')[0]) }));
+  w.webContents.on('console-message', (e) => {
+    if (e.level !== 'error') return;
+    note({ file: path.basename(String(e.sourceId ?? '').split('?')[0]), line: e.lineNumber, message: noPaths(e.message) });
+  });
+  // A module that is not there fails without a console line: the window's
+  // words are checked a little after each load (localise marks them).
+  w.webContents.on('did-finish-load', () => setTimeout(() => {
+    if (w.isDestroyed()) return;
+    w.webContents.executeJavaScript("document.documentElement.dataset.words || ''", true)
+      .then((words) => { if (!words) note({ words: 'not loaded' }); })
+      .catch(() => {
+        // The window closed or reloaded before the check; the next load checks again.
+      });
+  }, 8000));
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -212,6 +242,7 @@ function createWindow() {
 
   // Windows shutting down or logging off: no quit events follow (stopLog).
   win.on('session-end', () => stopLog());
+  watchWindow(win, 'main');
 
   // Local only: never navigate away, open external links in the browser.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -246,6 +277,10 @@ process.on('unhandledRejection', (err) => crashed('unhandled', err));
 
 app.whenReady().then(() => {
   syslog = new SystemLog(path.join(app.getPath('userData'), 'logs'));
+  // A word a table lacks shows in English; the log hears of it once (misses
+  // from before this line wait for it in i18n).
+  const tellMissing = i18n.missingWordsLog(syslog);
+  i18n.onMissing(tellMissing);
   // When the last run last wrote activity.log, taken before this run writes to it.
   const lastRunWrote = syslog.writtenAt('activity');
   for (const p of startupProblems) syslog.write('errors', 'problem', { what: p.label, detail: p.detail });
@@ -365,6 +400,26 @@ app.whenReady().then(() => {
   const reportsDir = path.join(app.getPath('userData'), 'reports');
   let lastReport;
   let reportWin;
+  // Why the report's process stopped, from what Node printed before it
+  // exited: the error's name and code and its message's first line (its
+  // last line is only Node's version).
+  const failureIn = (stderr) => {
+    const m = /^((?:[A-Z]\w*)?(?:Error|Exception))(?: \[([A-Z][A-Z0-9_]*)\])?: ([^\r\n]*)$/m.exec(stderr);
+    return m ? { name: m[1], code: m[2] ?? /\bcode: '([A-Z][A-Z0-9_]*)'/.exec(stderr)?.[1], message: m[3] } : null;
+  };
+  // Logged without paths (a module's path names the user's folders); the
+  // window hears the name and code.
+  const reportFailure = (f, exit) => {
+    if (!f) {
+      syslog.write('errors', 'report-failed', { exit });
+      return '';
+    }
+    const name = String(f?.name ?? 'Error').replace(/[^\w]/g, '').slice(0, 40);
+    const code = f?.code ? String(f.code).replace(/[^\w]/g, '').slice(0, 40) : undefined;
+    const message = f?.message ? String(f.message).replace(/(?:[A-Za-z]:)?(?:[\\/][^\\/\s'"`]+)+[\\/]?/g, '…').slice(0, 160) : undefined;
+    syslog.write('errors', 'report-failed', { exit, name, code, message });
+    return `: ${name}${code ? ` (${code})` : ''}`;
+  };
   // `details`: privacy mode is off, so Agent-call descriptions may show.
   ipcMain.handle('home:build-report', (_event, days, details) => new Promise((resolve) => {
     const n = Number(days);
@@ -381,17 +436,20 @@ app.whenReady().then(() => {
     child.stdout.on('data', () => {}); // the CLI summary; nothing to show here
     child.on('message', (result) => {
       answered = true;
+      for (const m of Array.isArray(result?.missingWords) ? result.missingWords : []) tellMissing(String(m?.lang), String(m?.key));
       if (result && result.ok) {
         lastReport = result;
         openReport(result.html);
         resolve({ ok: true, summary: result.summary, builtAt: Date.now() });
+      } else if (result?.failure) {
+        resolve({ ok: false, error: en('said.main.reportExit', { code: 1, why: reportFailure(result.failure, 1) }) });
       } else {
         resolve({ ok: false, error: (result && result.error) || en('said.main.reportFailed') });
       }
     });
     child.on('exit', (code) => {
       if (answered) return;
-      resolve({ ok: false, error: en('said.main.reportExit', { code, why: err ? `: ${err.trim().split('\n').pop()}` : '' }) });
+      resolve({ ok: false, error: en('said.main.reportExit', { code, why: reportFailure(failureIn(err), code) }) });
     });
   }));
 
@@ -2183,6 +2241,7 @@ app.whenReady().then(() => {
     mini.setAlwaysOnTop(true, 'floating');
     mini.on('session-end', () => stopLog()); // Windows shutting down or logging off
     mini.webContents.on('will-navigate', (e) => e.preventDefault());
+    watchWindow(mini, 'mini');
     mini.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     mini.on('close', () => {
       try {
@@ -2226,9 +2285,6 @@ app.whenReady().then(() => {
     if (reload) for (const w of [win, mini]) if (w && !w.isDestroyed()) w.webContents.reload();
     return { ok: true };
   });
-  // A word a table lacks shows in English; the log hears of it once.
-  const tellMissing = i18n.missingWordsLog(syslog);
-  i18n.onMissing(tellMissing);
   ipcMain.handle('home:missing-words', (_event, { lang, key } = {}) => ({ ok: tellMissing(String(lang), String(key)) }));
 
   createWindow();

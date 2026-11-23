@@ -10,12 +10,20 @@ const i18n = require('../../renderer/i18n.js');
 
 // The system log's one line per word a table lacks, whichever window or
 // module asked and however often (rule 5: said, never silent; once, so a
-// redraw cannot fill the log). Returns whether it wrote.
+// redraw cannot fill the log), and one line when it stops at `limit`. A key
+// is a table's key or a sentence's mark (sentenceMark), never its words.
+// Returns whether it wrote.
 function missingWordsLog(syslog, limit = 200) {
   const seen = new Set();
+  let full = false;
   return (lang, key) => {
     const k = `${lang}|${key}`;
-    if (seen.has(k) || seen.size >= limit) return false;
+    if (seen.has(k)) return false;
+    if (seen.size >= limit) {
+      if (!full) syslog.write('errors', 'missing-words-cap', { limit });
+      full = true;
+      return false;
+    }
     seen.add(k);
     syslog.write('errors', 'missing-words', { lang: String(lang).slice(0, 12), key: String(key).slice(0, 120) });
     return true;
@@ -30,6 +38,7 @@ module.exports = {
   en: i18n.english,
   sayIn: i18n.sayIn,
   unsay: i18n.unsay,
+  sentenceMark: i18n.sentenceMark,
   trFor: i18n.trFor,
   trHtmlIn: i18n.trHtmlIn,
   raw: i18n.raw,

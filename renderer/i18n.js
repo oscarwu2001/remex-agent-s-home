@@ -20,8 +20,12 @@ export const TABLES = { en, 'zh-TW': zhTW };
 export const DEFAULT_LANGUAGE = 'en';
 
 let current = DEFAULT_LANGUAGE;
-let tell = () => {};
+let tell = null;
 const told = new Set();
+// Misses before anyone listens (the main process sets its log up after its
+// first words), kept for the listener; a bounded few.
+const waiting = [];
+const MOST_WAITING = 200;
 
 export function setLanguage(id) {
   current = Object.hasOwn(TABLES, id) ? id : DEFAULT_LANGUAGE;
@@ -32,20 +36,31 @@ export const languageInfo = (id = current) => LANGUAGES.find((l) => l.id === id)
 
 // fn(lang, key) hears of each word a table lacks, once per language and key,
 // so it can go to the system log (rule 5). The word falls back to English.
+// When fn answers with a promise that fails (the main process did not hear
+// it), the word is told again the next time it is missed.
 export function onMissing(fn) {
-  tell = typeof fn === 'function' ? fn : () => {};
+  tell = typeof fn === 'function' ? fn : null;
+  if (tell) for (const [lang, key] of waiting.splice(0)) send(lang, key);
+}
+
+function send(lang, key) {
+  const k = `${lang}\u0000${key}`;
+  try {
+    const sent = tell(lang, key);
+    if (typeof sent?.then === 'function') sent.then(null, () => told.delete(k));
+  } catch {
+    // The log's own failure must not stop a redraw: the word has already
+    // fallen back. It is told again the next time it is missed.
+    told.delete(k);
+  }
 }
 
 function missing(lang, key) {
   const k = `${lang}\u0000${key}`;
   if (told.has(k)) return;
   told.add(k);
-  try {
-    tell(lang, key);
-  } catch {
-    // The log's own failure must not stop a redraw; the word has already
-    // fallen back, and the log keeps its own record of failed writes.
-  }
+  if (tell) send(lang, key);
+  else if (waiting.length < MOST_WAITING) waiting.push([lang, key]);
 }
 
 function entry(lang, key) {
@@ -282,7 +297,11 @@ export const trHtml = (key, params) => trHtmlIn(current, key, params);
 // (aria-label, placeholder) that attribute; <html lang> follows the language.
 const ATTRS = ['title', 'aria-label', 'placeholder'];
 export function localise(root = document) {
-  if (root.documentElement) root.documentElement.lang = languageInfo().html;
+  if (root.documentElement) {
+    root.documentElement.lang = languageInfo().html;
+    // The main process checks this after a load: no words means a table or module failed to load.
+    root.documentElement.dataset.words = current;
+  }
   for (const el of root.querySelectorAll('[data-i18n]')) {
     el.textContent = tr(el.dataset.i18n, el.dataset.i18nN === undefined ? {} : { n: Number(el.dataset.i18nN) });
   }

@@ -229,8 +229,44 @@ test('a whole sentence is never read as a part with fewer than four letters of i
     assert.equal(i18n.unsay('Words from elsewhere (and a reason)'), null, 'not "{words} ({where})"');
     assert.equal(i18n.unsay('Words from elsewhere (and a reason)', { inside: true }), null, 'nor inside one, when its parts are not sentences the tables built');
     assert.equal(i18n.sayIn('zh-TW', 'Words from elsewhere (and a reason)'), 'Words from elsewhere (and a reason)');
-    assert.deepEqual(told, [i18n.sentenceMark('Words from elsewhere (and a reason)')]);
+    const mark = i18n.sentenceMark('Words from elsewhere (and a reason)');
+    assert.deepEqual(told.filter((k) => k === mark), [mark], 'told once (misses from before a listener was set are told to it too)');
   } finally {
     i18n.onMissing(null);
   }
+});
+
+test('the missing-word log hears a part no entry built by its mark, misses from before it listened, a word it failed to hear again, and its cap once', async () => {
+  const i18n = await load();
+  const core = require('../src/core/i18n');
+  i18n.onMissing(null);
+  const early = 'Early words that no entry here built';
+  i18n.sayIn('zh-TW', early);
+  const told = [];
+  i18n.onMissing((lang, key) => { told.push(key); });
+  try {
+    assert.ok(told.includes(i18n.sentenceMark(early)), 'a miss from before the listener is told to it');
+    const part = 'Your local changes would be overwritten by merge';
+    i18n.sayIn('zh-TW', core.en('said.main.updateFailed', { why: part }));
+    assert.ok(told.includes(i18n.sentenceMark(part)), 'an English part inside a Chinese sentence is told');
+    assert.ok(told.every((k) => !/local changes|Early words/.test(k)), 'by its mark, never its words');
+    const sent = [];
+    let fail = true;
+    i18n.onMissing((lang, key) => { sent.push(key); return fail ? Promise.reject(new Error('not heard')) : Promise.resolve({ ok: true }); });
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    i18n.translate('zh-TW', 'test.absent.retry');
+    await tick();
+    fail = false;
+    i18n.translate('zh-TW', 'test.absent.retry');
+    await tick();
+    i18n.translate('zh-TW', 'test.absent.retry');
+    await tick();
+    assert.deepEqual(sent.filter((k) => k === 'test.absent.retry').length, 2, 'told again after a failed tell, then once');
+  } finally {
+    i18n.onMissing(null);
+  }
+  const lines = [];
+  const log = core.missingWordsLog({ write: (_file, event) => lines.push(event) }, 2);
+  for (const key of ['a', 'b', 'c', 'd']) log('zh-TW', key);
+  assert.deepEqual(lines, ['missing-words', 'missing-words', 'missing-words-cap'], 'the cap is said in one line');
 });
