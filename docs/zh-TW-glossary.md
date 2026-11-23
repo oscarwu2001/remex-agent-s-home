@@ -114,3 +114,8 @@ the git words **git**, **clone** and **worktree**, Claude Code's tool names (`Re
 | turn limit (`maxTurns`) | 回合上限 |
 | plugin | 外掛 |
 | prompt (what a helper was asked) | 提示詞 |
+| plan (Pro, Max 5×, …; the names stay as Anthropic writes them) | 方案 |
+| limit (a plan's 5-hour or weekly limit) | 上限 |
+| limit hit | 碰到上限 |
+| estimate | 估計 |
+| usage (Claude Code use; the Claude app's Settings → Usage) | 用量 |
