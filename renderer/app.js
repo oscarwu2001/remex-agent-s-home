@@ -2784,12 +2784,12 @@ async function fieldAction(act) {
   } else if (act === 'refresh') {
     fieldUi.error = '';
     if (snapshot.demo || !bridge.fieldRefresh) {
-      fieldUi.note = snapshot.demo ? 'The demo reads no sheet.' : 'The preview cannot read the sheet.';
+      fieldUi.note = snapshot.demo ? english('said.ui.demoNoSheet') : english('said.ui.previewNoSheet');
     } else {
       fieldUi.note = '';
       // The outcome arrives with the snapshot (updating, then the rows or
       // the error); only a failed call to the main process is shown here.
-      await bridge.fieldRefresh().catch((err) => { fieldUi.error = `The sheet could not be read: ${err.message}`; });
+      await bridge.fieldRefresh().catch((err) => { fieldUi.error = english('said.ui.sheetNotRead', { why: err.message }); });
     }
     renderFieldSettings();
     renderField();
@@ -2797,8 +2797,8 @@ async function fieldAction(act) {
     const address = snapshot.field?.clientEmail;
     const res = bridge.fieldCopyReader ? await bridge.fieldCopyReader().catch((err) => ({ ok: false, error: err.message }))
       : await navigator.clipboard.writeText(address ?? '').then(() => ({ ok: true }), (err) => ({ ok: false, error: err.message }));
-    fieldUi.note = res.ok ? 'Reader address copied: paste it in the sheet’s Share box.' : '';
-    fieldUi.error = res.ok ? '' : `The address could not be copied: ${res.error}`;
+    fieldUi.note = res.ok ? english('said.ui.addressCopied') : '';
+    fieldUi.error = res.ok ? '' : english('said.ui.addressNotCopied', { why: res.error });
     renderFieldSettings();
   } else if (act === 'choose-key') {
     if (!bridge.fieldChooseKey) return;
@@ -2830,7 +2830,7 @@ async function fieldAction(act) {
   } else if (act === 'copy-script') {
     if (!bridge.fieldCopyScript) return;
     const res = await bridge.fieldCopyScript().catch((err) => ({ ok: false, error: err.message }));
-    fieldUi.scriptNote = res.ok ? 'Reader script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
+    fieldUi.scriptNote = res.ok ? english('said.ui.readerScriptCopied') : '';
     fieldUi.scriptError = res.ok ? '' : res.error;
     renderFieldSettings();
   }
@@ -2874,19 +2874,19 @@ $('field-settings').addEventListener('submit', async (e) => {
     // Save is disabled while a row has no choice; this holds if it is sent anyway.
     const { roles, missing } = rolesFrom(snapshot.field, fieldUi.draft);
     if (missing) {
-      fieldUi.checkError = `Not saved: ${missing} ${missing === 1 ? 'column still needs' : 'columns still need'} a choice.`;
+      fieldUi.checkError = english('said.fs.stillNeed', { n: missing });
       renderFieldSettings();
       return;
     }
     if (snapshot.demo || !bridge.fieldSet) {
-      fieldUi.checkNote = snapshot.demo ? 'The demo does not save columns. With your own sheet, this saves your choices.' : 'The preview cannot save; this works in the app.';
+      fieldUi.checkNote = snapshot.demo ? english('said.ui.demoColumns') : english('said.ui.previewNoSave');
       renderFieldSettings();
       return;
     }
     const res = await bridge.fieldSet({ columns: roles }).catch((err) => ({ ok: false, error: err.message }));
     if (res.ok) {
       fieldUi.draft = {};
-      fieldUi.checkNote = res.note ?? 'Columns saved.'; // or "Kept hidden: …" from the main process
+      fieldUi.checkNote = res.note ?? english('said.fs.columnsSaved'); // or "Kept hidden: …" from the main process
     } else fieldUi.checkError = res.error;
     renderFieldSettings();
     setTimeout(renderFieldSettings, 600);

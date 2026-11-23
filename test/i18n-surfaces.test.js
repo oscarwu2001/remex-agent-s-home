@@ -27,7 +27,7 @@ const ALLOW = new Set([
   'Actions', 'Terminal', // GitHub's Actions tab, Windows Terminal
   "Agent’s", 'Apps', 'Script', 'Inbox', 'Developers', 'Webhook', 'Linux', 'GNOME', 'Keyring', 'KWallet', // names as their makers write them
   'https', 'MB', 'exec', // a link's parts: https, /exec, ?k=
-  'makeSecrets', 'Found', // the relay script's function to run; Verify's "302 Found"
+  'makeSecrets', 'makeSecret', 'Found', // the scripts' functions to run; Verify's "302 Found"
   'gid', 'RSA', 'Sheets', 'API', 'dev', 'TAB', // a sheet link's gid, Google's names, the test link's /dev, the reader script's TAB
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
 ]);
