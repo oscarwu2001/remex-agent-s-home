@@ -270,3 +270,18 @@ test('the missing-word log hears a part no entry built by its mark, misses from 
   for (const key of ['a', 'b', 'c', 'd']) log('zh-TW', key);
   assert.deepEqual(lines, ['missing-words', 'missing-words', 'missing-words-cap'], 'the cap is said in one line');
 });
+
+test('a name, a code or a path left inside a Chinese sentence is not told as a missing sentence', async () => {
+  const i18n = await load();
+  const core = require('../src/core/i18n');
+  const told = [];
+  i18n.onMissing((lang, key) => { told.push(key); });
+  try {
+    const before = told.length;
+    i18n.sayIn('zh-TW', core.en('said.main.officePack', { what: core.en('said.pack.notInPack', { name: 'not-in-this-pack' }) }));
+    i18n.sayIn('zh-TW', core.en('said.lb.legacyLeft', { close: core.en('said.lb.close'), dir: '%APPDATA%\Agents Home Two' }));
+    assert.deepEqual(told.slice(before), []);
+  } finally {
+    i18n.onMissing(null);
+  }
+});

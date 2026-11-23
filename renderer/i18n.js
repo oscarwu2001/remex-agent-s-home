@@ -234,11 +234,12 @@ export function sentenceMark(text) {
   return `said#${h.toString(16).padStart(8, '0')}`;
 }
 
-// Parts left as they came that read like a sentence (three words or more):
-// an English sentence no entry built, told like a missing word.
+// Parts left as they came that read like a sentence (three lower-case words
+// or more; a name, a code or a path does not): an English sentence no entry
+// built, told like a missing word.
 function tellUnread(lang, node) {
   if (node.text !== undefined) {
-    if ((node.text.match(/[A-Za-z]{2,}/g) ?? []).length >= 3) missing(lang, sentenceMark(node.text));
+    if (node.text.split(/\s+/).filter((w) => /^[a-z]{2,}[,.;:]?$/.test(w)).length >= 3) missing(lang, sentenceMark(node.text));
     return;
   }
   for (const child of node.list ?? Object.values(node.params ?? {})) tellUnread(lang, child);
