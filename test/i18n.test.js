@@ -158,9 +158,9 @@ test('every sentence core says reads back as the entry that built it, filled as 
     for (const [form, text] of typeof value === 'object' ? Object.entries(value) : [['', value]]) {
       assert.doesNotMatch(text, /\}\{/, `${key}: two placeholders side by side cannot be told apart`);
       const names = [...placeholders(text)];
-      const params = Object.fromEntries(names.map((name, i) => [name, name === 'n' ? (form === 'one' ? 1 : 7) : `‹${i}›`]));
+      const params = Object.fromEntries(names.map((name, i) => [name, name === 'n' ? (form === 'one' ? 1 : 7) : `‹${i} with words›`]));
       const filled = text.replace(/\{(\w+)\}/g, (_, name) => String(params[name]));
-      const found = unsay(filled);
+      const found = unsay(filled, { inside: true });
       assert.equal(found?.key, key, `${key}${form ? ` (${form})` : ''} reads back as itself`);
       for (const name of names) assert.equal(String(found.params[name]), String(params[name]), `${key}: {${name}}`);
     }
@@ -201,6 +201,31 @@ test('a core sentence Chinese lacks, and one no entry built, stay English and ar
     assert.deepEqual(told.filter((t) => t.includes('somewhere')), ['zh-TW:said: Words from somewhere else'], 'told once');
   } finally {
     zh['said.main.upToDate'] = kept;
+    i18n.onMissing(null);
+  }
+});
+
+test('a list of sentences inside one is put in the language item by item; a list with anything else stays as it is', async () => {
+  const { sayIn } = await load();
+  const core = require('../src/core/i18n');
+  const parts = [core.en('said.fs.unread.scores', { n: 2 }), core.en('said.fs.unread.numbers', { n: 1 })];
+  const text = core.en('said.fs.unread.total', { n: 3, parts: parts.join(', ') });
+  assert.equal(text, '3 answers could not be read: 2 scores that are not a whole number on its scale, 1 answer that is not a number', 'English as before');
+  assert.equal(sayIn('zh-TW', text), '有 3 個答案無法讀取：2 個不是量表上整數的分數、1 個不是數字的答案');
+  const mixed = core.en('said.fs.unread.total', { n: 3, parts: `${parts[0]}, a name of the user's` });
+  assert.equal(sayIn('zh-TW', mixed), `有 3 個答案無法讀取：${parts[0]}, a name of the user's`);
+});
+
+test('a whole sentence is never read as a part with fewer than four letters of its own, so one no entry built is told', async () => {
+  const i18n = await load();
+  const told = [];
+  i18n.onMissing((lang, key) => told.push(key));
+  try {
+    assert.equal(i18n.unsay('Words from elsewhere (and a reason)'), null, 'not "{words} ({where})"');
+    assert.ok(i18n.unsay('Words from elsewhere (and a reason)', { inside: true }), 'which a sentence may hold inside it');
+    assert.equal(i18n.sayIn('zh-TW', 'Words from elsewhere (and a reason)'), 'Words from elsewhere (and a reason)');
+    assert.deepEqual(told, ['said: Words from elsewhere (and a reason)']);
+  } finally {
     i18n.onMissing(null);
   }
 });

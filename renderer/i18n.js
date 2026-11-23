@@ -101,9 +101,11 @@ function saidPatterns() {
         if (!name) return escapeRe(part);
         if (names.includes(name)) return `\\k<${name}>`;
         names.push(name);
-        return `(?<${name}>[\\s\\S]*?)`;
+        // {n} is a count, so a sentence that starts with one cannot swallow a list before it.
+        return name === 'n' ? '(?<n>\\d+)' : `(?<${name}>[\\s\\S]*?)`;
       }).join('');
-      patterns.push({ key, one: form === 'one', re: new RegExp(`^${source}$`), literal: String(text).replace(/\{\w+\}/g, '').length });
+      const own = String(text).replace(/\{\w+\}/g, '');
+      patterns.push({ key, one: form === 'one', re: new RegExp(`^${source}$`), literal: own.length, letters: own.replace(/[^A-Za-z]/g, '').length });
     }
   }
   // The longest wording first, so a sentence is read as the entry that says
@@ -114,11 +116,15 @@ function saidPatterns() {
 
 // The entry an English sentence was built from: { key, params } or null.
 // A sentence a caller began lower-case ("Not saved: this computer...") is
-// read as its entry too.
-export function unsay(text) {
+// read as its entry too. A whole sentence is never read as an entry with
+// fewer than four letters of its own ("{words} ({where})"): those are only
+// the parts inside another (inside: true).
+const OWN_LETTERS = 4;
+export function unsay(text, { inside = false } = {}) {
   const s = String(text);
   for (const t of s && /^[a-z]/.test(s) ? [s, s[0].toUpperCase() + s.slice(1)] : [s]) {
     for (const p of saidPatterns()) {
+      if (!inside && p.letters < OWN_LETTERS) continue;
       const m = p.re.exec(t);
       if (!m) continue;
       const params = { ...m.groups };
@@ -129,10 +135,18 @@ export function unsay(text) {
   return null;
 }
 
+// A list of sentences (", " between them) is put in the language item by
+// item when every item is one; anything else inside a sentence stays as it is.
+function sayList(lang, text, depth) {
+  const items = text.split(', ');
+  if (items.length < 2 || !items.every((item) => unsay(item, { inside: true }))) return text;
+  return items.map((item) => sayInner(lang, item, depth + 1)).join(translate(lang, 'common.listSep'));
+}
+
 function sayInner(lang, text, depth) {
   if (/^\d+$/.test(text)) return Number(text);
-  const found = depth < 6 && text ? unsay(text) : null;
-  if (!found) return text;
+  const found = depth < 6 && text ? unsay(text, { inside: depth > 0 }) : null;
+  if (!found) return depth < 6 && text ? sayList(lang, text, depth) : text;
   const params = {};
   for (const [name, value] of Object.entries(found.params)) params[name] = sayInner(lang, value, depth + 1);
   return translate(lang, found.key, params);
