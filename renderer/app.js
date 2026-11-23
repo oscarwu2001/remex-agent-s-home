@@ -1180,7 +1180,6 @@ function rowTokens(x, sub) {
   return sub ? x.tokens?.total : x.tokensWithHelpers ?? x.tokens?.total;
 }
 
-
 function rowHtml(key, x, name, sub) {
   const what = statusText(x);
   const tokens = rowTokens(x, sub);

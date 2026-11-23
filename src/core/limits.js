@@ -129,18 +129,25 @@ class LimitBook {
   }
 
   save() {
-    // A fixed temp name: one left by a crash is written over by the next save.
+    // A fixed temp name: one left by a failed save or a crash is written
+    // over, and renamed into place, by the next save that works.
     const tmp = `${this.file}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       fs.writeFileSync(tmp, `${JSON.stringify({ ...this.kept, format: FORMAT, hits: this.hits }, null, 2)}\n`);
       fs.renameSync(tmp, this.file);
-      const st = fs.statSync(this.file);
-      this.stamp = `${st.mtimeMs}:${st.size}`;
-      this.saveProblem = null;
     } catch (err) {
       // The hits stay counted here and the next pass saves them again.
       this.saveProblem = { label: en('said.limits.notSaved', { code: err.code || err.name }), detail: this.file };
+      return;
+    }
+    this.saveProblem = null;
+    try {
+      const st = fs.statSync(this.file);
+      this.stamp = `${st.mtimeMs}:${st.size}`;
+    } catch {
+      // Saved; with no stamp the next pass reads the file back, which holds the same hits.
+      this.stamp = null;
     }
   }
 
