@@ -188,7 +188,12 @@ function read(text, inside, depth) {
           }
           if (!whole) continue;
           if (p.one && !params.n) params.n = { num: 1, raw: '1' };
-          if (!best || score > best.score) best = { score, node: { key: p.key, params } };
+          // Of two readings that explain as much, the one whose own wording
+          // starts the sentence wraps the other ("Office pack: {what}"
+          // around "{name} could not be added ({why})").
+          if (!best || score > best.score || (score === best.score && p.lits[0].length > best.lead)) {
+            best = { score, lead: p.lits[0].length, node: { key: p.key, params } };
+          }
         }
       }
     }

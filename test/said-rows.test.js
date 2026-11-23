@@ -94,3 +94,22 @@ test('text a person or a program wrote keeps its brackets and words', () => {
   const row = en('said.main.projectList', { what: en('said.projects.tooManyTodos', { name, n: 50 }) });
   assert.ok(i18n.sayIn('zh-TW', row).includes(name), 'the project name as written');
 });
+
+test('every wrapped row reads back as its wrapper, never as the sentence it wraps', () => {
+  const wrappers = ['said.line.row', 'said.fs.row', 'said.main.projectList', 'said.main.assistant', 'said.main.officePack']
+    .map((key) => ({ key, lead: i18n.translate('en', key, { what: '' }) }));
+  const labels = rows();
+  for (const label of labels) {
+    const wrapper = wrappers.find((w) => label.startsWith(w.lead));
+    assert.ok(wrapper, `a wrapper for: ${label}`);
+    assert.equal(i18n.unsay(label)?.key, wrapper.key, label);
+  }
+});
+
+test('an Office pack row reads as the wrapper around what could not be added, read or updated', () => {
+  const zh = (key, params) => i18n.translate('zh-TW', key, params);
+  for (const key of ['said.pack.notAdded', 'said.pack.notRead', 'said.pack.notUpdated']) {
+    const row = en('said.main.officePack', { what: en(key, { name: 'builder', why: 'EPERM' }) });
+    assert.equal(i18n.sayIn('zh-TW', row), zh('said.main.officePack', { what: zh(key, { name: 'builder', why: 'EPERM' }) }), key);
+  }
+});
