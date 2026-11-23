@@ -27,6 +27,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const fieldSurvey = require('./fieldsurvey');
+const { en } = require('./i18n');
 const { WINDOW_DAYS } = require('./linechat');
 
 const COLLECT_MS = 5 * 60_000;
@@ -63,32 +64,43 @@ const TRANSIENT = new Set(['network', 'busy', 'google', 'store', 'secretfile']);
 
 // ---- words ----------------------------------------------------------------------------
 
-const SETTINGS = 'Settings → Connections → LINE chats';
-const RELAY_HELP = 'In the relay script, Deploy → Manage deployments and copy the Web app link; it ends in /exec';
-const SECRET_HELP = 'Copy READER_SECRET from the relay script’s Project Settings → Script properties';
-const ANYONE = 'In the relay script, Deploy → Manage deployments → Edit → Who has access → Anyone, then press Refresh now.';
-const NEW_VERSION = 'deploy it again as a new version (Deploy → Manage deployments → Edit → Version: New version)';
-const RELINK = `Copy the Web app link again (Deploy → Manage deployments) and paste it in ${SETTINGS}, then press Refresh now.`;
-const AGAIN = 'The app tries again in 5 minutes, or press Refresh now.';
+const SETTINGS = en('said.lb.settings');
+// The parts of a sentence that name Settings' path, each one sentence of its
+// own: Settings puts the control in view in their place (inSettings), in
+// whichever language the window reads them.
+const COPY_IN = en('said.lb.copyIn', { settings: SETTINGS });
+const COPY_LATER = en('said.lb.copyLater', { settings: SETTINGS });
+const PASTE_IN = en('said.lb.pasteIn', { settings: SETTINGS });
+const THEN_SAVE_IN = en('said.lb.thenSaveIn', { settings: SETTINGS });
+const SAVE_AGAIN_IN = en('said.lb.saveAgainIn', { settings: SETTINGS });
+const SAVE_THIS_IN = en('said.lb.saveThisIn', { settings: SETTINGS });
+const SAVE_IT_IN = en('said.lb.saveItIn', { settings: SETTINGS });
+const IN_SETTINGS_PATH = en('said.lb.inSettings', { settings: SETTINGS });
+const RELAY_HELP = en('said.lb.relayHelp');
+const SECRET_HELP = en('said.lb.secretHelp');
+const ANYONE = en('said.lb.anyone');
+const NEW_VERSION = en('said.lb.newVersion');
+const RELINK = en('said.lb.relink', { paste: PASTE_IN });
+const AGAIN = en('said.lb.again');
 
 const RELAY_WORDS = {
-  blocked: (host) => `A request to ${host} was refused: LINE chats talks only to your relay.`,
-  shape: `The relay’s answer is not in the shape the app reads. In ${SETTINGS}, press Copy relay script, paste it over the old one in the relay’s Apps Script and ${NEW_VERSION}.`,
-  noLocation: `Google passed the relay’s call on without saying where to. ${RELINK}`,
-  hopUnreadable: `The relay’s answer was sent to an address that could not be read, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
-  hopSignIn: `Google asked for a sign-in instead of letting the relay answer. ${ANYONE}`,
-  hopElsewhere: (where, echo) => `The relay’s answer was sent to ${where}, which the app does not follow: it takes the answer only from ${echo} over https.`,
-  timeout: `The relay did not answer in time; check the internet connection. ${AGAIN}`,
-  offline: `No network: the relay could not be reached; check the internet connection or proxy. ${AGAIN}`,
-  secondRedirect: `Google redirected the relay’s answer a second time, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
-  tooLarge: `The relay’s answer is larger than 20 MB, more than the app reads. In ${SETTINGS}, press Copy relay script, paste it over the old one and ${NEW_VERSION}.`,
-  busy: `Google asked the app to slow down. ${AGAIN}`,
-  down: `Google’s Apps Script service had a problem. ${AGAIN}`,
-  denied: `Google did not let the relay answer. ${ANYONE}`,
-  missing: `No relay answers at this link: its deployment may have been archived or deleted. In the relay script, Deploy → Manage deployments, copy the Web app link and paste it in ${SETTINGS}.`,
-  refused: `Google refused the relay’s call. ${RELINK}`,
-  signInPage: `Google showed its sign-in page instead of the relay’s answer. ${ANYONE}`,
-  scriptFailed: `The relay script failed instead of answering. Open it (the relay sheet’s Extensions → Apps Script), look under Executions for what went wrong, then press Copy relay script in ${SETTINGS}, paste it over the old one and ${NEW_VERSION}.`,
+  blocked: (host) => en('said.lb.blocked', { host }),
+  shape: en('said.lb.shape', { copy: COPY_IN, newVersion: NEW_VERSION }),
+  noLocation: en('said.lb.noLocation', { relink: RELINK }),
+  hopUnreadable: en('said.lb.hopUnreadable', { newVersion: NEW_VERSION }),
+  hopSignIn: en('said.lb.hopSignIn', { anyone: ANYONE }),
+  hopElsewhere: (where, echo) => en('said.lb.hopElsewhere', { where, echo }),
+  timeout: en('said.lb.timeout', { again: AGAIN }),
+  offline: en('said.lb.offline', { again: AGAIN }),
+  secondRedirect: en('said.lb.secondRedirect', { newVersion: NEW_VERSION }),
+  tooLarge: en('said.lb.tooLarge', { copy: COPY_IN, newVersion: NEW_VERSION }),
+  busy: en('said.lb.busy', { again: AGAIN }),
+  down: en('said.lb.down', { again: AGAIN }),
+  denied: en('said.lb.denied', { anyone: ANYONE }),
+  missing: en('said.lb.missing', { paste: PASTE_IN }),
+  refused: en('said.lb.refused', { relink: RELINK }),
+  signInPage: en('said.lb.signInPage', { anyone: ANYONE }),
+  scriptFailed: en('said.lb.scriptFailed', { copy: COPY_LATER, newVersion: NEW_VERSION }),
 };
 const RELAY_VOICE = { Error: LineBotError, words: RELAY_WORDS };
 const wrongShape = (code) => fail('reader', RELAY_WORDS.shape, code);
@@ -97,18 +109,18 @@ const wrongShape = (code) => fail('reader', RELAY_WORDS.shape, code);
 // "in Settings → Connections → LINE chats", Settings names the control in
 // view there. shown: { secretOpen, linkOpen, noStorage }, as in field
 // feedback (fieldsurvey.js inSettings).
-const NO_STORE_YET = 'once this computer can keep it (see the note under Collect from my LINE bot)';
-const secretWords = (v, open, folded, none) => (v.noStorage ? none : v.secretOpen ? open : folded);
+const NO_STORE_YET = en('said.lb.noStoreYet');
+const secretWords = (v, open, folded, none) => en(`said.lb.${v.noStorage ? none : v.secretOpen ? open : folded}`, { later: NO_STORE_YET });
 const IN_SETTINGS = [
-  [`In ${SETTINGS}, press Copy relay script,`, () => 'Press Copy relay script,'],
-  [`press Copy relay script in ${SETTINGS},`, () => 'press Copy relay script,'],
-  [` and paste it in ${SETTINGS}`, (v) => (v.linkOpen ? ' and paste it under Relay link' : ', press Change link and paste it')],
-  [`then save it in ${SETTINGS}`, (v) => secretWords(v, 'then save it under Secret', 'then press Replace secret and save the new one', `then save it ${NO_STORE_YET}`)],
-  [`Save the secret again in ${SETTINGS}`, (v) => secretWords(v, 'Save the secret again under Secret', 'Press Replace secret and save it again', `Save the secret again ${NO_STORE_YET}`)],
-  [`Save this relay’s secret in ${SETTINGS}`, (v) => secretWords(v, 'Save this relay’s secret under Secret', 'Press Replace secret and save this relay’s secret', `Save this relay’s secret ${NO_STORE_YET}`)],
-  [`Save it in ${SETTINGS}`, (v) => secretWords(v, 'Save it under Secret', 'Press Replace secret and save it', `Save it ${NO_STORE_YET}`)],
+  [COPY_IN, () => en('said.lb.copyHere')],
+  [COPY_LATER, () => en('said.lb.copyHereLater')],
+  [PASTE_IN, (v) => en(v.linkOpen ? 'said.lb.pasteUnderLink' : 'said.lb.pasteChangeLink')],
+  [THEN_SAVE_IN, (v) => secretWords(v, 'thenSaveUnder', 'thenReplace', 'thenSaveLater')],
+  [SAVE_AGAIN_IN, (v) => secretWords(v, 'saveAgainUnder', 'saveAgainReplace', 'saveAgainLater')],
+  [SAVE_THIS_IN, (v) => secretWords(v, 'saveThisUnder', 'saveThisReplace', 'saveThisLater')],
+  [SAVE_IT_IN, (v) => secretWords(v, 'saveItUnder', 'saveItReplace', 'saveItLater')],
   // Whatever else names the path names a control in view already ("under Relay link").
-  [` in ${SETTINGS}`, () => ''],
+  [IN_SETTINGS_PATH, () => ''],
 ];
 function inSettings(message, { secretOpen = true, linkOpen = true, noStorage = false } = {}) {
   const shown = { secretOpen: secretOpen && !noStorage, linkOpen, noStorage };
@@ -137,7 +149,7 @@ const parseRelayLink = (text) => fieldSurvey.parseWebAppLink(text, { noun: 'rela
 // Whether the secret can be kept here: null, or why not. Never as plain text.
 function secretStorage({ available = false, backend } = {}) {
   if (fieldSurvey.canProtect({ available, backend })) return null;
-  return 'This computer has no protected storage for the relay’s secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Set up a keyring, then restart Agent’s Home.';
+  return en('said.lb.noStorage');
 }
 
 // The secret as typed, checked before it is saved -> { secret, deploymentId }
@@ -145,16 +157,16 @@ function secretStorage({ available = false, backend } = {}) {
 // first. No message repeats what was typed.
 function checkSecret(text, { available = false, backend, saved = false, link } = {}) {
   const storage = secretStorage({ available, backend });
-  if (storage) return { error: `Not saved: ${storage.charAt(0).toLowerCase()}${storage.slice(1)}` };
+  if (storage) return { error: en('said.lb.notSavedBecause', { why: storage.charAt(0).toLowerCase() + storage.slice(1) }) };
   let parsed;
   try {
     parsed = parseRelayLink(link);
   } catch {
-    return { error: 'Save the relay link first: the secret belongs to that relay.' };
+    return { error: en('said.lb.linkFirst') };
   }
   const s = typeof text === 'string' ? text.trim() : '';
-  if (!s) return { error: saved ? 'Paste the new secret, or press Cancel to keep the saved one.' : `No secret yet. ${SECRET_HELP}.` };
-  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the relay’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}.` };
+  if (!s) return { error: saved ? en('said.lb.pasteNew') : en('said.lb.noSecretYet', { help: SECRET_HELP }) };
+  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: en('said.lb.notTheSecret', { help: SECRET_HELP }) };
   return { secret: s, deploymentId: parsed.deploymentId };
 }
 
@@ -171,18 +183,18 @@ const secretIdOf = (text) => {
 // -> the sealed secret for this relay. Throws LineBotError.
 function openSecret(text, deploymentId) {
   const r = fieldSurvey.secretRecord(text);
-  if (!r) throw fail('secret', `The saved secret could not be read. Save the secret again in ${SETTINGS}.`, 'secret file not readable');
-  if (r.deploymentId !== deploymentId) throw fail('setup', `The saved secret was for another relay link. Save this relay’s secret in ${SETTINGS}.`, 'secret for another relay');
+  if (!r) throw fail('secret', en('said.lb.secretUnreadable', { save: SAVE_AGAIN_IN }), 'secret file not readable');
+  if (r.deploymentId !== deploymentId) throw fail('setup', en('said.lb.otherRelay', { save: SAVE_THIS_IN }), 'secret for another relay');
   return Buffer.from(r.sealed, 'base64');
 }
 function secretFileError(err) {
-  if (err?.code === 'ENOENT') return fail('setup', `No relay secret is saved. Save it in ${SETTINGS}.`, 'secret file missing');
+  if (err?.code === 'ENOENT') return fail('setup', en('said.lb.noSecretSaved', { save: SAVE_IT_IN }), 'secret file missing');
   if (err?.code === 'EACCES' || err?.code === 'EPERM') {
-    return fail('secret', `This computer will not let the app open the saved secret’s file. Save the secret again in ${SETTINGS}.`, `secret file ${err.code}`);
+    return fail('secret', en('said.lb.secretFileRefused', { save: SAVE_AGAIN_IN }), `secret file ${err.code}`);
   }
-  return fail('secretfile', `The saved secret could not be read just now. ${AGAIN}`, `secret file ${err?.code || 'unreadable'}`);
+  return fail('secretfile', en('said.lb.secretNotNow', { again: AGAIN }), `secret file ${err?.code || 'unreadable'}`);
 }
-const secretLocked = () => fail('secret', `The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in ${SETTINGS}.`, 'secret not decrypted');
+const secretLocked = () => fail('secret', en('said.lb.secretLocked', { save: SAVE_AGAIN_IN }), 'secret not decrypted');
 
 // ---- the relay's answer ----------------------------------------------------------------
 
@@ -204,20 +216,20 @@ const isSeq = (n) => Number.isSafeInteger(n) && n > 0;
 function relayReply(body) {
   if (body.ok === false) {
     if (body.error === 'not allowed') {
-      throw fail('secret', `The relay refused the secret: it does not match the relay’s. ${SECRET_HELP}, then save it in ${SETTINGS}.`, 'not allowed');
+      throw fail('secret', en('said.lb.secretRefused', { help: SECRET_HELP, save: THEN_SAVE_IN }), 'not allowed');
     }
-    if (body.error === 'busy') throw fail('busy', `The relay was busy keeping new messages. ${AGAIN}`, 'relay busy');
-    if (body.error === 'settings') throw fail('google', `The relay could not read its Script properties; see its Executions in Apps Script. ${AGAIN}`, 'relay settings');
+    if (body.error === 'busy') throw fail('busy', en('said.lb.relayBusy', { again: AGAIN }), 'relay busy');
+    if (body.error === 'settings') throw fail('google', en('said.lb.relaySettings', { again: AGAIN }), 'relay settings');
     if (body.error === 'not counted') {
       const step = ['read', 'removal'].includes(body.step) ? body.step : 'count';
-      const what = { read: `read its events older than ${WINDOW_DAYS} days from its Inbox tab`, removal: `remove its events older than ${WINDOW_DAYS} days from its Inbox tab`, count: `count its events older than ${WINDOW_DAYS} days` }[step];
-      throw fail('google', `The relay could not ${what} just now, so it is holding back newer ones until it can (they are not lost); if it keeps happening, the relay’s Executions in Apps Script show why. ${AGAIN}`, `relay not counted ${step}`);
+      const what = { read: en('said.lb.stepRead', { n: WINDOW_DAYS }), removal: en('said.lb.stepRemove', { n: WINDOW_DAYS }), count: en('said.lb.stepCount', { n: WINDOW_DAYS }) }[step];
+      throw fail('google', en('said.lb.notCounted', { what, again: AGAIN }), `relay not counted ${step}`);
     }
     if (body.error === 'cursor ahead') {
       if (typeof body.relay !== 'string' || !RELAY_ID.test(body.relay)) throw wrongShape('cursor ahead without relay');
       return { ahead: true, relay: body.relay };
     }
-    throw fail('reader', `The relay said no for a reason the app does not know. In ${SETTINGS}, press Copy relay script, paste it over the old one and ${NEW_VERSION}.`,
+    throw fail('reader', en('said.lb.unknownNo', { copy: COPY_IN, newVersion: NEW_VERSION }),
       `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').replace(/[^\w <>.-]/g, '').slice(0, 60)}`);
   }
   if (body.ok !== true) throw wrongShape('no ok');
@@ -577,7 +589,7 @@ function scrub(err, secret, link) {
   }
   return err;
 }
-const storeError = (err) => fail('store', `The messages collected could not be saved. ${AGAIN} If it keeps failing, the system log has the reason.`, `store ${err?.code || 'error'}`);
+const storeError = (err) => fail('store', en('said.lb.storeError', { again: AGAIN }), `store ${err?.code || 'error'}`);
 
 // Asks the relay for what follows the cursor until it has no more (at most
 // ROUNDS calls), saving the store (write) after each answer and before the
@@ -639,17 +651,17 @@ function nextCollect({ ready, lastTryAt = null, error = null, more = false }) {
 // step, or null when it can. stuck: the store's state when it is stuck
 // (BotKeeper.state), or false.
 const STUCK_WHY = {
-  unreadable: 'the bot’s saved data can’t be read just now; close any app using the app’s data folder. The app reads it again within a minute',
-  invalid: 'the bot’s saved data is not in a shape the app reads. To start afresh, turn Collect from my LINE bot off and on again; that deletes its saved messages, relay link and secret',
-  unwritten: 'the bot’s saved data was read but could not be brought up to this version of the app; close any app using the app’s data folder. The app tries again within a minute',
-  unremoved: 'turning the bot off is not finished, because the bot’s saved data could not be removed; close any app using the app’s data folder. The app tries again within a minute',
+  unreadable: en('said.lb.stuckUnreadable'),
+  invalid: en('said.lb.stuckInvalid'),
+  unwritten: en('said.lb.stuckUnwritten'),
+  unremoved: en('said.lb.stuckUnremoved'),
 };
 function notCollecting({ on, stuck = false, link, secretSaved, storage }) {
   if (!on) return null;
   if (stuck) return STUCK_WHY[stuck] ?? STUCK_WHY.unreadable;
-  if (storage) return 'this computer can’t keep the relay’s secret; set up a keyring (on Linux, GNOME Keyring or KWallet), then restart Agent’s Home';
-  if (!link) return `no relay link is saved; paste the relay’s Web app link under Relay link in ${SETTINGS}`;
-  if (!secretSaved) return `no secret is saved; paste READER_SECRET under Secret in ${SETTINGS}`;
+  if (storage) return en('said.lb.cantKeepSecret');
+  if (!link) return en('said.lb.noLink', { where: IN_SETTINGS_PATH });
+  if (!secretSaved) return en('said.lb.noSecret', { where: IN_SETTINGS_PATH });
   return null;
 }
 
@@ -711,7 +723,7 @@ function botChats(store, ticked = new Set(store.settings?.read ?? [])) {
     const member = memberNames(store, id);
     const messages = store.messages.filter((m) => m.chat === id).map((m) => {
       const msg = { chat, chatKey, at: wall(m.ms), ms: m.ms, sender: m.who ? member(m.who) : '', kind: m.kind, text: m.text, hash: m.hash };
-      if (m.kind !== 'text') msg.actor = m.actorBot ? 'Your bot' : m.actorWho ? member(m.actorWho) : msg.sender || 'A member';
+      if (m.kind !== 'text') msg.actor = m.actorBot ? en('said.lb.yourBot') : m.actorWho ? member(m.actorWho) : msg.sender || en('said.lb.aMember');
       return msg;
     });
     out.push({ chat, chatKey, id, bot: true, messages, unread: 0, olderOnly: 0, newestMs: messages.length ? messages[messages.length - 1].ms : null });
@@ -772,32 +784,24 @@ function botView({ settings, store, stuck = false, secretSaved = false, storage 
   };
 }
 
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const were = (n) => (n === 1 ? 'was' : 'were');
 const TOKEN_REFUSED = /^HTTP 40[13]$/;
-const SWITCH = 'Collect from my LINE bot';
-const MISSING_WORDS = 'so your own promises there can’t be found and your own messages may show as mentions';
+const SWITCH = en('said.lb.botSwitch');
+const MISSING_WORDS = en('said.lb.missingWords');
 // The relay's name lookups failing, in one row; standIns: senders kept show as stand-ins now.
 const NAME_WORDS = (code, standIns) => {
   if (TOKEN_REFUSED.test(code)) {
-    return `LINE refused the relay’s LINE_TOKEN: names are off and groups and senders show as stand-ins, ${MISSING_WORDS}. To fix it, issue a new channel access token in the LINE Developers console and put it in the relay’s Script properties as LINE_TOKEN, or remove LINE_TOKEN to go without names`;
+    return en('said.lb.tokenRefused', { missing: MISSING_WORDS });
   }
-  const why = code === 'HTTP 429' ? 'LINE asked the relay to slow down its name lookups'
-    : code === 'HTTP 404' ? 'LINE did not find some names the relay looked up (a member who left, for one)'
-      : 'the relay’s name lookups failed';
-  const next = code === 'HTTP 429' ? 'the names come back by themselves' : code === 'HTTP 404' ? 'this can’t be fixed from here' : 'the relay’s Executions in Apps Script show why';
-  const shows = standIns ? 'so some senders show as stand-ins and your own promises there can’t be found (your own messages may show as mentions)' : 'so some names may show as stand-ins';
-  return `${why}, ${shows}; ${next}`;
+  const shows = en(standIns ? 'said.lb.showsStandIns' : 'said.lb.showsSomeNames');
+  return en(code === 'HTTP 429' ? 'said.lb.namesSlow' : code === 'HTTP 404' ? 'said.lb.namesNotFound' : 'said.lb.namesFailed', { shows });
 };
 // Why a file could not be written or removed, in words ('not saved' says it
 // in Settings; the code goes to the detail and the system log).
-const writeWhy = (code) => (['EBUSY', 'EPERM', 'EACCES'].includes(code) ? 'another program has it open'
-  : code === 'ENOSPC' ? 'the disk is full' : 'the system log has the reason');
-const CLOSE = 'close any app using the app’s data folder';
+const writeWhy = (code) => (['EBUSY', 'EPERM', 'EACCES'].includes(code) ? en('said.lb.heldOpen')
+  : code === 'ENOSPC' ? en('said.lb.diskFull') : en('said.lb.inTheLog'));
+const CLOSE = en('said.lb.close');
 // The user's off, not finished, by why (BotKeeper.unfinished), as Settings says it.
-const UNFINISHED = (why) => `turning the bot off is not finished; its kept messages, relay link and secret are still on this computer because ${why === 'failed'
-  ? 'its file could not be deleted (the system log has the reason). The app tries again within a minute'
-  : `another program has its file open. Close any app using the app’s data folder; the app finishes within a minute of the file being freed`}`;
+const UNFINISHED = (why) => en('said.lb.unfinished', { because: en(why === 'failed' ? 'said.lb.unfinishedFailed' : 'said.lb.unfinishedHeld') });
 // Where the app's data folder is (Electron's userData), without the user's name, for what to delete by hand.
 function dataDir(platform = process.platform) {
   return platform === 'win32' ? '%APPDATA%\\Agents Home' : platform === 'darwin' ? '~/Library/Application Support/Agents Home' : '~/.config/Agents Home';
@@ -806,23 +810,23 @@ const DATA_DIR = dataDir();
 // A trouble with the store's files, in words (BotKeeper's problems()); on:
 // whether the part is on, so the app tries again by itself.
 const STORE_WORDS = {
-  unreadable: () => `the bot’s saved data can’t be read just now, so nothing is collected or changed; ${CLOSE}. The app reads it again within a minute`,
-  invalid: () => `the bot’s saved data is not in a shape the app reads, so nothing is collected or changed, and its messages stay in its file until you turn ${SWITCH} off. To start afresh, turn it off and on again in ${SETTINGS}; that deletes its saved messages, relay link and secret`,
-  unwritten: () => `the bot’s saved data was read but could not be brought up to this version of the app, so nothing is collected or changed; ${CLOSE}. The app tries again within a minute`,
+  unreadable: () => en('said.lb.storeUnreadable', { close: CLOSE }),
+  invalid: () => en('said.lb.storeInvalid', { botSwitch: SWITCH, settings: SETTINGS }),
+  unwritten: () => en('said.lb.storeUnwritten', { close: CLOSE }),
   unremoved: (sp) => UNFINISHED(sp.why),
-  legacyLeft: () => `the bot’s settings file from before the update (line-bot.json) could not be removed; ${CLOSE} and delete it from ${DATA_DIR}`,
-  legacyUnread: () => `the bot’s settings file from before the update (line-bot.json) could not be read, so its ticks and relay link were not kept and ${SWITCH} is off; to use the bot, turn it on in ${SETTINGS} and paste the relay link and secret`,
-  damaged: (sp) => `${sp.count} of the bot’s saved entries could not be read and were left out; the rest are kept`,
-  unlisted: (sp, on) => (on ? `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; collecting goes on. The app tries again within a minute`
-    : `the app’s data folder could not be listed, so half-written copies of the bot’s saved data may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp files from ${DATA_DIR}`),
+  legacyLeft: () => en('said.lb.legacyLeft', { close: CLOSE, dir: DATA_DIR }),
+  legacyUnread: () => en('said.lb.legacyUnread', { botSwitch: SWITCH, settings: SETTINGS }),
+  damaged: (sp) => en('said.lb.damaged', { n: sp.count }),
+  unlisted: (sp, on) => (on ? en('said.lb.unlistedOn')
+    : en('said.lb.unlistedOff', { close: CLOSE, dir: DATA_DIR })),
   // Listed by removeSecret only: cleared by the next removeSecret that lists the folder.
-  secretUnlisted: () => `the app’s data folder could not be listed, so half-written copies of the bot’s secret may be left there; ${CLOSE} and delete any line-bot-secret.json.*.tmp files from ${DATA_DIR}`,
-  untickLeft: () => `the bot’s file from an earlier version, line-bot-store.untick.json, could not be deleted; ${CLOSE} and delete it from ${DATA_DIR}`,
-  recordLeft: () => `turning the bot off is finished, but its note line-bot-store-off.json could not be deleted; ${CLOSE}, and the app deletes it within a minute of the file being freed`,
-  notStarted: () => 'turning the bot off could not be started because the app could not write to its data folder (the system log has the reason), so the bot’s kept messages, relay link and secret are still on this computer. The app tries again within a minute',
-  leftover: (sp, on) => (on ? `a half-written copy of the bot’s saved data could not be deleted; ${CLOSE}. The app tries again within a minute`
-    : `a half-written copy of the bot’s saved data could not be deleted; ${CLOSE} and delete line-bot-store.json.*.tmp from ${DATA_DIR}`),
-  prune: () => `messages older than ${WINDOW_DAYS} days could not be removed from the bot’s file just now; ${CLOSE}. The app tries again every half minute`,
+  secretUnlisted: () => en('said.lb.secretUnlisted', { close: CLOSE, dir: DATA_DIR }),
+  untickLeft: () => en('said.lb.untickLeft', { close: CLOSE, dir: DATA_DIR }),
+  recordLeft: () => en('said.lb.recordLeft', { close: CLOSE }),
+  notStarted: () => en('said.lb.notStarted'),
+  leftover: (sp, on) => (on ? en('said.lb.leftoverOn', { close: CLOSE })
+    : en('said.lb.leftoverOff', { close: CLOSE, dir: DATA_DIR })),
+  prune: () => en('said.lb.prune', { n: WINDOW_DAYS, close: CLOSE }),
 };
 const STUCK = new Set(['unreadable', 'invalid', 'unwritten', 'unremoved']);
 // Why the ticks (and the link) were rebuilt at load: 'update' (67909b5's
@@ -830,13 +834,13 @@ const STUCK = new Set(['unreadable', 'invalid', 'unwritten', 'unremoved']);
 // 'ticks' (ticks and kept text disagreed: kept text means ticked).
 const REBUILT = ['update', 'damaged', 'ticks'];
 function REBUILT_WORDS(store) {
-  const why = { update: 'after the update, the bot’s ticks and relay link from before were not found', damaged: 'the bot’s ticks and relay link could not be read', ticks: 'the bot’s ticks did not match the messages it kept' }[store.rebuilt];
-  if (store.rebuilt !== 'ticks' && !store.settings?.link) return `${why}, so the ticks were rebuilt from the groups it kept messages for; check the ticks and paste the relay link in ${SETTINGS}`;
-  const how = store.rebuilt === 'ticks' ? 'so they were rebuilt from the groups it kept messages for' : 'so they were rebuilt from the groups it kept messages for and from the saved secret or the last collection';
-  return `${why}, ${how}; check them in ${SETTINGS}`;
+  const why = { update: en('said.lb.rebuiltUpdate'), damaged: en('said.lb.rebuiltDamaged'), ticks: en('said.lb.rebuiltTicks') }[store.rebuilt];
+  if (store.rebuilt !== 'ticks' && !store.settings?.link) return en('said.lb.rebuiltNoLink', { why, settings: SETTINGS });
+  const how = store.rebuilt === 'ticks' ? en('said.lb.rebuiltFromGroups') : en('said.lb.rebuiltFromMore');
+  return en('said.lb.rebuilt', { why, how, settings: SETTINGS });
 }
-const AGAIN_SCRIPT = `if it keeps happening, press Copy relay script in ${SETTINGS}, paste it over the relay’s script and deploy it as a new version`;
-const NEW_DEPLOYMENT = `in the relay script, Deploy → New deployment; put its link followed by ?k= and WEBHOOK_KEY in LINE’s webhook and under Relay link in ${SETTINGS}, then archive the old deployment`;
+const AGAIN_SCRIPT = en('said.lb.againScript', { copy: COPY_LATER });
+const NEW_DEPLOYMENT = en('said.lb.newDeployment', { settings: SETTINGS });
 
 // What goes under Needs attention, as counts and next steps; no group or
 // sender name, message or link. on: the part is on; error: the last
@@ -846,14 +850,14 @@ const NEW_DEPLOYMENT = `in the relay script, Deploy → New deployment; put its 
 // store's own by default). fix 'line': a link to Settings. One row per cause.
 function botProblems({ on, store, error = null, notCollecting: why = null, storeProblems = [], ticked = new Set(store?.settings?.read ?? []), now }) {
   const out = [];
-  const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
+  const add = (label, detail = '', fix = null) => out.push({ label: en('said.lb.row', { what: label }), detail, ...(fix ? { fix } : {}) });
   const kinds = new Set(storeProblems.map((sp) => sp.what));
   const secretList = storeProblems.find((sp) => sp.what === 'secretUnlisted');
   for (const sp of storeProblems) {
     if (!STORE_WORDS[sp.what] || (sp.what === 'secretUnlisted' && kinds.has('unlisted'))) continue;
     // One row for a folder that could not be listed, for the store's copies and the secret's.
     if (sp.what === 'unlisted' && secretList) {
-      add(`the app’s data folder could not be listed, so half-written copies of the bot’s saved data or secret may be left there; ${CLOSE} and delete any line-bot-store.json.*.tmp and line-bot-secret.json.*.tmp files from ${DATA_DIR}`, sp.detail ?? '');
+      add(en('said.lb.unlistedBoth', { close: CLOSE, dir: DATA_DIR }), sp.detail ?? '');
     } else add(STORE_WORDS[sp.what](sp, on), sp.detail ?? '', ['invalid', 'legacyUnread', 'notStarted'].includes(sp.what) ? 'line' : null);
   }
   // Kept in the store until the user changes a tick or the link.
@@ -861,39 +865,36 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   if (!on) return out;
   const stuck = storeProblems.some((sp) => STUCK.has(sp.what));
   // A store that can't be read says so itself, with what to do.
-  const first = why && !stuck ? `your LINE bot is on but not collecting: ${why}` : error && !stuck ? `the bot’s messages could not be collected. ${error.message}` : '';
-  if (first) out.unshift({ label: `LINE chats: ${first}`, detail: '', fix: 'line' });
+  const first = why && !stuck ? en('said.lb.onNotCollecting', { why }) : error && !stuck ? en('said.lb.notCollected', { why: error.message }) : '';
+  if (first) out.unshift({ label: en('said.lb.row', { what: first }), detail: '', fix: 'line' });
   const sum = (what) => (store?.notes ?? []).filter((n) => n.what === what && n.at >= now - KEEP_MS).reduce((a, n) => a + n.n, 0);
-  const days = `in the last ${WINDOW_DAYS} days`;
+  const days = en('said.lb.lastDays', { n: WINDOW_DAYS });
   // A full tally on the relay: these counts are floors.
   const capped = sum('capped') > 0;
-  const atLeast = capped ? 'at least ' : '';
+  // n picks the form; count is how it reads ("at least 3" when capped).
+  const floor = (n) => ({ n, count: capped ? en('said.lb.atLeast', { n }) : n, days });
   const refused = sum('refused');
-  if (refused) {
-    add(`${atLeast}${plural(refused, 'call')} to the relay’s webhook ${were(refused)} refused ${days}: a wrong key in LINE’s webhook link, or someone else calling the relay. Check that the webhook link in the LINE Developers console ends in ?k= and the relay’s WEBHOOK_KEY (the relay script’s Project Settings → Script properties); if the key is right and the count keeps rising, someone else has the relay’s link: ${NEW_DEPLOYMENT}`, '', 'line');
-  }
+  if (refused) add(en('said.lb.webhookRefused', { ...floor(refused), newDeployment: NEW_DEPLOYMENT }), '', 'line');
   const denied = sum('denied');
-  if (denied) add(`${atLeast}${plural(denied, 'call')} to the relay had a wrong secret ${days}: someone other than this app. If it goes on, ${NEW_DEPLOYMENT}`, '', 'line');
+  if (denied) add(en('said.lb.wrongSecret', { ...floor(denied), newDeployment: NEW_DEPLOYMENT }), '', 'line');
   const unchecked = sum('unchecked');
-  if (unchecked) {
-    add(`${capped ? 'at least' : 'up to'} ${plural(unchecked, 'event')} that reached the relay while it could not read its WEBHOOK_KEY ${were(unchecked)} not kept (some may not be LINE’s) ${days}, so messages may be missing; the relay’s Executions in Apps Script show why`);
-  }
+  if (unchecked) add(en('said.lb.unchecked', { n: unchecked, count: en(capped ? 'said.lb.atLeast' : 'said.lb.upTo', { n: unchecked }), days }));
   const missed = sum('missed');
-  if (missed) add(`${plural(missed, 'event')} waited on the relay over ${WINDOW_DAYS} days and ${were(missed)} deleted before the app collected ${missed === 1 ? 'it' : 'them'} ${days}: keep ${SWITCH} on and open the app at least every ${WINDOW_DAYS} days`);
+  if (missed) add(en('said.lb.missed', { n: missed, window: WINDOW_DAYS, days, botSwitch: SWITCH }));
   const lost = sum('lost');
-  if (lost) add(`${atLeast}${plural(lost, 'event')} from LINE could not be kept by the relay (it was busy, or its sheet failed) ${days}, so ${lost === 1 ? 'it is' : 'they are'} gone; if it keeps happening, the relay’s Executions in Apps Script show why`);
+  if (lost) add(en('said.lb.lost', floor(lost)));
   const notJson = sum('notJson');
-  if (notJson) add(`${plural(notJson, 'call')} to the relay’s webhook could not be read ${days}; if this goes on, check that only LINE has the webhook link`);
+  if (notJson) add(en('said.lb.notJson', { n: notJson, days }));
   const broken = sum('broken');
-  if (broken) add(`${plural(broken, 'event')} on the relay could not be read and ${were(broken)} left out ${days}; ${AGAIN_SCRIPT}`, '', 'line');
+  if (broken) add(en('said.lb.broken', { n: broken, days, againScript: AGAIN_SCRIPT }), '', 'line');
   const unusable = sum('unusable');
-  if (unusable) add(`${plural(unusable, 'event')} from the relay lacked a group, a time or a message and ${were(unusable)} left out ${days}; ${AGAIN_SCRIPT}`, '', 'line');
+  if (unusable) add(en('said.lb.unusable', { n: unusable, days, againScript: AGAIN_SCRIPT }), '', 'line');
   const future = sum('future');
-  if (future) add(`${plural(future, 'event')} from the relay ${were(future)} dated in the future and ${were(future)} left out ${days}; check this computer’s date and time`);
-  if (sum('ahead')) add('the relay held fewer events than the app had collected (it was reset or replaced), so the app started counting afresh; what is still on the relay comes in again and is kept once');
-  if (sum('restarted')) add('the relay at this link is a new one (its id changed), so messages the old one still held may be missing');
+  if (future) add(en('said.lb.future', { n: future, days }));
+  if (sum('ahead')) add(en('said.lb.ahead'));
+  if (sum('restarted')) add(en('said.lb.restarted'));
   if (store?.relayVersion != null && store.relayVersion < RELAY_VERSION) {
-    add(`your relay is an older version; to update it, press Copy relay script in ${SETTINGS}, paste it over the relay’s script, then Deploy → Manage deployments → Edit → Version: New version → Deploy. The link stays the same`, '', 'line');
+    add(en('said.lb.olderRelay', { copy: COPY_LATER }), '', 'line');
   }
   // Stand-ins: one row, the lookups' failure when there is one. The fix is
   // in the relay's Script properties, or with LINE: no Settings link.
@@ -901,8 +902,8 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   if (store?.nameProblem) add(NAME_WORDS(store.nameProblem.code, standIns));
   else if (standIns) {
     add(store.namedMs > 0
-      ? `some senders in your bot’s groups show as stand-ins because LINE gave no name for them, ${MISSING_WORDS}`
-      : `senders in your bot’s groups show as stand-ins, because the relay sends no names, ${MISSING_WORDS}; put the channel access token in the relay’s Script properties as LINE_TOKEN to turn names on`);
+      ? en('said.lb.someStandIns', { missing: MISSING_WORDS })
+      : en('said.lb.allStandIns', { missing: MISSING_WORDS }));
   }
   return out;
 }
@@ -950,19 +951,19 @@ function linkOf(deploymentId) {
     return ''; // not a deployment id: the link is asked for in Settings, and the rebuilt row says to check it
   }
 }
-const UNREAD = 'The bot’s saved data can’t be read yet, so nothing was changed; see Needs attention.';
-const notSaved = (err) => `Not saved: the bot’s file could not be written (${writeWhy(err?.code)}). Try again; if it keeps failing, ${CLOSE}.`;
+const UNREAD = en('said.lb.unread');
+const notSaved = (err) => en('said.lb.notSaved', { why: writeWhy(err?.code), close: CLOSE });
 const HELD = ['EBUSY', 'EPERM', 'EACCES'];
 const notOff = (err, name) => (HELD.includes(err?.code)
-  ? `Not turned off: the bot’s file ${name} could not be removed (another program has it open). Close any app using the app’s data folder and try again.`
-  : `Not turned off: the bot’s file ${name} could not be removed; the system log has the reason. Try again.`);
+  ? en('said.lb.notOffHeld', { name })
+  : en('said.lb.notOff', { name }));
 const PRUNE_SAY = 2; // failed prunes in a row before it is said
 // 911dc0f's untick file: removed at load and at off, and said while it won't go.
 const UNTICK = (stem) => `${stem}.untick.json`;
 // LINE chats, or the bot, turned on while the bot's off is not finished (Settings says why, below).
-const ON_WAITS = 'LINE chats can’t be turned on until turning the bot off is finished (see below).';
-const BOT_WAITS = `${SWITCH} can’t be turned on until turning the bot off is finished (see below).`;
-const RECORD_WAITS = `Not turned on: the note of the bot’s earlier off (line-bot-store-off.json) could not be deleted; ${CLOSE} and try again.`;
+const ON_WAITS = en('said.lb.onWaits');
+const BOT_WAITS = en('said.lb.botWaits', { botSwitch: SWITCH });
+const RECORD_WAITS = en('said.lb.recordWaits', { close: CLOSE });
 
 class BotKeeper {
   // file: the store; legacyFile: 67909b5's settings file (line-bot.json),
@@ -1394,7 +1395,7 @@ class BotKeeper {
   // with the tick, in the same write.
   readGroup(id, on) {
     if (!this.ready) return { ok: false, error: UNREAD };
-    if (typeof id !== 'string' || !Object.hasOwn(this.store.groups, id)) return { ok: false, error: 'That group is no longer listed; close and reopen Settings.' };
+    if (typeof id !== 'string' || !Object.hasOwn(this.store.groups, id)) return { ok: false, error: en('said.lb.groupGone') };
     const read = this.store.settings.read.filter((x) => x !== id);
     if (on) read.push(id);
     return this.apply(applyTicks({ ...this.store, rebuilt: null, settings: { ...this.store.settings, read } }, new Set(read)));
@@ -1483,8 +1484,8 @@ function offLeft({ storeProblems = [], secretStuck = [], secretBase }) {
 // what to delete and where, in the label, so privacy mode still shows it.
 // A folder that could not be listed ('.') is the 'secretUnlisted' row (main notes it). -> words or null.
 function secretLeftWords(secretStuck, secretBase) {
-  if (secretStuck.some((s) => s.name === secretBase)) return `LINE chats: the bot’s secret could not be deleted; ${CLOSE} and delete ${secretBase} (and any ${secretBase}.*.tmp) from ${DATA_DIR}`;
-  if (secretStuck.some((s) => s.name !== '.')) return `LINE chats: a half-written copy of the bot’s secret could not be deleted; ${CLOSE} and delete ${secretBase}.*.tmp from ${DATA_DIR}`;
+  if (secretStuck.some((s) => s.name === secretBase)) return en('said.lb.secretLeft', { close: CLOSE, base: secretBase, dir: DATA_DIR });
+  if (secretStuck.some((s) => s.name !== '.')) return en('said.lb.secretCopyLeft', { close: CLOSE, base: secretBase, dir: DATA_DIR });
   return null;
 }
 
