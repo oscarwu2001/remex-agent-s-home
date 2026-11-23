@@ -2,7 +2,7 @@
 // board's plan rows. Pure, so the windows draw them and the tests read
 // them in each language. The estimate itself is renderer/plans.js's.
 
-import { tr, escapeHtml as esc } from './i18n.js';
+import { tr, trHtml, raw, escapeHtml as esc } from './i18n.js';
 import { estimate, isPlan, HITS_NEEDED, WINDOWS } from './plans.js';
 import { isRunning } from './overview.js';
 
@@ -29,19 +29,31 @@ export function shownPlan(prefs, snap) {
 }
 
 // What the card and the board say about the plan: its name (null when none
-// is picked), how many hits wait for one, and a line for each window with
-// hits: { kind: 'estimate' | 'over' | 'wait', window, text, row, value,
-// basis }, then { kind: 'zero' | 'paused', text }.
+// is picked), a line for each window with hits ({ kind: 'estimate' | 'over'
+// | 'wait', window, text, row, value, basis }), and notes ({ kind, text,
+// card, board }: where each is said) on hits that wait, expired or are not
+// counted. Without a plan, only the hits waiting for one are said.
 export function planWords(usage, plan) {
   const limits = usage?.limits;
-  if (!isPlan(plan) || plan === 'none') return { plan: null, waiting: limits?.waitingFor === 'plan' ? limits.waiting : 0, lines: [] };
+  const notes = [];
+  const note = (kind, text, { card = true, board = true } = {}) => notes.push({ kind, text, card, board });
+  const waiting = limits?.waiting ?? {};
+  if (waiting.plan) note('waiting', tr('use.waitingPlan', { n: waiting.plan }));
+  if (limits?.expiredPlan) note('expired', tr('use.expiredPlan', { n: limits.expiredPlan }), { board: false });
+  if (!isPlan(plan) || plan === 'none') return { plan: null, lines: [], notes };
   const name = tr(`plan.${plan}`);
-  if (!limits) return { plan: name, waiting: 0, lines: [] };
-  if (limits.paused) return { plan: name, waiting: 0, lines: [{ kind: 'paused', text: tr('use.paused') }] };
+  if (!limits) return { plan: name, lines: [], notes };
+  if (limits.paused) return { plan: name, lines: [], notes: [...notes, { kind: 'paused', text: tr('use.paused'), card: true, board: true }] };
+  if (waiting.wsl) note('waiting', tr('use.waitingWsl', { n: waiting.wsl }));
+  if (waiting.pass) note('waiting', tr('use.waitingPass', { n: waiting.pass }));
   const est = estimate(limits.hits, plan, usage);
   const lines = [];
+  let zeroWaiting = 0;
+  let zero = 0;
   for (const w of WINDOWS) {
     const e = est[w];
+    zero += e.zero;
+    if (e.hits < HITS_NEEDED) zeroWaiting += e.zero;
     if (e.hits && e.hits < HITS_NEEDED) lines.push({ kind: 'wait', window: w, text: tr(`use.after.${w}`, { n: HITS_NEEDED - e.hits }) });
     else if (e.pct !== undefined) {
       const basis = tr('use.basis', { n: e.basis });
@@ -51,26 +63,34 @@ export function planWords(usage, plan) {
         : { kind: 'estimate', window: w, text: tr(`use.estimate.${w}`, { pct: e.pct }), row, value: tr('use.row.about', { pct: e.pct }), basis });
     }
   }
-  const zero = WINDOWS.reduce((n, w) => n + est[w].zero, 0);
-  if (zero) lines.push({ kind: 'zero', text: tr('use.zero', { n: zero }) });
-  return { plan: name, waiting: 0, lines };
+  // On the card only while the estimate they would have helped still waits.
+  if (zeroWaiting) note('zero', tr('use.zero', { n: zeroWaiting }), { board: false });
+  if (zero) note('zero', tr('use.zero', { n: zero }), { card: false });
+  if (limits.unnamed) note('unnamed', tr('use.unnamed', { n: limits.unnamed }));
+  return { plan: name, lines, notes };
 }
+
+const noteHtml = (n) => `<p class="use-note">${esc(n.text)}</p>`;
 
 // The card's plan and estimate lines. With no plan, the line is a button
 // that opens the hospital window's Settings at the plan picker.
 export function planLines(usage, plan) {
   const p = planWords(usage, plan);
-  if (!p.plan) {
-    const waiting = p.waiting ? `<p class="use-note">${esc(tr('use.waitingPlan', { n: p.waiting }))}</p>` : '';
-    return `<button type="button" class="use-pick" title="${esc(tr('use.pickTitle'))}">${esc(tr('use.pick'))}</button>${waiting}`;
-  }
+  const notes = p.notes.filter((n) => n.card).map(noteHtml).join('');
+  if (!p.plan) return `<button type="button" class="use-pick" title="${esc(tr('use.pickTitle'))}">${esc(tr('use.pick'))}</button>${notes}`;
   const lines = p.lines.map((l) => {
-    if (l.kind === 'zero' || l.kind === 'paused') return `<p class="use-note">${esc(l.text)}</p>`;
     const mark = l.kind === 'over' ? '<span class="use-mark" aria-hidden="true">!</span>' : '';
     const basis = l.basis ? `<p class="use-basis">${esc(l.basis)}</p>` : '';
     return `<p class="use-est use-${l.kind}">${mark}${esc(l.text)}</p>${basis}`;
   });
-  return `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(p.plan)}</strong></p>${lines.join('')}`;
+  return `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(p.plan)}</strong></p>${lines.join('')}${notes}`;
+}
+
+// Claude Code's own limit message, passed on as it came; with privacy mode
+// on, without its links (it can carry one, as any text can).
+export function limitText(text, privacy) {
+  const t = String(text ?? '');
+  return privacy ? t.replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b(?:\/\S*)?/gi, tr('use.linkHidden')) : t;
 }
 
 // The running session whose context is fullest, on this computer (other
@@ -102,18 +122,25 @@ function tokensLine(usage) {
 export function useCardHtml(snap, plan) {
   const usage = snap?.usage;
   return `<section class="use" aria-label="${esc(tr('use.title'))}">${planLines(usage, plan)}${contextLine(fullestContext(snap?.sessions))}${tokensLine(usage)}
-      <p class="use-exact">${esc(tr('use.exact'))}</p></section>`;
+      <p class="use-exact">${exactHtml()}</p></section>`;
 }
 
-// The board's rows: the plan, then each window's estimate as a row with its
-// share in bold, the basis under it; other lines as hints.
+// Where the exact numbers are, the path kept on one line.
+export const exactHtml = () => trHtml('use.exact', { path: raw(`<span class="use-path">${esc(tr('use.exactPath'))}</span>`) });
+
+// The board's rows: the plan, what waits for it, then each window's
+// estimate as a row with its share in bold, the basis under it; other
+// lines and notes as hints.
 export function planRowsHtml(usage, plan) {
   const p = planWords(usage, plan);
   const row = (label, value, basis = '') => `<div class="usage-row"><span>${esc(label)}</span><strong>${value}</strong>${basis ? `<span class="muted">${esc(basis)}</span>` : ''}</div>`;
+  const hint = (n) => `<p class="hint">${esc(n.text)}</p>`;
+  const notes = p.notes.filter((n) => n.board);
   const lines = p.lines.map((l) => {
     if (l.kind === 'estimate') return row(l.row, esc(l.value), l.basis);
     if (l.kind === 'over') return row(l.row, `⚠ ${esc(l.value)}`, l.basis);
-    return `<p class="hint">${esc(l.text)}</p>`;
+    return hint(l);
   });
-  return row(tr('use.plan'), esc(p.plan ?? tr('plan.none'))) + lines.join('');
+  return row(tr('use.plan'), esc(p.plan ?? tr('plan.none'))) + notes.filter((n) => n.kind === 'waiting').map(hint).join('')
+    + lines.join('') + notes.filter((n) => n.kind !== 'waiting').map(hint).join('');
 }

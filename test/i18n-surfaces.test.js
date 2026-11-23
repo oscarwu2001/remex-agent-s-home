@@ -124,9 +124,11 @@ function snapshot() {
       { computer: '桌機', online: false, at: now - 90 * min, sessions: [] },
     ] },
     field: { enabled: true, summary: { newSince: 3 }, fetchedAt: now - 30 * min, error: '失敗' },
-    // Two 5-hour hits and one weekly hit for the plan shown, and 5 hours' use past their level.
+    // Two 5-hour hits and one weekly hit for the plan shown, 5 hours' use past their level, one weekly
+    // hit with no use before it, hits waiting, one that expired waiting for a plan, and unnamed messages.
     usage: { last5h: { total: 2_627_000 }, today: { total: 2_627_000 }, week: { total: 29_752_000 },
-      limits: { paused: false, hits: [{ at: 1, plan: 'max5', window: '5h', tokens: 2_000_000 }, { at: 2, plan: 'max5', window: '5h', tokens: 2_400_000 }, { at: 3, plan: 'max5', window: 'week', tokens: 40_000_000 }] } },
+      limits: { paused: false, hits: [{ at: 1, plan: 'max5', window: '5h', tokens: 2_000_000 }, { at: 2, plan: 'max5', window: '5h', tokens: 2_400_000 }, { at: 3, plan: 'max5', window: 'week', tokens: 40_000_000 }, { at: 4, plan: 'max5', window: 'week', tokens: 0 }],
+        waiting: { file: 0, pass: 1, wsl: 2, plan: 0 }, expiredPlan: 1, unnamed: 3 } },
   };
 }
 
@@ -141,6 +143,7 @@ test('the mini window\'s Now tab and headline read in Chinese, privacy mode on a
       assert.match(list, /估計：已超過/);
       assert.match(list, /每週估計|每週用量/);
       assert.match(list, /精確用量/);
+      for (const words of [/要等 WSL 執行時才計入/, /要等所有對話記錄資料夾都讀完/, /沒有說是哪一種上限/, /等你選擇方案超過 7 天/, /有 1 次碰到上限沒有計入/]) assert.match(list, words);
       assert.match(list, /等你處理/);
       assert.match(list, /輪到你了/);
       assert.equal(list.includes('做乙中'), !privacy, 'to-do wording only with privacy off');

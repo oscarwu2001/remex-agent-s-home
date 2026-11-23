@@ -12,24 +12,25 @@ const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&#39;/g, "'").repl
 const totals = (total) => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total, fresh: total, replies: 1 });
 const hit = (at, plan, window, tokens) => ({ at, plan, window, tokens });
 // 3000 tokens in 5 hours against hits at 10000 and 14000: a quarter of 12000.
-const snap = (hits, { paused = false, last5h = 2_627_000, week = 29_752_000, sessions = [], waiting = 0, waitingFor = null } = {}) => ({
+const snap = (hits, { paused = false, last5h = 2_627_000, week = 29_752_000, sessions = [], waiting = {}, expiredPlan = 0, unnamed = 0 } = {}) => ({
   sessions,
-  usage: { last5h: totals(last5h), today: totals(last5h), week: totals(week), limits: { paused, hits, waiting, waitingFor, expired: 0 } },
+  usage: { last5h: totals(last5h), today: totals(last5h), week: totals(week),
+    limits: { paused, hits, waiting: { file: 0, pass: 0, wsl: 0, plan: 0, ...waiting }, expiredPlan, unnamed } },
 });
 const twoHits = [hit(1, 'pro', '5h', 10_000), hit(2, 'pro', '5h', 14_000)];
 
 test('plan not set: the card\'s first line is a button to Agent\'s Home\'s Settings, and no estimate is made', async () => {
   const { useCardHtml } = await load();
   const html = useCardHtml(snap(twoHits, { last5h: 3000 }), 'none');
-  assert.match(html, /^<section class="use"[^>]*><button type="button" class="use-pick" title="Opens Settings in the hospital window, at the plan picker">Pick your plan in Agent&#39;s Home&#39;s Settings<\/button>/);
+  assert.match(html, /^<section class="use"[^>]*><button type="button" class="use-pick" title="Opens Settings in the hospital window, at the plan picker">Pick your plan in Agent&#39;s Home Settings<\/button>/);
   assert.doesNotMatch(text(html), /Estimate/);
   assert.match(text(html), /Exact limits: Claude app → Settings → Usage/);
 });
 
 test('plan not set, with hits waiting for one: the card says how many', async () => {
   const { useCardHtml } = await load();
-  assert.match(text(useCardHtml(snap([], { waiting: 2, waitingFor: 'plan' }), 'none')), /2 limit hits are waiting for your plan/);
-  assert.doesNotMatch(text(useCardHtml(snap([], { waiting: 2, waitingFor: 'pass' }), 'none')), /waiting/);
+  assert.match(text(useCardHtml(snap([], { waiting: { plan: 2 } }), 'none')), /2 limit hits are waiting for your plan/);
+  assert.doesNotMatch(text(useCardHtml(snap([], { waiting: { pass: 2 } }), 'none')), /wait/);
 });
 
 test('two hits for the plan: "about N% of your 5-hour limit used", its basis on its own line', async () => {
@@ -54,6 +55,42 @@ test('hits with no Claude Code use before them are said, not dropped', async () 
   assert.match(t, /1 limit hit not counted: no Claude Code use on this computer before it/);
   assert.match(t, /5-hour estimate: after 1 more limit hit/);
   assert.match(text(planRowsHtml(snap([...hits, hit(3, 'pro', 'week', 0)]).usage, 'pro')), /2 limit hits not counted: no Claude Code use on this computer before them/);
+  // Once the window's estimate stands, the card no longer says it; the board does.
+  const learned = [...twoHits, hit(3, 'pro', '5h', 0)];
+  assert.doesNotMatch(text(useCardHtml(snap(learned, { last5h: 3000 }), 'pro')), /not counted/);
+  assert.match(text(planRowsHtml(snap(learned, { last5h: 3000 }).usage, 'pro')), /1 limit hit not counted/);
+});
+
+test('hits waiting for WSL or for every folder to be read are said with a count, on the card and the board', async () => {
+  const { useCardHtml, planRowsHtml } = await load();
+  const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 2, pass: 1 } });
+  for (const t of [text(useCardHtml(s, 'pro')), text(planRowsHtml(s.usage, 'pro'))]) {
+    assert.match(t, /2 limit hits wait until WSL is running, so its use is counted/);
+    assert.match(t, /1 limit hit waits until every transcript folder has been read/);
+  }
+});
+
+test('limit messages that named no limit are said as not counted; hits that waited over 7 days for a plan are said on the card only', async () => {
+  const { useCardHtml, planRowsHtml } = await load();
+  const s = snap(twoHits, { last5h: 3000, unnamed: 3, expiredPlan: 1 });
+  const card = text(useCardHtml(s, 'pro'));
+  assert.match(card, /3 limit messages did not say which limit, so they are not counted/);
+  assert.match(card, /1 limit hit was not counted: it waited over 7 days for you to pick a plan/);
+  const board = text(planRowsHtml(s.usage, 'pro'));
+  assert.match(board, /3 limit messages did not say which limit/);
+  assert.doesNotMatch(board, /pick a plan/);
+});
+
+test('the board says what waits for a plan under its plan row', async () => {
+  const { planRowsHtml } = await load();
+  assert.equal(text(planRowsHtml(snap([], { waiting: { plan: 1 } }).usage, 'none')), 'Plan Not set 1 limit hit is waiting for your plan');
+});
+
+test('with privacy on, Claude Code\'s limit message is passed on without its links', async () => {
+  const { limitText } = await load();
+  const msg = 'You\'ve hit your session limit · resets 6pm (Europe/London). See https://example.test/upgrade or claude.ai/settings, or www.example.test.';
+  assert.equal(limitText(msg, true), 'You\'ve hit your session limit · resets 6pm (Europe/London). See [link hidden] or [link hidden] or [link hidden]');
+  assert.equal(limitText(msg, false), msg);
 });
 
 test('another plan\'s hits make no estimate: a new plan starts its own count', async () => {
@@ -121,7 +158,8 @@ test('the card in Chinese: both apps named, plan, estimate, basis and the wait',
     const t = text(useCardHtml(snap(twoHits, { last5h: 3000 }), 'pro'));
     assert.match(t, /方案 Pro/);
     assert.match(t, /估計：5 小時上限已用約 25% （依前 2 次碰到上限推算）/);
-    assert.match(t, /精確用量：Claude App → 設定 → 用量/);
+    assert.match(text(useCardHtml(snap([hit(1, 'pro', '5h', 10), hit(2, 'pro', '5h', 0)]), 'pro')), /有 1 次碰到上限沒有計入/);
+    assert.match(t, /精確用量：\s?Claude App → 設定 → 用量/);
     assert.match(text(useCardHtml(snap([]), 'none')), /^請在 Agent's Home 的設定中選擇方案/);
     assert.match(text(useCardHtml(snap([hit(1, 'pro', 'week', 5)]), 'pro')), /每週估計：再碰到 1 次上限就開始/);
   } finally {

@@ -95,10 +95,12 @@ body { min-height: 100vh; overflow-x: hidden; }
 /* ---- plan and use -------------------------------------------------------- */
 
 .use {
-  display: grid; gap: 6px; margin: var(--s-1) 0 var(--s-3); padding: var(--s-3);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: var(--s-1) 0 var(--s-3); padding: var(--s-3);
   background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
   font-size: 12.5px; font-variant-numeric: tabular-nums;
 }
+/* A long project name or translation truncates or wraps inside the card, never past it. */
+.use > * { min-width: 0; }
 .use-label, .use-basis, .use-wait, .use-note, .use-exact, .use-sep { color: var(--ink-muted); }
 .use-plan { font-size: 13px; }
 .use-plan strong { margin-left: 2px; }
@@ -117,7 +119,7 @@ body { min-height: 100vh; overflow-x: hidden; }
   display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px;
   border-radius: 50%; background: var(--warn-soft); color: var(--warn); font-size: 11px; line-height: 1;
 }
-.use-ctx { display: grid; gap: 4px; }
+.use-ctx { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .use-ctx-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
 .use-ctx-head .use-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .use-pct { flex: none; }
@@ -126,6 +128,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 .use-ctx.full .use-bar > span { background: var(--warn); }
 .use-full { color: var(--warn); font-size: 11.5px; }
 .use-exact { font-size: 11.5px; }
+.use-path { white-space: nowrap; }
 
 /* ---- to-dos -------------------------------------------------------------- */
 

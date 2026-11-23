@@ -19,7 +19,7 @@ import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, 
 import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english, dateLocale } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
-import { compact, CONTEXT_WARN, planRowsHtml, shownPlan, OPEN_PLAN } from './usage-view.js';
+import { compact, CONTEXT_WARN, planRowsHtml, shownPlan, OPEN_PLAN, limitText, exactHtml } from './usage-view.js';
 import { PLANS, isPlan } from './plans.js';
 
 installTips();
@@ -1410,7 +1410,7 @@ function render(force = false) {
     snapshot.sessions.map((x) => [x.id, x.status, x.activity?.label, x.activity?.detail, compact(x.tokensWithHelpers ?? 0),
       x.agents.map((a) => [a.id, a.status, a.activity?.label, a.activity?.detail, compact(a.tokens?.total ?? 0)])]),
     chart, problems, (snapshot.roster || []).length, selected, prefs.private, warnings,
-    snapshot.usage ? [snapshot.usage.last5h.total, snapshot.usage.today.total, snapshot.usage.limitNotice?.ts, prefs.budget5h] : null,
+    snapshot.usage ? [snapshot.usage.last5h.total, snapshot.usage.today.total, snapshot.usage.limitNotice?.ts, prefs.budget5h, prefs.plan, snapshot.usage.limits] : null,
     snapshot.sessions.map((x) => Math.round((x.context?.pct ?? 0) * 100)),
     snapshot.sessions.map((x) => (x.todos ? [x.todos.done, x.todos.total, x.todos.doing] : 0)),
     running.key, snapshot.fleet?.on,
@@ -1644,9 +1644,9 @@ function renderUsage(s) {
         <span style="width:${pct}%"></span></div><p class="hint">${escapeXml(tr('usage.pct', { pct, budget: compact(prefs.budget5h) }))}</p>`;
     })()
     : '';
-  const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(u.limitNotice.text)}</p>` : '';
+  const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(limitText(u.limitNotice.text, prefs.private))}</p>` : '';
   $('usage-body').innerHTML = `${limit}${planRowsHtml(u, shownPlan(prefs, s))}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}
-    <p class="hint">${escapeXml(tr('use.exact'))}</p>`;
+    <p class="hint">${exactHtml()}</p>`;
 }
 
 // Warnings are raised once each: per session when its context passes the
@@ -1665,10 +1665,10 @@ function checkWarnings(s) {
     if (sess.context?.pct >= CONTEXT_WARN) {
       raise(`ctx:${sess.id}`, tr('warn.context', { project: sess.project, pct: Math.round(sess.context.pct * 100) }));
     }
-    if (sess.limitNotice) raise(`limit:${sess.id}:${sess.limitNotice.ts}`, tr('warn.limitSession', { project: sess.project, text: sess.limitNotice.text }));
+    if (sess.limitNotice) raise(`limit:${sess.id}:${sess.limitNotice.ts}`, tr('warn.limitSession', { project: sess.project, text: limitText(sess.limitNotice.text, prefs.private) }));
   }
   const u = s.usage;
-  if (u?.limitNotice && !s.sessions.some((x) => x.limitNotice)) raise(`limit:all:${u.limitNotice.ts}`, tr('warn.limit', { text: u.limitNotice.text }));
+  if (u?.limitNotice && !s.sessions.some((x) => x.limitNotice)) raise(`limit:all:${u.limitNotice.ts}`, tr('warn.limit', { text: limitText(u.limitNotice.text, prefs.private) }));
   if (u && prefs.budget5h > 0) {
     const window = Math.floor(Date.now() / (5 * 3_600_000));
     for (const level of [0.8, 1]) {
@@ -3712,7 +3712,7 @@ function groupSummaries() {
           : f.fetchedAt ? 'summary.field.updated' : 'summary.field.notYet', { age: f?.fetchedAt ? fieldAge(f.fetchedAt) : '' });
   return {
     look: `${theme} · ${time}`,
-    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${tr('summary.plan', { plan: tr(`plan.${isPlan(prefs.plan) ? prefs.plan : 'none'}`) })} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
+    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${isPlan(prefs.plan) && prefs.plan !== 'none' ? tr('summary.plan', { plan: tr(`plan.${prefs.plan}`) }) : tr('summary.planNone')} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
     connect: `${field} · ${lineSummary(lineState())} · ${tr(snapshot?.fleet?.on ? 'summary.fleet.on' : 'summary.fleet.off')}`,
     agents: tr('summary.report', { period: $('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? tr('settings.report.days', { n: 28 }).toLowerCase() }),
     app: `${updateSummary}${prefs.demo ? ` · ${tr('summary.demoOn')}` : ''}`,

@@ -227,9 +227,9 @@ export function demoSnapshot(nowMs, epochMs) {
           { at: nowMs - 20 * 86_400_000, plan: 'pro', window: '5h', tokens: 1_800_000 },
           { at: nowMs - 18 * 86_400_000, plan: 'pro', window: '5h', tokens: 0 },
         ],
-        waiting: 0,
-        waitingFor: null,
-        expired: 0,
+        waiting: { file: 0, pass: 0, wsl: 0, plan: 0 },
+        expiredPlan: 0,
+        unnamed: 0,
       },
     },
   };
