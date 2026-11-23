@@ -32,6 +32,7 @@ and never overwrites anything already there.
 | `write-docs` | docs for one reader, every claim checked in the code | `documenting` |
 | `save-as-skill` | a way of working that just worked, saved as a skill | `distill` |
 | `scan-projects` | finds your projects, groups copies, asks you, saves the list | — |
+| `drawing-record` | 圖面紀錄助手: a one-page record, in Traditional Chinese, of how you checked a drawing (what, conventions as rules, how you asked, corrections), saved in `紀錄/` only after you say 「好」 | — |
 
 Every agent and skill follows the same few rules:
 

@@ -15,7 +15,7 @@ test('the pack lists its agents and skills with a one-line summary each', () => 
   const items = listPack(PACK);
   assert.deepEqual(items.filter((i) => i.kind === 'agent').map((i) => i.name).sort(), ['builder', 'checker', 'code-reviewer', 'data-helper', 'personal-assistant', 'planner', 'project-manager', 'researcher', 'silent-failure-hunter', 'summariser', 'test-runner', 'ui-reviewer', 'writer']);
   assert.deepEqual(items.filter((i) => i.kind === 'hook').map((i) => i.name), ['team-reminders']);
-  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'find-the-bug', 'handover', 'question-me', 'save-as-skill', 'scan-projects', 'teach-me', 'write-docs', 'write-spec']);
+  assert.deepEqual(items.filter((i) => i.kind === 'skill').map((i) => i.name).sort(), ['break-down', 'drawing-record', 'find-the-bug', 'handover', 'question-me', 'save-as-skill', 'scan-projects', 'teach-me', 'write-docs', 'write-spec']);
   for (const i of items) assert.ok(i.summary.length > 10 && i.summary.length <= 120, i.name);
 });
 

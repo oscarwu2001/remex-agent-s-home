@@ -314,6 +314,8 @@ export default {
   'pack.added': '已加入 Claude。請開始新的 Claude 工作階段來使用。',
   'pack.name.handover': '交接筆記',
   'pack.name.break-down': '拆解成工作項目',
+  'pack.name.drawing-record': '圖面紀錄助手',
+  'pack.summary.drawing-record': '把這次用 Claude 檢查圖面的方式寫成一頁紀錄',
   'pack.name.team-reminders': '團隊提醒',
 
   // Each office team item's name and what it does (the pack's own words in

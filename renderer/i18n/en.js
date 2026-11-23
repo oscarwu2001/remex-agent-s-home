@@ -314,6 +314,8 @@ export default {
   'pack.added': { one: 'Added to Claude. Start a new Claude session to use it.', other: 'Added to Claude. Start a new Claude session to use them.' },
   'pack.name.handover': 'Handover note',
   'pack.name.break-down': 'Break into tasks',
+  'pack.name.drawing-record': 'Drawing record helper',
+  'pack.summary.drawing-record': 'Writes a one-page record of how the user checked a drawing with Claude',
   'pack.name.team-reminders': 'Team reminders',
 
   // Each office team item's name and what it does (the pack's own words in
