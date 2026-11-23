@@ -82,6 +82,17 @@ test('every row core and main build reads in Chinese, with no English left but n
   assert.deepEqual(left.map(([label, zh]) => `${label}\n  -> ${zh}\n  left: ${english(zh).join(' ')}`), []);
 });
 
+test('the limit hits file\'s rows read back as their entries and in Chinese, with only the file name and codes left', () => {
+  const rows = [['said.limits.notRead', { code: 'EBUSY' }], ['said.limits.notShape', {}], ['said.limits.notSaved', { code: 'EACCES' }]];
+  for (const [key, params] of rows) {
+    const label = en(key, params);
+    assert.equal(i18n.unsay(label)?.key, key, label);
+    const zh = i18n.sayIn('zh-TW', label);
+    assert.notEqual(zh, label);
+    assert.deepEqual(english(zh), [], zh);
+  }
+});
+
 test('a wrapper is never read into the part it wraps', () => {
   const wrapped = en('said.main.projectList', { what: en('said.projects.unreadable', { code: 'EBUSY' }) });
   assert.equal(i18n.sayIn('zh-TW', wrapped), `${i18n.translate('zh-TW', 'said.main.projectList', { what: i18n.translate('zh-TW', 'said.projects.unreadable', { code: 'EBUSY' }) })}`);

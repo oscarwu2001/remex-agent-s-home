@@ -28,6 +28,7 @@ const lineChat = require('../src/core/linechat');
 const lineBot = require('../src/core/linebot');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
+const { LimitBook, isPlan } = require('../src/core/limits');
 const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
 const i18n = require('../src/core/i18n');
 
@@ -1226,19 +1227,47 @@ app.whenReady().then(() => {
 
   // Claude Code use over 5 hours, today and 7 days, from every transcript
   // folder the app watches. A pass reads only lines added since the last.
+  // It also records the limit hits it read (src/core/limits.js) under the
+  // plan picked in Settings: until the window has said which, they wait in
+  // the scanner, which keeps them for 7 days.
   const usage = new UsageScanner({ roots: [] });
+  const limitBook = new LimitBook({ file: path.join(app.getPath('userData'), 'usage-limits.json') });
+  limitBook.load();
+  let usagePlan; // set by home:plan
+  let usageScanned = false;
   let usageSummary;
+  const takeLimits = () => {
+    if (usagePlan === undefined) limitBook.load();
+    else limitBook.take(usage.limitHits(), usagePlan, usage);
+    usageSummary = { ...usage.summary(), limits: limitBook.view() };
+  };
   (async function followUsage() {
     try {
       usage.setRoots(allRoots());
       await usage.scan();
-      usageSummary = usage.summary();
+      usageScanned = true;
+      takeLimits();
     } catch (err) {
       problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
     } finally {
       setTimeout(followUsage, 60_000);
     }
   })();
+  // The plan picked in Settings, said by the window as it starts and on
+  // each pick (the preferences are the window's).
+  ipcMain.handle('home:plan', (_event, id) => {
+    if (!isPlan(id)) return { ok: false, error: en('said.main.unknownPlan') };
+    const first = usagePlan === undefined;
+    usagePlan = id;
+    if (first && usageScanned) {
+      try {
+        takeLimits();
+      } catch (err) {
+        problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
+      }
+    }
+    return { ok: true };
+  });
 
   // Desktop notifications, asked for by the page (context nearly full, a
   // usage limit, the user's own warning level). Shown by Windows, locally.
@@ -2474,12 +2503,13 @@ app.whenReady().then(() => {
         ...assistant.problems.map((label) => ({ label: en('said.main.assistant', { what: label }), detail: assistantPath, count: 1 })),
         ...(usageSummary?.problems ?? []).map((p) => ({ label: en('said.main.usageTranscript', { what: p.what }), detail: p.where, count: 1 })),
         ...(usageSummary?.unreadable ? [{ label: en('said.main.usageUnreadable'), detail: '', count: usageSummary.unreadable }] : []),
+        ...limitBook.problems().map((p) => ({ ...p, count: 1 })),
       ],
     };
     if (mainOpen) win.webContents.send('home:snapshot', payload);
     if (miniOpen) mini.webContents.send('home:snapshot', payload);
     // Problems that do not come through problem() go to the log once each.
-    for (const p of [...wsl.problems, ...roster.problems]) {
+    for (const p of [...wsl.problems, ...roster.problems, ...limitBook.problems()]) {
       const key = `${p.label}|${p.detail ?? ''}`;
       if (seenProblems.has(key)) continue;
       seenProblems.add(key);

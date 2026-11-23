@@ -158,4 +158,4 @@ class LimitBook {
   }
 }
 
-module.exports = { hitWindow, LimitBook, GRACE_MS };
+module.exports = { hitWindow, LimitBook, GRACE_MS, isPlan };

@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('agentsHome', {
   logOpen: () => ipcRenderer.invoke('home:log-open'),
   logError: (info) => ipcRenderer.invoke('home:log-error', info),
   useLanguage: (id, opts) => ipcRenderer.invoke('home:language', id, opts),
+  usePlan: (id) => ipcRenderer.invoke('home:plan', id),
   missingWords: (info) => ipcRenderer.invoke('home:missing-words', info),
   buildReport: (days, details) => ipcRenderer.invoke('home:build-report', days, details),
   showReportFiles: () => ipcRenderer.invoke('home:show-report-files'),

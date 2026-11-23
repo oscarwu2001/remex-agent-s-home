@@ -24,22 +24,31 @@ export function shownPlan(prefs, snap) {
   return 'none';
 }
 
-// The plan, then each window's estimate or how far it is from one.
-export function planLines(usage, plan) {
-  if (!isPlan(plan) || plan === 'none') return `<p class="use-plan use-pick">${esc(tr('use.pickPlan'))}</p>`;
-  const head = `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(tr(`plan.${plan}`))}</strong></p>`;
+// The plan's name (null when none is picked) and a line for each window
+// with hits: { kind: 'wait' | 'estimate' | 'over' | 'paused', text, basis }.
+export function planWords(usage, plan) {
+  if (!isPlan(plan) || plan === 'none') return { plan: null, lines: [] };
+  const name = tr(`plan.${plan}`);
   const limits = usage?.limits;
-  if (!limits) return head;
-  if (limits.paused) return `${head}<p class="use-est use-paused">${esc(tr('use.paused'))}</p>`;
+  if (!limits) return { plan: name, lines: [] };
+  if (limits.paused) return { plan: name, lines: [{ kind: 'paused', text: tr('use.paused') }] };
   const est = estimate(limits.hits, plan, usage);
-  const lines = WINDOWS.map((w) => {
+  // A window with hits enough but no use counted yet says nothing.
+  const lines = WINDOWS.filter((w) => est[w].hits && (est[w].hits < HITS_NEEDED || est[w].pct !== undefined)).map((w) => {
     const e = est[w];
-    if (!e.hits) return '';
-    if (e.hits < HITS_NEEDED || e.pct === undefined) return `<p class="use-est use-wait">${esc(tr(`use.after.${w}`, { need: HITS_NEEDED, n: e.hits }))}</p>`;
-    const words = e.over ? tr(`use.over.${w}`) : tr(`use.estimate.${w}`, { pct: e.pct });
-    return `<p class="use-est${e.over ? ' use-over' : ''}">${e.over ? '<span class="use-mark" aria-hidden="true">!</span>' : ''}${esc(words)} <span class="use-basis">${esc(tr('use.basis', { n: e.basis }))}</span></p>`;
+    if (e.hits < HITS_NEEDED) return { kind: 'wait', text: tr(`use.after.${w}`, { need: HITS_NEEDED, n: e.hits }) };
+    const basis = tr('use.basis', { n: e.basis });
+    return e.over ? { kind: 'over', text: tr(`use.over.${w}`), basis } : { kind: 'estimate', text: tr(`use.estimate.${w}`, { pct: e.pct }), basis };
   });
-  return head + lines.join('');
+  return { plan: name, lines };
+}
+
+// The card's plan and estimate lines.
+export function planLines(usage, plan) {
+  const p = planWords(usage, plan);
+  if (!p.plan) return `<p class="use-plan use-pick">${esc(tr('use.pickPlan'))}</p>`;
+  const lines = p.lines.map((l) => `<p class="use-est use-${l.kind}">${l.kind === 'over' ? '<span class="use-mark" aria-hidden="true">!</span>' : ''}${esc(l.text)}${l.basis ? ` <span class="use-basis">${esc(l.basis)}</span>` : ''}</p>`);
+  return `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(p.plan)}</strong></p>${lines.join('')}`;
 }
 
 // The running session whose context is fullest, on this computer (other

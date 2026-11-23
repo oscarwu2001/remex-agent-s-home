@@ -99,7 +99,7 @@ body { min-height: 100vh; overflow-x: hidden; }
   background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
   font-size: 12.5px; font-variant-numeric: tabular-nums;
 }
-.use-label, .use-basis, .use-wait, .use-exact, .use-sep { color: var(--ink-muted); }
+.use-label, .use-basis, .use-wait, .use-paused, .use-exact, .use-sep { color: var(--ink-muted); }
 .use-plan { font-size: 13px; }
 .use-plan strong { margin-left: 2px; }
 .use-pick { color: var(--accent); }

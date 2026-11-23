@@ -19,6 +19,8 @@ import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, 
 import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english, dateLocale } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
+import { compact, CONTEXT_WARN, planWords, shownPlan } from './usage-view.js';
+import { PLANS, isPlan } from './plans.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -101,6 +103,7 @@ if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.tim
 const WEATHERS = ['clear', 'cloudy', 'rain', 'snow', 'fog'];
 const weatherName = (w) => tr(`weather.${w}`);
 if (!WEATHERS.includes(prefs.weather) && prefs.weather !== 'changing') prefs.weather = 'clear';
+if (prefs.plan !== undefined && !isPlan(prefs.plan)) delete prefs.plan; // not set
 if (!prefs.live || typeof prefs.live !== 'object') prefs.live = { on: false, place: null, unit: 'celsius' };
 prefs.live = { on: prefs.live.on === true, place: prefs.live.place ?? null, unit: prefs.live.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius' };
 
@@ -1172,19 +1175,11 @@ bridge.onSnapshot?.((s) => {
   liveSnapshot = s;
 });
 
-// 1234 -> "1.2k", 3456789 -> "3.5M".
-function compact(n) {
-  if (n < 1000) return String(n);
-  if (n < 1e6) return `${(n / 1000).toFixed(n < 1e4 ? 1 : 0)}k`;
-  return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)}M`;
-}
-
 // A session row counts its helpers' tokens too; a helper row its own.
 function rowTokens(x, sub) {
   return sub ? x.tokens?.total : x.tokensWithHelpers ?? x.tokens?.total;
 }
 
-const CONTEXT_WARN = 0.85; // share of the context at which a session is flagged
 
 function rowHtml(key, x, name, sub) {
   const what = statusText(x);
@@ -1650,7 +1645,14 @@ function renderUsage(s) {
     })()
     : '';
   const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(u.limitNotice.text)}</p>` : '';
-  $('usage-body').innerHTML = `${limit}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}`;
+  const p = planWords(u, shownPlan(prefs, s));
+  const plan = p.plan
+    ? `<div class="usage-row"><span>${escapeXml(tr('use.plan'))}</span><strong>${escapeXml(p.plan)}</strong></div>`
+    : `<p class="hint">${escapeXml(tr('use.pickPlan'))}</p>`;
+  // Past the learned level reads like Claude Code's own limit message.
+  const estimates = p.lines.map((l) => `<p class="${l.kind === 'over' ? 'form-error' : 'hint'}">${l.kind === 'over' ? '⚠ ' : ''}${escapeXml(l.text)}${l.basis ? ` <span class="muted">${escapeXml(l.basis)}</span>` : ''}</p>`).join('');
+  $('usage-body').innerHTML = `${limit}${plan}${estimates}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}
+    <p class="hint">${escapeXml(tr('use.exact'))}</p>`;
 }
 
 // Warnings are raised once each: per session when its context passes the
@@ -1707,6 +1709,33 @@ function notifyWaits(s) {
   // The first look only learns what is running: nothing has ended yet.
   if (endWatch && prefs.notifyEnds) for (const e of ended) tell(`end:${e.key}`, e.text);
   endWatch = running;
+}
+
+// The plan, picked in Settings and saved with the preferences; the mini
+// window follows the storage. The main process records limit hits under
+// it, so it is told at start and on each pick.
+function tellPlan() {
+  if (!bridge.usePlan) return; // the browser preview records nothing
+  const note = $('plan-note');
+  const failed = (why) => {
+    note.textContent = tr('settings.plan.notTold', { why });
+    note.hidden = false;
+  };
+  bridge.usePlan(isPlan(prefs.plan) ? prefs.plan : 'none').then((res) => { if (!res?.ok) failed(said(res?.error ?? '')); }, (err) => failed(err.message));
+}
+{
+  const pick = $('opt-plan');
+  pick.innerHTML = PLANS.map((id) => `<option value="${id}">${escapeXml(tr(`plan.${id}`))}</option>`).join('');
+  pick.value = isPlan(prefs.plan) ? prefs.plan : 'none';
+  pick.addEventListener('change', () => {
+    prefs.plan = pick.value;
+    const note = $('plan-note');
+    note.hidden = savePrefs();
+    note.textContent = note.hidden ? '' : tr('settings.plan.notSaved');
+    tellPlan();
+    render(true);
+  });
+  tellPlan();
 }
 
 $('opt-budget').value = prefs.budget5h > 0 ? String(prefs.budget5h) : '';
@@ -3669,7 +3698,7 @@ function groupSummaries() {
           : f.fetchedAt ? 'summary.field.updated' : 'summary.field.notYet', { age: f?.fetchedAt ? fieldAge(f.fetchedAt) : '' });
   return {
     look: `${theme} · ${time}`,
-    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
+    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${isPlan(prefs.plan) && prefs.plan !== 'none' ? tr(`plan.${prefs.plan}`) : tr('summary.plan.none')} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
     connect: `${field} · ${lineSummary(lineState())} · ${tr(snapshot?.fleet?.on ? 'summary.fleet.on' : 'summary.fleet.off')}`,
     agents: tr('summary.report', { period: $('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? tr('settings.report.days', { n: 28 }).toLowerCase() }),
     app: `${updateSummary}${prefs.demo ? ` · ${tr('summary.demoOn')}` : ''}`,

@@ -196,6 +196,10 @@
           <section class="settings-group" aria-labelledby="warn-h">
             <h4 id="warn-h" tabindex="-1" data-i18n="settings.warn"></h4>
             <p class="hint" data-i18n="settings.warn.hint"></p>
+            <label class="field" for="opt-plan"><span data-i18n="settings.plan"></span>
+              <select id="opt-plan" aria-describedby="plan-hint"></select></label>
+            <p class="hint" id="plan-hint" data-i18n="settings.plan.hint"></p>
+            <p class="form-error" id="plan-note" role="status" hidden></p>
             <label class="field" for="opt-budget"><span data-i18n="settings.budget"></span>
               <input id="opt-budget" type="number" min="0" step="100000" inputmode="numeric" data-i18n-placeholder="settings.budget.example"></label>
             <label class="switch"><input type="checkbox" id="opt-notify" checked> <span data-i18n="settings.notify"></span></label>
