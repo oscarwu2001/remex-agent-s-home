@@ -72,19 +72,22 @@ export function planWords(usage, plan) {
 
 const noteHtml = (n) => `<p class="use-note">${esc(n.text)}</p>`;
 
-// The card's plan and estimate lines. With no plan, the line is a button
+// The card's plan and estimate lines (its notes come after the tokens,
+// planNotesHtml). With no plan, the line is a button
 // that opens the hospital window's Settings at the plan picker.
 export function planLines(usage, plan) {
   const p = planWords(usage, plan);
-  const notes = p.notes.filter((n) => n.card).map(noteHtml).join('');
-  if (!p.plan) return `<button type="button" class="use-pick" title="${esc(tr('use.pickTitle'))}">${esc(tr('use.pick'))}</button>${notes}`;
+  if (!p.plan) return `<button type="button" class="use-pick" title="${esc(tr('use.pickTitle'))}">${esc(tr('use.pick'))}</button>`;
   const lines = p.lines.map((l) => {
     const mark = l.kind === 'over' ? '<span class="use-mark" aria-hidden="true">!</span>' : '';
     const basis = l.basis ? `<p class="use-basis">${esc(l.basis)}</p>` : '';
     return `<p class="use-est use-${l.kind}">${mark}${esc(l.text)}</p>${basis}`;
   });
-  return `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(p.plan)}</strong></p>${lines.join('')}${notes}`;
+  return `<p class="use-plan"><span class="use-label">${esc(tr('use.plan'))}</span> <strong>${esc(p.plan)}</strong></p>${lines.join('')}`;
 }
+
+// The card's notes: what waits, expired or is not counted.
+export const planNotesHtml = (usage, plan) => planWords(usage, plan).notes.filter((n) => n.card).map(noteHtml).join('');
 
 // Claude Code's own limit message, passed on as it came; with privacy mode
 // on, without its links (it can carry one, as any text can).
@@ -121,16 +124,15 @@ function tokensLine(usage) {
 // over 5 hours and 7 days, and where the exact numbers are.
 export function useCardHtml(snap, plan) {
   const usage = snap?.usage;
-  return `<section class="use" aria-label="${esc(tr('use.title'))}">${planLines(usage, plan)}${contextLine(fullestContext(snap?.sessions))}${tokensLine(usage)}
+  return `<section class="use" aria-label="${esc(tr('use.title'))}">${planLines(usage, plan)}${contextLine(fullestContext(snap?.sessions))}${tokensLine(usage)}${planNotesHtml(usage, plan)}
       <p class="use-exact">${exactHtml()}</p></section>`;
 }
 
 // Where the exact numbers are, the path kept on one line.
 export const exactHtml = () => trHtml('use.exact', { path: raw(`<span class="use-path">${esc(tr('use.exactPath'))}</span>`) });
 
-// The board's rows: the plan, what waits for it, then each window's
-// estimate as a row with its share in bold, the basis under it; other
-// lines and notes as hints.
+// The board's rows: the plan, then each window's estimate as a row with
+// its share in bold, the basis under it; other lines, then the notes, as hints.
 export function planRowsHtml(usage, plan) {
   const p = planWords(usage, plan);
   const row = (label, value, basis = '') => `<div class="usage-row"><span>${esc(label)}</span><strong>${value}</strong>${basis ? `<span class="muted">${esc(basis)}</span>` : ''}</div>`;
@@ -141,6 +143,5 @@ export function planRowsHtml(usage, plan) {
     if (l.kind === 'over') return row(l.row, `⚠ ${esc(l.value)}`, l.basis);
     return hint(l);
   });
-  return row(tr('use.plan'), esc(p.plan ?? tr('plan.none'))) + notes.filter((n) => n.kind === 'waiting').map(hint).join('')
-    + lines.join('') + notes.filter((n) => n.kind !== 'waiting').map(hint).join('');
+  return row(tr('use.plan'), esc(p.plan ?? tr('plan.none'))) + lines.join('') + notes.map(hint).join('');
 }

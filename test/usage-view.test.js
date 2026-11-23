@@ -65,8 +65,8 @@ test('hits waiting for WSL or for every folder to be read are said with a count,
   const { useCardHtml, planRowsHtml } = await load();
   const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 2, pass: 1 } });
   for (const t of [text(useCardHtml(s, 'pro')), text(planRowsHtml(s.usage, 'pro'))]) {
-    assert.match(t, /2 limit hits wait until WSL is running, so its use is counted/);
-    assert.match(t, /1 limit hit waits until every transcript folder has been read/);
+    assert.match(t, /2 limit hits wait until WSL is running, so WSL's use can be counted/);
+    assert.match(t, /1 limit hit waits until all your sessions have been read/);
   }
 });
 
@@ -74,11 +74,21 @@ test('limit messages that named no limit are said as not counted; hits that wait
   const { useCardHtml, planRowsHtml } = await load();
   const s = snap(twoHits, { last5h: 3000, unnamed: 3, expiredPlan: 1 });
   const card = text(useCardHtml(s, 'pro'));
-  assert.match(card, /3 limit messages did not say which limit, so they are not counted/);
-  assert.match(card, /1 limit hit was not counted: it waited over 7 days for you to pick a plan/);
+  assert.match(card, /3 limit hits not counted: their messages did not say which limit/);
+  assert.match(card, /1 limit hit not counted: it waited over 7 days for you to pick a plan/);
   const board = text(planRowsHtml(s.usage, 'pro'));
-  assert.match(board, /3 limit messages did not say which limit/);
+  assert.match(board, /3 limit hits not counted: their messages did not say which limit/);
   assert.doesNotMatch(board, /pick a plan/);
+});
+
+test('the notes come after the tokens line on the card, just before Exact limits, and after the rows on the board', async () => {
+  const { useCardHtml, planRowsHtml } = await load();
+  const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 1 }, unnamed: 2 });
+  const card = text(useCardHtml(s, 'pro'));
+  const order = ['Estimate:', 'Tokens', 'until WSL is running', 'not counted', 'Exact limits'].map((w) => card.indexOf(w));
+  assert.ok(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), card);
+  const board = text(planRowsHtml(s.usage, 'pro'));
+  assert.ok(board.indexOf('learned from') < board.indexOf('until WSL is running'), board);
 });
 
 test('the board says what waits for a plan under its plan row', async () => {

@@ -143,7 +143,7 @@ test('the mini window\'s Now tab and headline read in Chinese, privacy mode on a
       assert.match(list, /估計：已超過/);
       assert.match(list, /每週估計|每週用量/);
       assert.match(list, /精確用量/);
-      for (const words of [/要等 WSL 執行時才計入/, /要等所有對話記錄資料夾都讀完/, /沒有說是哪一種上限/, /等你選擇方案超過 7 天/, /有 1 次碰到上限沒有計入/]) assert.match(list, words);
+      for (const words of [/要等 WSL 開啟後才計入，才能算進 WSL 上的用量/, /要等所有工作階段都讀完才計入/, /沒有計入：訊息沒有說是哪一種上限/, /等你選擇方案超過 7 天/, /有 1 次碰到上限沒有計入/]) assert.match(list, words);
       assert.match(list, /等你處理/);
       assert.match(list, /輪到你了/);
       assert.equal(list.includes('做乙中'), !privacy, 'to-do wording only with privacy off');
