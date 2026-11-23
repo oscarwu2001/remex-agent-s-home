@@ -47,20 +47,28 @@ function send(lang, key) {
   const k = `${lang}\u0000${key}`;
   try {
     const sent = tell(lang, key);
-    if (typeof sent?.then === 'function') sent.then(null, () => told.delete(k));
+    if (typeof sent?.then === 'function') sent.then(null, () => forget(k));
   } catch {
     // The log's own failure must not stop a redraw: the word has already
     // fallen back. It is told again the next time it is missed.
-    told.delete(k);
+    forget(k);
   }
+}
+
+// A miss the listener did not hear is told again: its mark goes, and so do
+// the sentences already put in a language (a sentence is told when it is read).
+function forget(k) {
+  told.delete(k);
+  heard.clear();
 }
 
 function missing(lang, key) {
   const k = `${lang}\u0000${key}`;
   if (told.has(k)) return;
+  if (!tell && waiting.length >= MOST_WAITING) return; // not marked: told once someone listens
   told.add(k);
   if (tell) send(lang, key);
-  else if (waiting.length < MOST_WAITING) waiting.push([lang, key]);
+  else waiting.push([lang, key]);
 }
 
 function entry(lang, key) {
@@ -101,6 +109,12 @@ export const tr = (key, params) => translate(current, key, params);
 // like a missing word, by a short hash: the log never holds its text.
 const SAID = 'said.';
 const MOST_SAID = 500;
+// A sentence longer than this, or one that takes more splits than this to
+// read, is shown as it came and told: no row may hang the window.
+const MOST_SAID_LENGTH = 3000;
+const MOST_SPLITS = 20000;
+let splitsLeft = MOST_SPLITS;
+const TOO_LONG = new Error('too long to read');
 let patterns = null;
 let countRe = null;
 const heard = new Map(); // language and sentence -> the sentence in that language
@@ -151,6 +165,7 @@ function* splits(p, text) {
     if (i === names.length - 1) ats.push(end);
     else for (let at = text.indexOf(next, pos); at !== -1 && at + next.length <= end; at = text.indexOf(next, at + 1)) ats.push(at);
     for (const at of ats) {
+      if (--splitsLeft < 0) throw TOO_LONG;
       const value = text.slice(pos, at);
       if (at < pos || !fits(names[i], value, got)) continue;
       const now = { ...got, [names[i]]: value };
@@ -239,21 +254,51 @@ export function sentenceMark(text) {
   return `said#${h.toString(16).padStart(8, '0')}`;
 }
 
-// Parts left as they came that read like a sentence (three lower-case words
-// or more; a name, a code or a path does not): an English sentence no entry
-// built, told like a missing word.
-function tellUnread(lang, node) {
+// The placeholders whose words the tables build (a row's {what}, a step's
+// {settings}): an English sentence (three lower-case words or more) left in
+// one is a gap in the code, told by the entry that held it
+// ("said.line.row>said#…"). Any other ({name}, {code}, {why}: a person's
+// words, a git, file or network message) holds text as its caller passed
+// it, and is not told.
+const SENTENCE_PARAMS = new Set(['what', 'words', 'parts', 'how', 'because', 'days', 'settings', 'close', 'help', 'again', 'copy', 'paste',
+  'where', 'save', 'later', 'anyone', 'botSwitch', 'relink', 'newDeployment', 'againScript', 'newVersion', 'missing', 'shows', 'choose',
+  'script', 'button', 'noun']);
+function tellUnread(lang, node, outer = null, held = true) {
   if (node.text !== undefined) {
-    if (node.text.split(/\s+/).filter((w) => /^[a-z]{2,}[,.;:]?$/.test(w)).length >= 3) missing(lang, sentenceMark(node.text));
+    const sentence = node.text.split(/\s+/).filter((w) => /^[a-z]{2,}[,.;:]?$/.test(w)).length >= 3;
+    if (held && sentence) missing(lang, `${outer}>${sentenceMark(node.text)}`);
     return;
   }
-  for (const child of node.list ?? Object.values(node.params ?? {})) tellUnread(lang, child);
+  if (node.list) for (const item of node.list) tellUnread(lang, item, outer, held);
+  else for (const [name, child] of Object.entries(node.params ?? {})) tellUnread(lang, child, node.key, SENTENCE_PARAMS.has(name));
+}
+
+// Reads a whole sentence with a fresh split budget; { tooLong } when it is
+// too long to read.
+function readWhole(s) {
+  if (s.length > MOST_SAID_LENGTH) return { tooLong: true };
+  splitsLeft = MOST_SPLITS;
+  try {
+    return read(s, false, 0);
+  } catch (err) {
+    if (err === TOO_LONG) return { tooLong: true };
+    throw err;
+  }
 }
 
 // The entry an English sentence was built from: { key, params } (each part
 // as it came) or null.
 export function unsay(text, { inside = false } = {}) {
-  const r = read(String(text), inside, 0);
+  const s = String(text);
+  if (s.length > MOST_SAID_LENGTH) return null;
+  splitsLeft = MOST_SPLITS;
+  let r;
+  try {
+    r = read(s, inside, 0);
+  } catch (err) {
+    if (err === TOO_LONG) return null;
+    throw err;
+  }
   if (!r || !r.node.key) return null;
   return { key: r.node.key, params: Object.fromEntries(Object.entries(r.node.params).map(([name, child]) => [name, child.raw])) };
 }
@@ -264,9 +309,10 @@ export function sayIn(lang, text) {
   const s = String(text);
   const k = `${lang}|${s}`;
   if (heard.has(k)) return heard.get(k);
-  const r = read(s, false, 0);
+  const r = readWhole(s);
   let out = s;
-  if (r) {
+  if (r?.tooLong) missing(lang, `too-long>${sentenceMark(s)}`);
+  else if (r) {
     out = render(lang, r.node);
     tellUnread(lang, r.node);
   } else missing(lang, sentenceMark(s));

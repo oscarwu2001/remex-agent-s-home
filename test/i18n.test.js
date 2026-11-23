@@ -246,10 +246,14 @@ test('the missing-word log hears a part no entry built by its mark, misses from 
   i18n.onMissing((lang, key) => { told.push(key); });
   try {
     assert.ok(told.includes(i18n.sentenceMark(early)), 'a miss from before the listener is told to it');
-    const part = 'Your local changes would be overwritten by merge';
-    i18n.sayIn('zh-TW', core.en('said.main.updateFailed', { why: part }));
-    assert.ok(told.includes(i18n.sentenceMark(part)), 'an English part inside a Chinese sentence is told');
-    assert.ok(told.every((k) => !/local changes|Early words/.test(k)), 'by its mark, never its words');
+    const part = 'Some words the code wrote without an entry';
+    i18n.sayIn('zh-TW', core.en('said.line.row', { what: part }));
+    assert.ok(told.includes(`said.line.row>${i18n.sentenceMark(part)}`), 'an English sentence left where the tables build one is told, with the entry that held it');
+    const raw = 'Your local changes would be overwritten by merge';
+    i18n.sayIn('zh-TW', core.en('said.main.updateFailed', { why: raw }));
+    i18n.sayIn('zh-TW', core.en('said.main.projectList', { what: core.en('said.projects.tooManyTodos', { name: 'my thesis draft for the lab', n: 50 }) }));
+    assert.ok(!told.some((k) => k.endsWith(i18n.sentenceMark(raw)) || k.endsWith(i18n.sentenceMark('my thesis draft for the lab'))), 'a message or a name passed as plain text is not');
+    assert.ok(told.every((k) => !/local changes|Early words|Some words/.test(k)), 'by its mark, never its words');
     const sent = [];
     let fail = true;
     i18n.onMissing((lang, key) => { sent.push(key); return fail ? Promise.reject(new Error('not heard')) : Promise.resolve({ ok: true }); });
@@ -281,6 +285,52 @@ test('a name, a code or a path left inside a Chinese sentence is not told as a m
     i18n.sayIn('zh-TW', core.en('said.main.officePack', { what: core.en('said.pack.notInPack', { name: 'not-in-this-pack' }) }));
     i18n.sayIn('zh-TW', core.en('said.lb.legacyLeft', { close: core.en('said.lb.close'), dir: '%APPDATA%\Agents Home Two' }));
     assert.deepEqual(told.slice(before), []);
+  } finally {
+    i18n.onMissing(null);
+  }
+});
+
+test('a sentence miss the listener did not hear is sent again; misses beyond the waiting room are told once someone listens', async () => {
+  const i18n = await load();
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const sent = [];
+  let fail = true;
+  i18n.onMissing((lang, key) => { sent.push(key); return fail ? Promise.reject(new Error('not heard')) : Promise.resolve({ ok: true }); });
+  try {
+    const odd = 'A sentence that no entry in the tables built';
+    const mark = i18n.sentenceMark(odd);
+    i18n.sayIn('zh-TW', odd);
+    await tick();
+    fail = false;
+    i18n.sayIn('zh-TW', odd);
+    await tick();
+    assert.equal(sent.filter((k) => k === mark).length, 2, 'sent again after the listener failed to hear it');
+    i18n.onMissing(null);
+    for (let i = 0; i < 230; i++) i18n.translate('zh-TW', `test.absent.queue.${i}`);
+    const heard = [];
+    i18n.onMissing((lang, key) => { heard.push(key); });
+    assert.equal(heard.filter((k) => k.startsWith('test.absent.queue.')).length, 200, 'the waiting room holds 200');
+    i18n.translate('zh-TW', 'test.absent.queue.229');
+    assert.ok(heard.includes('test.absent.queue.229'), 'one that did not fit is told when it is missed again');
+  } finally {
+    i18n.onMissing(null);
+  }
+});
+
+test('a row far too long, or with too many ways to split it, is shown as it came at once and told', async () => {
+  const i18n = await load();
+  const core = require('../src/core/i18n');
+  const told = [];
+  i18n.onMissing((lang, key) => { told.push(key); });
+  try {
+    for (const [unit, size] of [['the relay link, ', 5500], ['ab, ', 2800]]) {
+      const why = unit.repeat(Math.round(size / unit.length));
+      const row = core.en('said.line.row', { what: core.en('said.lb.rebuilt', { why, how: core.en('said.lb.rebuiltFromGroups'), settings: core.en('said.fs.settings') }) });
+      const start = Date.now();
+      assert.equal(i18n.sayIn('zh-TW', row), row);
+      assert.ok(Date.now() - start < 100, `${row.length} characters read in ${Date.now() - start} ms`);
+      assert.ok(told.includes(`too-long>${i18n.sentenceMark(row)}`));
+    }
   } finally {
     i18n.onMissing(null);
   }
