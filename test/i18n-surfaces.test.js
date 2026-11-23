@@ -21,6 +21,10 @@ const ALLOW = new Set([
   'Token', 'rooms.json', 'claude', // the command
   'helper-end-corrected', // a system log event's name
   'spine-planner', // an example agent name: those are lower-case identifiers in every language
+  'layout.json', 'decor.json', 'fleet.json', 'activity.log', 'line-prompts', 'JSON', 'README', // files and folders by name
+  'Agents', // "Agents Home", the program's own name in Task Manager
+  'npm', 'ci', 'start', 'stash', 'tmux', // commands
+  'Actions', 'Terminal', // GitHub's Actions tab, Windows Terminal
 ]);
 const latin = (text) => (String(text).replace(/°[CF]/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));
 const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');

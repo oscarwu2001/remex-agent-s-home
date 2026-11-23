@@ -69,6 +69,89 @@ export function translate(lang, key, params = {}) {
 }
 
 export const tr = (key, params) => translate(current, key, params);
+
+// ---- what core and the main process say ----------------------------------------
+// The main process and src/core say their sentences in English (the log and
+// their tests read them so), each built from a `said.*` entry of the English
+// table with english() (en() in src/core/i18n.js). The window puts one in
+// its own language by finding the entry that built it and filling that
+// entry in the window's language with what filled it, each of those put in
+// the language the same way when it is a sentence of its own (a host, a
+// code or a name stays as it is). So core's answers keep their shape and
+// every sentence keeps one source per language.
+// A sentence no entry built stays English and is told once, like a missing word.
+const SAID = 'said.';
+const MOST_SAID = 500;
+let patterns = null;
+const heard = new Map(); // language and sentence -> the sentence in that language
+
+export const english = (key, params) => translate(DEFAULT_LANGUAGE, key, params);
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function saidPatterns() {
+  if (patterns) return patterns;
+  patterns = [];
+  for (const [key, value] of Object.entries(en)) {
+    if (!key.startsWith(SAID)) continue;
+    const forms = typeof value === 'object' && value !== null ? Object.entries(value) : [['', value]];
+    for (const [form, text] of forms) {
+      const names = [];
+      const source = String(text).split(/(\{\w+\})/).map((part) => {
+        const name = /^\{(\w+)\}$/.exec(part)?.[1];
+        if (!name) return escapeRe(part);
+        if (names.includes(name)) return `\\k<${name}>`;
+        names.push(name);
+        return `(?<${name}>[\\s\\S]*?)`;
+      }).join('');
+      patterns.push({ key, one: form === 'one', re: new RegExp(`^${source}$`), literal: String(text).replace(/\{\w+\}/g, '').length });
+    }
+  }
+  // The longest wording first, so a sentence is read as the entry that says
+  // most of it (test/i18n.test.js checks every entry reads back as itself).
+  patterns.sort((a, b) => b.literal - a.literal);
+  return patterns;
+}
+
+// The entry an English sentence was built from: { key, params } or null.
+// A sentence a caller began lower-case ("Not saved: this computer...") is
+// read as its entry too.
+export function unsay(text) {
+  const s = String(text);
+  for (const t of s && /^[a-z]/.test(s) ? [s, s[0].toUpperCase() + s.slice(1)] : [s]) {
+    for (const p of saidPatterns()) {
+      const m = p.re.exec(t);
+      if (!m) continue;
+      const params = { ...m.groups };
+      if (p.one && params.n === undefined) params.n = '1';
+      return { key: p.key, params };
+    }
+  }
+  return null;
+}
+
+function sayInner(lang, text, depth) {
+  if (/^\d+$/.test(text)) return Number(text);
+  const found = depth < 6 && text ? unsay(text) : null;
+  if (!found) return text;
+  const params = {};
+  for (const [name, value] of Object.entries(found.params)) params[name] = sayInner(lang, value, depth + 1);
+  return translate(lang, found.key, params);
+}
+
+// A sentence from core or the main process in `lang`.
+export function sayIn(lang, text) {
+  if (text == null || text === '' || lang === DEFAULT_LANGUAGE) return text;
+  const s = String(text);
+  const k = `${lang}|${s}`;
+  if (heard.has(k)) return heard.get(k);
+  let out = s;
+  if (unsay(s)) out = sayInner(lang, s, 0);
+  else missing(lang, `said: ${s.slice(0, 60)}`);
+  if (heard.size >= MOST_SAID) heard.clear();
+  heard.set(k, out);
+  return out;
+}
+export const said = (text) => sayIn(current, text);
 // Whether the tables have words for `key`, for words that may come from elsewhere.
 export const hasWords = (key) => Object.hasOwn(en, key);
 

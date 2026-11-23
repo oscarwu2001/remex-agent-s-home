@@ -16,7 +16,7 @@ import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDi
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
-import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing } from './i18n.js';
+import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
 
@@ -85,6 +85,10 @@ onMissing((code, key) => bridge.missingWords?.({ lang: code, key })?.catch(() =>
   // An older main process without the handler: the word has already fallen
   // back to English, which is all a missing word can do here.
 }));
+// The main process draws the system's own dialogs (Choose a folder) in it.
+bridge.useLanguage?.(startLanguage.id)?.catch(() => {
+  // An older main process: its dialogs stay English, as every word falls back.
+});
 localise(document);
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
 if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
@@ -264,7 +268,7 @@ async function refreshLive() {
     liveError = '';
   } else {
     // Shown in Settings and on the clock; the chosen weather stands in.
-    liveError = res.error;
+    liveError = said(res.error);
   }
   if (weather() !== before) {
     applyPrefs();
@@ -321,7 +325,7 @@ $('live-body').addEventListener('submit', async (e) => {
   const q = $('live-q').value;
   const res = await bridge.weatherSearch(q);
   liveResults = res.ok ? res.places : [];
-  liveError = res.ok ? (res.places.length ? '' : tr('live.notFound', { q: q.trim() })) : tr('live.searchFailed', { error: res.error });
+  liveError = res.ok ? (res.places.length ? '' : tr('live.notFound', { q: q.trim() })) : tr('live.searchFailed', { error: said(res.error) });
   renderLive();
   $('live-body').querySelector('[data-place]')?.focus();
 });
@@ -1551,7 +1555,7 @@ async function moveAgent(name, roomId) {
   else moves[name] = roomId;
   const plain = depts.map(({ id, kind, name: n, purpose, cell, agents }) => ({ id, kind, name: n, purpose, cell, agents: [...agents] }));
   const result = await bridge.saveLayout({ departments: plain, gardens: config.layout.gardens ?? [], moves });
-  moveNote = result.ok ? tr('move.done', { name, room: roomName(roomId) }) : tr('move.failed', { name, error: result.error });
+  moveNote = result.ok ? tr('move.done', { name, room: roomName(roomId) }) : tr('move.failed', { name, error: said(result.error) });
   if (result.ok) useConfig(result.config);
   $('move-status').textContent = moveNote;
   render(true);
@@ -1791,7 +1795,7 @@ async function saveLayout(departments, gardens = config.layout.gardens ?? [], mo
   const plain = departments.map(({ id, kind, name, purpose, cell, agents }) => ({ id, kind, name, purpose, cell, agents: [...agents] }));
   const result = await bridge.saveLayout({ departments: plain, gardens, moves });
   if (!result.ok) {
-    layoutError = result.error;
+    layoutError = said(result.error);
     renderLayoutEditor();
     return false;
   }
@@ -2014,7 +2018,7 @@ $('decorate').addEventListener('keydown', (e) => {
 async function saveDecor(next, note) {
   const result = await bridge.saveDecor(next);
   if (!result.ok) {
-    decorError = result.error;
+    decorError = said(result.error);
     decorNote = '';
     renderDecorPanel();
     return;
@@ -2346,7 +2350,7 @@ $('report-open').addEventListener('click', async () => {
   try {
     const res = await bridge.buildReport(Number($('report-days').value), !prefs.private);
     if (!res.ok) {
-      status.textContent = res.error;
+      status.textContent = said(res.error);
       return;
     }
     const x = res.summary;
@@ -2427,7 +2431,7 @@ async function showUpdateInfo() {
   const info = await bridge.updateInfo();
   $('update-version').textContent = info.available
     ? tr('update.version', { version: info.version, branch: info.branch, commit: info.commit })
-    : tr('update.versionOff', { version: info.version, reason: info.reason });
+    : tr('update.versionOff', { version: info.version, reason: said(info.reason) });
   $('update-run').disabled = !info.available;
   updateSummary = tr(info.available ? 'update.summaryOn' : 'update.summaryOff', { version: info.version });
   if (!$('settings').hidden) renderGroupSummaries();
@@ -2441,7 +2445,7 @@ $('update-run').addEventListener('click', async () => {
   status.textContent = tr('update.getting');
   try {
     const res = await bridge.update();
-    status.textContent = res.ok ? res.message : res.error;
+    status.textContent = res.ok ? said(res.message) : said(res.error);
     status.classList.toggle('form-error', !res.ok);
     if (!res.ok || !res.restart) {
       button.disabled = false;
@@ -2475,7 +2479,7 @@ $('update-agents').addEventListener('click', async () => {
   try {
     const res = await bridge.packUpdate();
     if (!res.updated) {
-      status.textContent = res.error;
+      status.textContent = said(res.error);
       status.classList.add('form-error');
       return;
     }
@@ -2513,7 +2517,7 @@ async function showLogStatus() {
   }
   const res = await bridge.logTail('reminders');
   if (!res.ok) {
-    line.textContent = res.error;
+    line.textContent = said(res.error);
     return;
   }
   const { summary: s, team } = res;
@@ -2533,7 +2537,7 @@ async function showLog(which) {
   view.hidden = false;
   view.textContent = res.ok
     ? res.lines.length ? res.lines.join('\n') : tr(`log.empty.${which}`)
-    : res.error;
+    : said(res.error);
   view.scrollTop = view.scrollHeight;
   showLogStatus();
 }
@@ -2541,7 +2545,7 @@ $('log-activity').addEventListener('click', () => showLog('activity'));
 $('log-errors').addEventListener('click', () => showLog('errors'));
 $('log-open').addEventListener('click', async () => {
   const res = await bridge.logOpen();
-  if (!res.ok) $('log-reminders').textContent = tr('log.openFailed', { error: res.error });
+  if (!res.ok) $('log-reminders').textContent = tr('log.openFailed', { error: said(res.error) });
 });
 
 // ---- the Office pack: a ready-made team offered to Claude ---------------------------
@@ -2560,7 +2564,7 @@ async function loadPack() {
   if (!bridge.packStatus) return;
   const res = await bridge.packStatus();
   if (!res.ok) {
-    packError = res.error;
+    packError = said(res.error);
     pack = undefined;
   } else {
     pack = res;
@@ -2610,7 +2614,7 @@ async function addPack(names) {
   const added = res.installed?.length ?? 0;
   packNote = added ? tr('pack.added', { n: added }) : '';
   if (res.errors?.length) packError = res.errors.join('; ');
-  else if (!res.ok) packError = res.error;
+  else if (!res.ok) packError = said(res.error);
   await loadPack();
 }
 
@@ -2641,7 +2645,7 @@ loadPack();
     button.textContent = tr('stage.report');
     if (!res.ok) {
       // Shown where the report's other messages go, not lost.
-      $('report-status').textContent = res.error;
+      $('report-status').textContent = said(res.error);
       showInSettings('report-h', 'center');
     }
   });
@@ -2672,7 +2676,7 @@ wireProjects($('projects-body'), {
 });
 $('projects-file').addEventListener('click', async () => {
   const res = await bridge.projectsShow?.();
-  $('projects-file-status').textContent = !res ? tr('proj.previewFile') : !res.ok ? res.error : !prefs.private ? tr('proj.fileIs', { file: res.file }) : '';
+  $('projects-file-status').textContent = !res ? tr('proj.previewFile') : !res.ok ? said(res.error) : !prefs.private ? tr('proj.fileIs', { file: res.file }) : '';
 });
 setInterval(renderProjects, 1000);
 
@@ -3563,7 +3567,7 @@ function showFleet() {
   const others = (snapshot.fleet?.computers ?? []).length;
   const f = snapshot.fleet ?? {};
   const where = prefs.private || !f.dir ? '' : tr('fleet.where', { dir: f.dir });
-  const pulled = f.lastPull ? (f.lastPull.ok ? tr('fleet.lastPull', { time: clock(f.lastPull.at) }) : tr('fleet.pullFailed', { error: f.lastPull.error })) : '';
+  const pulled = f.lastPull ? (f.lastPull.ok ? tr('fleet.lastPull', { time: clock(f.lastPull.at) }) : tr('fleet.pullFailed', { error: said(f.lastPull.error) })) : '';
   const found = (none) => (others ? tr('fleet.found', { n: others }) : tr(none));
   $('fleet-status').textContent = snapshot.demo ? tr('fleet.demo')
     : !on ? tr('fleet.off')
@@ -3576,7 +3580,7 @@ $('fleet-choose').addEventListener('click', async () => {
     return;
   }
   const res = await bridge.fleetChoose();
-  if (!res.ok && !res.canceled) $('fleet-status').textContent = res.error;
+  if (!res.ok && !res.canceled) $('fleet-status').textContent = said(res.error);
 });
 $('fleet-git').addEventListener('click', async () => {
   if (!bridge.fleetGitChoose) {
@@ -3584,11 +3588,11 @@ $('fleet-git').addEventListener('click', async () => {
     return;
   }
   const res = await bridge.fleetGitChoose();
-  if (!res.ok && !res.canceled) $('fleet-status').textContent = res.error;
+  if (!res.ok && !res.canceled) $('fleet-status').textContent = said(res.error);
 });
 $('fleet-off').addEventListener('click', async () => {
   const res = await bridge.fleetOff?.();
-  if (res && !res.ok) $('fleet-status').textContent = res.error;
+  if (res && !res.ok) $('fleet-status').textContent = said(res.error);
 });
 setInterval(() => { if (!$('settings').hidden) showFleet(); }, 1000);
 

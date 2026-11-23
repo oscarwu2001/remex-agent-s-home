@@ -11,7 +11,7 @@
 // is shown.
 
 import { boardTime, boardDay } from './dates.js';
-import { tr } from './i18n.js';
+import { tr, said } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const DASH = '<span class="none"><span aria-hidden="true">–</span><span class="visually-hidden">none</span></span>';
@@ -34,7 +34,7 @@ export function age(ms, now = Date.now()) {
 // state (a line that asks to turn privacy mode off has one without it), and
 // how many times it came up.
 export function problemLabel(p, { privacy = true } = {}) {
-  const label = !privacy && p.labelPrivacyOff ? p.labelPrivacyOff : p.label;
+  const label = said(!privacy && p.labelPrivacyOff ? p.labelPrivacyOff : p.label);
   return p.count > 1 ? `${label} (×${p.count})` : label;
 }
 

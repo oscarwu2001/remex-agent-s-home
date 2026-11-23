@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { en } = require('./i18n');
 
 // The context window of a model when no compaction has shown where it
 // really stops. Current models read 1M tokens; Haiku 4.5 and older models
@@ -73,7 +74,7 @@ class UsageScanner {
       names = await fs.promises.readdir(root, { recursive: true });
     } catch (err) {
       // A folder that does not exist yet has no usage in it.
-      if (err.code !== 'ENOENT') this.problems.set(root, `could not be listed (${err.code})`);
+      if (err.code !== 'ENOENT') this.problems.set(root, en('said.usage.notListed', { code: err.code }));
       return [];
     }
     this.problems.delete(root);
@@ -148,7 +149,7 @@ class UsageScanner {
         try {
           await this.readNew(file, state);
         } catch (err) {
-          this.problems.set(file, `could not be read (${err.code || err.message})`);
+          this.problems.set(file, en('said.usage.notRead', { code: err.code || err.message }));
         }
       }
     }

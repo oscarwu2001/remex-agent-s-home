@@ -31,6 +31,12 @@ const { UsageScanner } = require('../src/core/usage');
 const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
 const i18n = require('../src/core/i18n');
 
+// What the app says is English here and in the log; the window puts it in
+// its own language (renderer/i18n.js said). Only the system's own dialogs,
+// drawn here, use the window's language, which it tells at start.
+const { en } = i18n;
+let uiLanguage = i18n.DEFAULT_LANGUAGE;
+
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
 const WSL_MS = 1_500; // WSL files are read this often, each time after a running check
@@ -82,15 +88,15 @@ function loadLayout() {
   } catch (err) {
     // No layout.json is the normal case: just the core hospital.
     if (err.code !== 'ENOENT') {
-      startupProblems.push({ label: `layout.json could not be read (${err.code}); showing the core hospital`, detail: file, count: 1 });
+      startupProblems.push({ label: en('said.main.layoutUnreadable', { code: err.code }), detail: file, count: 1 });
     }
     return { file, layout: { departments: [], gardens: [] } };
   }
   try {
     return { file, layout: validateLayout(JSON.parse(text)) };
   } catch (err) {
-    const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
-    startupProblems.push({ label: `layout.json ignored: ${reason}; showing the core hospital`, detail: file, count: 1 });
+    const reason = err instanceof SyntaxError ? en('said.main.notJson') : err.message;
+    startupProblems.push({ label: en('said.main.layoutIgnored', { reason }), detail: file, count: 1 });
     return { file, layout: { departments: [], gardens: [] } };
   }
 }
@@ -107,7 +113,7 @@ function loadDecor(rooms, gardens) {
   } catch (err) {
     // No decor.json is the normal case: the default look.
     if (err.code !== 'ENOENT') {
-      startupProblems.push({ label: `decor.json could not be read (${err.code}); showing the default look`, detail: file, count: 1 });
+      startupProblems.push({ label: en('said.main.decorUnreadable', { code: err.code }), detail: file, count: 1 });
     }
     return { file, decor: decorCatalogue.checkDecor(undefined, rooms, gardens).decor };
   }
@@ -115,11 +121,11 @@ function loadDecor(rooms, gardens) {
   try {
     parsed = JSON.parse(text);
   } catch {
-    startupProblems.push({ label: 'decor.json ignored: it is not valid JSON; showing the default look', detail: file, count: 1 });
+    startupProblems.push({ label: en('said.main.decorNotJson'), detail: file, count: 1 });
     return { file, decor: decorCatalogue.checkDecor(undefined, rooms, gardens).decor };
   }
   const { decor, problems: found } = decorCatalogue.checkDecor(parsed, rooms, gardens);
-  for (const p of found) startupProblems.push({ label: `decor.json: ${p}; left out`, detail: file, count: 1 });
+  for (const p of found) startupProblems.push({ label: en('said.main.decorLeftOut', { what: p }), detail: file, count: 1 });
   return { file, decor };
 }
 
@@ -136,15 +142,15 @@ function loadOverrides(roomIds) {
   } catch (err) {
     // No rooms.json is the normal case: the default rooms apply.
     if (err.code !== 'ENOENT') {
-      startupProblems.push({ label: `rooms.json could not be read (${err.code}); using the default rooms`, detail: file, count: 1 });
+      startupProblems.push({ label: en('said.main.roomsUnreadable', { code: err.code }), detail: file, count: 1 });
     }
     return { file, overrides: {} };
   }
   try {
     return { file, overrides: validateOverrides(JSON.parse(text), roomIds) };
   } catch (err) {
-    const reason = err instanceof SyntaxError ? 'it is not valid JSON' : err.message;
-    startupProblems.push({ label: `rooms.json ignored: ${reason}; using the default rooms`, detail: file, count: 1 });
+    const reason = err instanceof SyntaxError ? en('said.main.notJson') : err.message;
+    startupProblems.push({ label: en('said.main.roomsIgnored', { reason }), detail: file, count: 1 });
     return { file, overrides: {} };
   }
 }
@@ -233,7 +239,7 @@ app.commandLine.appendSwitch('disable-domain-reliability');
 function crashed(kind, err) {
   const first = String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ');
   syslog?.write('errors', kind, { where: 'main', error: first });
-  problem(`Something went wrong inside the app (${kind}); see the system log`, String(err?.message ?? err).slice(0, 120));
+  problem(en('said.main.inside', { kind }), String(err?.message ?? err).slice(0, 120));
 }
 process.on('uncaughtException', (err) => crashed('crash', err));
 process.on('unhandledRejection', (err) => crashed('unhandled', err));
@@ -248,7 +254,7 @@ app.whenReady().then(() => {
   // everything again. It takes the log over once the first has stopped.
   let heldElsewhere; // the problem shown while another copy writes it
   if (!syslog.claim('activity')) {
-    heldElsewhere = `Another copy of Agents Home (process ${syslog.heldBy}) is writing the system log, so this one leaves activity.log alone until that copy stops`;
+    heldElsewhere = en('said.main.heldElsewhere', { pid: syslog.heldBy });
     problem(heldElsewhere, syslog.dir);
   }
   // The spell checker would fetch a dictionary from Google at start; the app
@@ -302,7 +308,7 @@ app.whenReady().then(() => {
       wslWatcher.tick();
       if (Date.now() - rosterAt >= ROSTER_MS) refreshRoster();
     } catch (err) {
-      problem(`Following WSL sessions failed (${err.name})`, err.message);
+      problem(en('said.main.wslFailed', { name: err.name }), err.message);
     } finally {
       setTimeout(followWsl, wsl.roots.length ? WSL_MS : WSL_IDLE_MS);
     }
@@ -319,7 +325,7 @@ app.whenReady().then(() => {
       const taken = new Set([...watcher.roots, ...wslWatcher.roots].map((r) => rootKey(r)));
       coworkWatcher.setRoots(cowork.roots.filter((r) => !taken.has(rootKey(r))));
     } catch (err) {
-      problem(`Looking for Cowork tasks failed (${err.name})`, err.message);
+      problem(en('said.main.coworkFailed', { name: err.name }), err.message);
     } finally {
       setTimeout(followCowork, COWORK_MS);
     }
@@ -363,7 +369,7 @@ app.whenReady().then(() => {
   ipcMain.handle('home:build-report', (_event, days, details) => new Promise((resolve) => {
     const n = Number(days);
     if (![7, 28, 90].includes(n)) {
-      resolve({ ok: false, error: 'Choose 7, 28 or 90 days.' });
+      resolve({ ok: false, error: en('said.main.reportDays') });
       return;
     }
     const roots = allRoots();
@@ -380,12 +386,12 @@ app.whenReady().then(() => {
         openReport(result.html);
         resolve({ ok: true, summary: result.summary, builtAt: Date.now() });
       } else {
-        resolve({ ok: false, error: (result && result.error) || 'The report could not be built.' });
+        resolve({ ok: false, error: (result && result.error) || en('said.main.reportFailed') });
       }
     });
     child.on('exit', (code) => {
       if (answered) return;
-      resolve({ ok: false, error: `The report could not be built (exit ${code})${err ? `: ${err.trim().split('\n').pop()}` : ''}` });
+      resolve({ ok: false, error: en('said.main.reportExit', { code, why: err ? `: ${err.trim().split('\n').pop()}` : '' }) });
     });
   }));
 
@@ -427,7 +433,7 @@ app.whenReady().then(() => {
     try {
       validateOverrides(fileOverrides, new Set(roomsWith(next).map((r) => r.id)));
     } catch (err) {
-      return { ok: false, error: `rooms.json still uses a room this change removes: ${err.message}. Edit rooms.json first.` };
+      return { ok: false, error: en('said.main.roomsStillUse', { what: err.message }) };
     }
     try {
       fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
@@ -437,7 +443,7 @@ app.whenReady().then(() => {
         moves: next.moves,
       }, null, 2)}\n`);
     } catch (err) {
-      return { ok: false, error: `The layout could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.layoutNotSaved', { code: err.code || err.message }) };
     }
     layout = next;
     // A removed department takes its floor and decorations with it, so
@@ -452,7 +458,7 @@ app.whenReady().then(() => {
       try {
         writeDecor(decorFile, decor);
       } catch (err) {
-        problem(`decor.json could not be updated (${err.code || err.message}); it still names a removed department`, decorFile);
+        problem(en('said.main.decorNotUpdated', { code: err.code || err.message }), decorFile);
       }
     }
     overrides = { ...overridesFrom(layout), ...fileOverrides };
@@ -464,11 +470,11 @@ app.whenReady().then(() => {
   // Saving decor: every entry must check out, or nothing is written.
   ipcMain.handle('home:save-decor', (_event, proposed) => {
     const { decor: next, problems: found } = decorCatalogue.checkDecor(proposed, roomsWith(layout), gardensWith(layout));
-    if (found.length) return { ok: false, error: `That could not be saved: ${found[0]}` };
+    if (found.length) return { ok: false, error: en('said.main.notSavedBecause', { why: found[0] }) };
     try {
       writeDecor(decorFile, next);
     } catch (err) {
-      return { ok: false, error: `Your changes could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.changesNotSaved', { code: err.code || err.message }) };
     }
     decor = next;
     return { ok: true, decor };
@@ -482,11 +488,11 @@ app.whenReady().then(() => {
     if (!weatherService.HOSTS.has(new URL(url).host)) throw new Error('not the weather service');
     // Electron's own network stack, so the system proxy settings apply.
     const res = await net.fetch(url, { signal: AbortSignal.timeout(10_000), headers: { accept: 'application/json' } });
-    if (!res.ok) throw new Error(`the weather service answered ${res.status}`);
+    if (!res.ok) throw new Error(en('said.main.weatherAnswered', { status: res.status }));
     return res.json();
   }
-  const reason = (err) => (err.name === 'TimeoutError' ? 'the weather service did not answer in time'
-    : /^net::ERR_/.test(err.message) ? `the weather service could not be reached (${err.message.slice(5)}); check the internet connection or proxy`
+  const reason = (err) => (err.name === 'TimeoutError' ? en('said.main.weatherTimeout')
+    : /^net::ERR_/.test(err.message) ? en('said.main.weatherUnreachable', { code: err.message.slice(5) })
       : err.message);
   ipcMain.handle('home:weather-search', async (_event, name) => {
     try {
@@ -525,7 +531,7 @@ app.whenReady().then(() => {
   const fieldSecretFile = path.join(app.getPath('userData'), 'field-reader-secret.json');
   const FIELD_CHECK_MS = 10 * 60_000; // how often to look whether a slot has come (a timer can miss one across sleep)
   const FIELD_TIMEOUT_MS = 20_000;
-  const FIELD_STALE = 'The link, key or secret changed while reading; reading again.';
+  const FIELD_STALE = en('said.main.fieldStale');
   // { enabled, source, sheetUrl, keyPath, readerUrl, columns: the user's
   // checked column roles }. source and readerUrl only once set.
   let field = { enabled: false, sheetUrl: '', keyPath: '', columns: [] };
@@ -578,7 +584,7 @@ app.whenReady().then(() => {
     try {
       columns = fieldSurvey.checkRoles(saved.columns ?? []);
     } catch {
-      problem('The checked field feedback columns could not be read; check them again in Settings → Connections → Field feedback', fieldFile, 'check');
+      problem(en('said.main.fieldColumnsUnreadable'), fieldFile, 'check');
     }
     field = {
       enabled: saved.enabled === true,
@@ -589,7 +595,7 @@ app.whenReady().then(() => {
       columns,
     };
   } catch (err) {
-    if (err.code !== 'ENOENT') problem('The field feedback settings could not be read; field feedback is off until it is set again in Settings → Connections → Field feedback', fieldFile, 'settings');
+    if (err.code !== 'ENOENT') problem(en('said.main.fieldSettingsUnreadable'), fieldFile, 'settings');
   }
   function dropFieldCache() {
     fieldCache = null;
@@ -597,7 +603,7 @@ app.whenReady().then(() => {
     try {
       fs.rmSync(fieldCacheFile, { force: true });
     } catch (err) {
-      problem(`The saved field feedback could not be removed (${err.code || err.message})`, fieldCacheFile);
+      problem(en('said.main.fieldCacheNotRemoved', { code: err.code || err.message }), fieldCacheFile);
     }
   }
   // Off keeps no secret, and another reader link drops the old reader's.
@@ -607,7 +613,7 @@ app.whenReady().then(() => {
     try {
       fs.rmSync(fieldSecretFile, { force: true });
     } catch (err) {
-      problem(`The saved reader secret could not be removed (${err.code || 'error'}); remove it from the app's data folder`, fieldSecretFile);
+      problem(en('said.main.readerSecretNotRemoved', { code: err.code || 'error' }), fieldSecretFile);
     }
     fieldSecretSaved = fs.existsSync(fieldSecretFile);
     if (!fieldSecretSaved) fieldSecretFor = null;
@@ -620,7 +626,7 @@ app.whenReady().then(() => {
       raw = JSON.parse(fs.readFileSync(fieldCacheFile, 'utf8'));
     } catch (err) {
       if (err.code !== 'ENOENT') {
-        problem('The saved field feedback could not be read; the sheet is read again', fieldCacheFile);
+        problem(en('said.main.fieldCacheUnreadable'), fieldCacheFile);
         dropFieldCache();
       }
     }
@@ -632,7 +638,7 @@ app.whenReady().then(() => {
       try {
         fs.rmSync(old, { force: true }); // force: one already gone is no error
       } catch (err) {
-        problem(`An old saved reader secret could not be removed (${err.code || 'error'}); remove ${name} from the app's data folder`, old);
+        problem(en('said.main.oldSecretNotRemoved', { code: err.code || 'error', name }), old);
       }
     }
     if (plan.dropSecret) dropFieldSecret();
@@ -648,7 +654,7 @@ app.whenReady().then(() => {
     } catch (err) {
       // Never stops the app: the section shows no numbers and says why.
       fieldSummary = null;
-      fieldSummaryError = 'The answers kept could not be summarised; press Refresh now, and see the system log if it stays.';
+      fieldSummaryError = en('said.main.fieldNotSummarised');
       syslog?.write('errors', 'field-feedback', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
     }
   }
@@ -656,7 +662,7 @@ app.whenReady().then(() => {
     try {
       writeJsonFile(fieldCacheFile, fieldCache);
     } catch (err) {
-      problem(`The field feedback could not be saved (${err.code || err.message}); it shows until the app closes`, fieldCacheFile);
+      problem(en('said.main.fieldNotSaved', { code: err.code || err.message }), fieldCacheFile);
     }
   }
   function readFieldKey() {
@@ -724,7 +730,7 @@ app.whenReady().then(() => {
       let answered = false;
       let failBody = null;
       const timer = setTimeout(() => {
-        const err = Object.assign(new Error('The reader did not answer in time'), { name: 'TimeoutError' });
+        const err = Object.assign(new Error(en('said.main.readerTimeout')), { name: 'TimeoutError' });
         if (!answered) {
           answered = true;
           reject(err);
@@ -755,7 +761,7 @@ app.whenReady().then(() => {
             clearTimeout(timer);
             chunks.length = 0;
             failBody = null;
-            fail(Object.assign(new Error('The answer is over the size the app reads'), { name: 'TooLargeError' }));
+            fail(Object.assign(new Error(en('said.main.answerTooLarge')), { name: 'TooLargeError' }));
             req.abort();
           });
           res.on('end', () => {
@@ -767,7 +773,7 @@ app.whenReady().then(() => {
               fail(err);
             }
           });
-          res.on('aborted', () => fail(new Error('The answer was cut off')));
+          res.on('aborted', () => fail(new Error(en('said.main.answerCut'))));
           res.on('error', (err) => fail(err));
         });
         // text() awaits it; this only keeps a body nobody reads (an answer
@@ -873,7 +879,7 @@ app.whenReady().then(() => {
     try {
       writeJsonFile(fieldFile, res.settings);
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.settingNotSaved', { code: err.code || err.message }) };
     }
     const turnedOff = field.enabled && !res.settings.enabled;
     field = res.settings;
@@ -904,9 +910,9 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('home:field-choose-key', async () => {
     const res = await dialog.showOpenDialog(win, {
-      title: 'Choose the service account key (JSON) that can read the survey sheet',
+      title: i18n.translate(uiLanguage, 'dialog.keyFile'),
       properties: ['openFile'],
-      filters: [{ name: 'Key file (JSON)', extensions: ['json'] }],
+      filters: [{ name: i18n.translate(uiLanguage, 'dialog.keyFileType'), extensions: ['json'] }],
     });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const file = res.filePaths[0];
@@ -914,13 +920,13 @@ app.whenReady().then(() => {
     try {
       key = fieldSurvey.readKey(fs.readFileSync(file, 'utf8'));
     } catch (err) {
-      return { ok: false, error: err.code ? `The file could not be read (${err.code})` : err.message };
+      return { ok: false, error: err.code ? en('said.main.fileUnreadable', { code: err.code }) : err.message };
     }
     const next = { ...field, keyPath: file };
     try {
       writeJsonFile(fieldFile, next);
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.settingNotSaved', { code: err.code || err.message }) };
     }
     field = next;
     fieldGeneration += 1;
@@ -936,7 +942,7 @@ app.whenReady().then(() => {
   // plain text. The reply says only whether it was saved; the window never
   // gets it back.
   ipcMain.handle('home:field-save-secret', (_event, text) => {
-    if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
+    if (!field.enabled) return { ok: false, error: en('said.main.fieldOnFirst') };
     const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined;
     const checked = fieldSurvey.checkSecret(text, {
       available: safeStorage.isEncryptionAvailable(), backend, saved: fieldSecretSaved, readerUrl: fieldSource() === 'reader' ? field.readerUrl : '',
@@ -955,7 +961,7 @@ app.whenReady().then(() => {
         // Only the half-written copy is left, encrypted; the save's own error is what is said and logged.
       }
       syslog?.write('errors', 'field-feedback', { route: 'reader', code: `secret not saved ${err?.code || 'error'}` });
-      return { ok: false, error: 'The secret could not be saved; see the system log, then try again.' };
+      return { ok: false, error: en('said.main.secretNotSaved') };
     }
     fieldSecretSaved = true;
     fieldSecretFor = checked.deploymentId;
@@ -975,7 +981,7 @@ app.whenReady().then(() => {
       code = fs.readFileSync(path.join(app.getAppPath(), 'docs', 'field-feedback-reader.gs'), 'utf8');
     } catch (err) {
       syslog?.write('errors', 'field-feedback', { route: 'reader', code: `script not read ${err?.code || 'error'}` });
-      return { ok: false, error: 'The reader script that comes with the app is missing from this copy. Update the app (Settings → App → Updates) or install it again, then copy it.' };
+      return { ok: false, error: en('said.main.readerScriptMissing') };
     }
     clipboard.writeText(code);
     return { ok: true };
@@ -983,14 +989,14 @@ app.whenReady().then(() => {
   // Refresh now reads the settings as they are: a read that started before
   // they changed is dropped (FIELD_STALE), and this waits for the new one.
   ipcMain.handle('home:field-refresh', async () => {
-    if (!field.enabled) return { ok: false, error: 'Turn field feedback on first.' };
+    if (!field.enabled) return { ok: false, error: en('said.main.fieldOnFirst') };
     const res = await refreshField();
     return res.error === FIELD_STALE ? refreshField() : res;
   });
   // The reader address goes to the clipboard from here, so it can be pasted
   // into the sheet's Share box while privacy mode keeps it off the screen.
   ipcMain.handle('home:field-copy-reader', () => {
-    if (!fieldKey.clientEmail) return { ok: false, error: 'Choose the key file first.' };
+    if (!fieldKey.clientEmail) return { ok: false, error: en('said.main.keyFileFirst') };
     clipboard.writeText(fieldKey.clientEmail);
     return { ok: true };
   });
@@ -1061,12 +1067,12 @@ app.whenReady().then(() => {
       (err, stdout, stderr) => {
         if (!err) return resolve(stdout.trim());
         const first = String(stderr || '').trim().split('\n').find((l) => l.trim()) || err.message;
-        return reject(new Error(err.code === 'ENOENT' ? 'git was not found; install Git for Windows and try again' : first));
+        return reject(new Error(err.code === 'ENOENT' ? en('said.main.noGit') : first));
       });
   });
   function updateInfo() {
     if (app.isPackaged || !fs.existsSync(path.join(repo, '.git'))) {
-      return { available: false, reason: 'This copy was installed from the setup file. To update, download the newest build from the repository’s Actions tab and run it.' };
+      return { available: false, reason: en('said.main.installedCopy') };
     }
     return { available: true };
   }
@@ -1077,7 +1083,7 @@ app.whenReady().then(() => {
       const [branch, commit] = await Promise.all([git(['rev-parse', '--abbrev-ref', 'HEAD']), git(['rev-parse', '--short', 'HEAD'])]);
       return { ...info, version: app.getVersion(), branch, commit };
     } catch (err) {
-      return { available: false, reason: `The git clone could not be read: ${err.message}`, version: app.getVersion() };
+      return { available: false, reason: en('said.main.cloneUnreadable', { why: err.message }), version: app.getVersion() };
     }
   });
   ipcMain.handle('home:update', async () => {
@@ -1087,12 +1093,12 @@ app.whenReady().then(() => {
       const dirty = await git(['status', '--porcelain', '--untracked-files=no']);
       if (dirty) {
         const n = dirty.split('\n').length;
-        return { ok: false, error: `This clone has ${n} changed file${n === 1 ? '' : 's'} not yet committed. Commit or stash them first, so the update cannot overwrite your work.` };
+        return { ok: false, error: en('said.main.dirty', { n }) };
       }
       const before = await git(['rev-parse', 'HEAD']);
       await git(['pull', '--ff-only'], 180_000);
       const after = await git(['rev-parse', 'HEAD']);
-      if (after === before) return { ok: true, updated: false, message: 'Already up to date.' };
+      if (after === before) return { ok: true, updated: false, message: en('said.main.upToDate') };
       const changed = (await git(['diff', '--name-only', before, after])).split('\n');
       const count = (await git(['rev-list', '--count', `${before}..${after}`])) || '?';
       if (changed.some((f) => f === 'package.json' || f === 'package-lock.json')) {
@@ -1100,7 +1106,7 @@ app.whenReady().then(() => {
         // the app, and installing over a running Electron fails on Windows.
         return {
           ok: true, updated: true, restart: false,
-          message: `Pulled ${count} new commit${count === '1' ? '' : 's'}. This update changes the app's packages: close the app, run "npm ci", then "npm start".`,
+          message: en('said.main.pulledPackages', { n: Number(count) || count }),
         };
       }
       setTimeout(() => {
@@ -1108,9 +1114,9 @@ app.whenReady().then(() => {
         app.relaunch();
         app.exit(0);
       }, 1200);
-      return { ok: true, updated: true, restart: true, message: `Pulled ${count} new commit${count === '1' ? '' : 's'}. Restarting…` };
+      return { ok: true, updated: true, restart: true, message: en('said.main.pulledRestart', { n: Number(count) || count }) };
     } catch (err) {
-      return { ok: false, error: `The update did not complete: ${err.message}` };
+      return { ok: false, error: en('said.main.updateFailed', { why: err.message }) };
     }
   });
 
@@ -1124,7 +1130,7 @@ app.whenReady().then(() => {
       await usage.scan();
       usageSummary = usage.summary();
     } catch (err) {
-      problem(`Counting Claude Code use failed (${err.code || err.name})`, err.message);
+      problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
     } finally {
       setTimeout(followUsage, 60_000);
     }
@@ -1146,13 +1152,13 @@ app.whenReady().then(() => {
     try {
       return { ok: true, ...officePack.packStatus(packDir, claudeDir) };
     } catch (err) {
-      return { ok: false, error: `The Claude folder could not be read (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.claudeUnreadable', { code: err.code || err.message }) };
     }
   });
   ipcMain.handle('pack:install', (_event, names) => {
-    if (!Array.isArray(names) || !names.length) return { ok: false, error: 'Nothing was chosen.' };
+    if (!Array.isArray(names) || !names.length) return { ok: false, error: en('said.main.nothingChosen') };
     const res = officePack.installPack(packDir, claudeDir, names.map(String));
-    for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    for (const e of res.errors) problem(en('said.main.officePack', { what: e }), claudeDir);
     syslog.write('activity', 'team-install', { added: res.installed.join(','), skipped: res.skipped.join(','), errors: res.errors.length || undefined });
     rosterAt = 0; // the new agents show in the hospital at the next check
     return { ok: res.errors.length === 0, ...res };
@@ -1162,10 +1168,10 @@ app.whenReady().then(() => {
     try {
       versions = JSON.parse(fs.readFileSync(path.join(packDir, 'versions.json'), 'utf8'));
     } catch (err) {
-      return { ok: false, error: `The app's list of team versions could not be read (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.versionsUnreadable', { code: err.code || err.message }) };
     }
     const res = officePack.updatePack(packDir, claudeDir, versions);
-    for (const e of res.errors) problem(`Office pack: ${e}`, claudeDir);
+    for (const e of res.errors) problem(en('said.main.officePack', { what: e }), claudeDir);
     syslog.write('activity', 'team-update', {
       added: res.added.join(','), updated: res.updated.join(','), edited: res.edited.join(','),
       ownAgents: res.own.agents.length, ownSkills: res.own.skills.length, errors: res.errors.length || undefined,
@@ -1195,10 +1201,10 @@ app.whenReady().then(() => {
         const lines = tailFile(reminderLog, 1000);
         return { ok: true, lines: lines.slice(-60), summary: reminderSummary(lines), team: teamState() };
       }
-      if (which !== 'activity' && which !== 'errors') return { ok: false, error: 'Unknown log' };
+      if (which !== 'activity' && which !== 'errors') return { ok: false, error: en('said.main.unknownLog') };
       return { ok: true, lines: syslog.tail(which, 80), dir: logDir };
     } catch (err) {
-      return { ok: false, error: `The log could not be read (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.logUnreadable', { code: err.code || err.message }) };
     }
   });
   ipcMain.handle('home:log-open', () => {
@@ -1231,7 +1237,7 @@ app.whenReady().then(() => {
     if (saved.mode === 'git') fleetMode = 'git';
     if (typeof saved.id === 'string' && /^[a-f0-9]{8,16}$/.test(saved.id)) fleetId = saved.id;
   } catch (err) {
-    if (err.code !== 'ENOENT') problem('fleet.json could not be read; sharing with other computers is off', fleetFile);
+    if (err.code !== 'ENOENT') problem(en('said.main.fleetUnreadable'), fleetFile);
   }
   if (!fleetId) {
     fleetId = require('crypto').randomBytes(5).toString('hex');
@@ -1240,7 +1246,7 @@ app.whenReady().then(() => {
       try {
         fs.writeFileSync(fleetFile, `${JSON.stringify({ dir: fleetDir, id: fleetId, mode: fleetMode }, null, 2)}\n`);
       } catch (err) {
-        problem(`fleet.json could not be saved (${err.code || err.message})`, fleetFile);
+        problem(en('said.main.fleetNotSaved', { code: err.code || err.message }), fleetFile);
       }
     }
   }
@@ -1260,7 +1266,7 @@ app.whenReady().then(() => {
     execFile('git', ['-C', fleetDir, 'pull', '--ff-only', '-q'], { timeout: 60_000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } },
       (err, _out, stderr) => {
         lastPull = err
-          ? { at: Date.now(), ok: false, error: err.code === 'ENOENT' ? 'git was not found' : String(stderr || err.message).trim().split('\n').pop() }
+          ? { at: Date.now(), ok: false, error: err.code === 'ENOENT' ? en('said.main.gitNotFound') : String(stderr || err.message).trim().split('\n').pop() }
           : { at: Date.now(), ok: true };
       });
   }
@@ -1268,27 +1274,27 @@ app.whenReady().then(() => {
   pullStatus();
   ipcMain.handle('home:fleet-git-choose', async () => {
     const res = await dialog.showOpenDialog(win, {
-      title: 'Pick your clone of the agents-status branch',
+      title: i18n.translate(uiLanguage, 'dialog.statusClone'),
       properties: ['openDirectory'],
     });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const dir = res.filePaths[0];
     if (!fs.existsSync(path.join(dir, '.git')) || !fs.existsSync(path.join(dir, 'post-status.js'))) {
-      return { ok: false, error: 'That is not a clone of the agents-status branch (see its README for the one-line clone).' };
+      return { ok: false, error: en('said.main.notStatusClone') };
     }
     fleetDir = dir;
     fleetMode = 'git';
     try {
       saveFleet();
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.settingNotSaved', { code: err.code || err.message }) };
     }
     pullStatus();
     return { ok: true, dir };
   });
   ipcMain.handle('home:fleet-choose', async () => {
     const res = await dialog.showOpenDialog(win, {
-      title: 'Pick a folder your computers share (OneDrive, Dropbox, a network drive)',
+      title: i18n.translate(uiLanguage, 'dialog.sharedFolder'),
       properties: ['openDirectory', 'createDirectory'],
     });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
@@ -1300,7 +1306,7 @@ app.whenReady().then(() => {
       return { ok: true, dir: fleetDir };
     } catch (err) {
       fleetDir = undefined;
-      return { ok: false, error: `That folder cannot be used (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.folderUnusable', { code: err.code || err.message }) };
     }
   });
   ipcMain.handle('home:fleet-off', () => {
@@ -1311,7 +1317,7 @@ app.whenReady().then(() => {
       saveFleet();
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: `The setting could not be saved (${err.code || err.message})` };
+      return { ok: false, error: en('said.main.settingNotSaved', { code: err.code || err.message }) };
     }
   });
   setInterval(() => {
@@ -1322,10 +1328,10 @@ app.whenReady().then(() => {
       try {
         fleet.writeShare(fleetDir, fleet.summaryOf(tracker.snapshot(now), HERE, now, fleetId));
       } catch (err) {
-        problemsNow.push({ label: `This computer's status could not be written to the shared folder (${err.code || 'error'})`, detail: fleetDir, count: 1 });
+        problemsNow.push({ label: en('said.main.statusNotWritten', { code: err.code || 'error' }), detail: fleetDir, count: 1 });
       }
     } else if (lastPull && !lastPull.ok) {
-      problemsNow.push({ label: `The status branch could not be pulled (${lastPull.error})`, detail: fleetDir, count: 1 });
+      problemsNow.push({ label: en('said.main.statusNotPulled', { why: lastPull.error }), detail: fleetDir, count: 1 });
     }
     const read = fleet.readShares(statusDir(), fleet.fileFor(HERE, fleetId), now);
     fleetState = { computers: read.computers, problems: [...problemsNow, ...read.problems.map((p) => ({ ...p, count: 1 }))] };
@@ -1362,12 +1368,12 @@ app.whenReady().then(() => {
   }, 2_000);
   ipcMain.handle('home:project-change', (_event, change) => {
     readProjects(true);
-    if (!projects.raw) return { ok: false, error: `The project list cannot be changed: ${projects.problems[0]}` };
+    if (!projects.raw) return { ok: false, error: en('said.main.projectsUnchangeable', { why: projects.problems[0] }) };
     try {
       const next = projectList.applyChange(projects.raw, change);
       projectList.saveProjects(projectsPath, next);
     } catch (err) {
-      return { ok: false, error: err.code ? `The project list could not be saved (${err.code})` : err.message };
+      return { ok: false, error: err.code ? en('said.main.projectsNotSaved', { code: err.code }) : err.message };
     }
     readProjects(true);
     return { ok: true };
@@ -1375,11 +1381,11 @@ app.whenReady().then(() => {
   // A project's worktrees, looked at only when the user opens them.
   ipcMain.handle('home:worktrees', async (_event, id) => {
     const p = (projects.data?.projects ?? []).find((x) => x.id === id);
-    if (!p?.path) return { ok: false, error: 'This project has no folder on this computer.' };
+    if (!p?.path) return { ok: false, error: en('said.main.noProjectFolder') };
     try {
       return await inspectWorktrees(p.path);
     } catch (err) {
-      return { ok: false, error: 'The worktrees could not be read.', detail: err.message };
+      return { ok: false, error: en('said.main.worktreesUnreadable'), detail: err.message };
     }
   });
   ipcMain.handle('home:projects-show', async () => {
@@ -1391,10 +1397,10 @@ app.whenReady().then(() => {
     try {
       fs.mkdirSync(path.dirname(projectsPath), { recursive: true });
     } catch (err) {
-      return { ok: false, file: projectsPath, error: `The folder for the project list could not be made (${err.code || err.message})` };
+      return { ok: false, file: projectsPath, error: en('said.main.projectsFolderNotMade', { code: err.code || err.message }) };
     }
     const error = await shell.openPath(path.dirname(projectsPath));
-    return error ? { ok: false, file: projectsPath, error: `The folder could not be opened: ${error}` } : { ok: true, file: projectsPath };
+    return error ? { ok: false, file: projectsPath, error: en('said.main.folderNotOpened', { why: error }) } : { ok: true, file: projectsPath };
   });
 
   // ---- LINE chats ------------------------------------------------------------
@@ -1422,7 +1428,7 @@ app.whenReady().then(() => {
   let lineLogged = '';
   const lineCode = (err) => err?.code ?? (err?.killed ? 'timeout' : 'error');
   const lineLog = (what, err) => syslog?.write('errors', 'line-chats', { error: `${what}: ${lineCode(err)}` });
-  const LINE_SAVE_ERROR = 'The setting could not be saved. Try again; if it keeps failing, the system log has the reason.';
+  const LINE_SAVE_ERROR = en('said.main.lineSaveError');
   let lineRead = 'missing'; // how the settings file read: 'ok', 'missing' or 'unreadable': a clean 'off' is the user's off for the bot part too
   try {
     line = lineChat.changeSettings(JSON.parse(fs.readFileSync(lineFile, 'utf8')), {}).settings;
@@ -1430,7 +1436,7 @@ app.whenReady().then(() => {
   } catch (err) {
     if (err.code !== 'ENOENT') {
       lineRead = 'unreadable';
-      problem('LINE chats: its settings could not be read; it is off until it is set again in Settings → Connections → LINE chats', lineFile, 'line');
+      problem(en('said.main.lineSettingsUnreadable'), lineFile, 'line');
     }
   }
   // The bot part: messages from the user's LINE groups through their own
@@ -1550,7 +1556,7 @@ app.whenReady().then(() => {
       // on the board as if just read; the stack (no chat text: the parser
       // keeps none in its errors) goes to the system log.
       [lineChats, lineItems] = [[], []];
-      lineScanError = 'LINE chats: the chats could not be read. The app tries again in 10 seconds; the system log has the reason';
+      lineScanError = en('said.main.lineScanError');
       syslog?.write('errors', 'line-chats', { error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
     }
   }
@@ -1570,7 +1576,7 @@ app.whenReady().then(() => {
   const lineLeftovers = loadedLeftovers.leftovers; // prompt file name -> the code it could not be removed with
   if (loadedLeftovers.error) {
     lineLog('leftover prompt list not read', { code: loadedLeftovers.error });
-    problem('LINE chats: the list of saved prompts a failed start left could not be read; the app still removes every saved prompt a day after it was written', lineLeftoverFile, 'line');
+    problem(en('said.main.leftoverListUnreadable'), lineLeftoverFile, 'line');
   }
   let leftoversSaved = JSON.stringify(lineChat.leftoverJson(lineLeftovers));
   function saveLeftovers() {
@@ -1585,26 +1591,26 @@ app.whenReady().then(() => {
       lineLog('leftover prompt list not saved', err);
     }
   }
-  const PRUNE_AGAIN = 'the app tries again within the hour';
+  const PRUNE_AGAIN = en('said.main.pruneAgain');
   function pruneLinePrompts(maxAgeMs) {
     const gone = lineChat.prunePrompts(linePromptDir, { ...(maxAgeMs == null ? {} : { maxAgeMs }), retry: [...lineLeftovers.keys()] });
     const n = gone.failed.length;
     const out = [];
     if (gone.folderError) {
       // The leftovers cannot be looked at either: they stay said.
-      out.push({ label: `LINE chats: the app's folder of saved prompts could not be opened to remove old ones; ${PRUNE_AGAIN}. If this stays, restart the app`, detail: `${linePromptDir} (${gone.folderError})` });
+      out.push({ label: en('said.main.promptFolderUnopened', { again: PRUNE_AGAIN }), detail: `${linePromptDir} (${gone.folderError})` });
     } else {
       lineLeftovers.clear();
       for (const s of gone.stuck) lineLeftovers.set(s.name, s.code);
     }
     saveLeftovers();
     if (n) {
-      out.push({ label: `LINE chats: ${n === 1 ? '1 saved prompt' : `${n} saved prompts`} could not be removed; close any app using the app's line-prompts folder, and ${PRUNE_AGAIN}`,
+      out.push({ label: en('said.main.promptsNotRemoved', { n, again: PRUNE_AGAIN }),
         detail: `${linePromptDir} (${[...new Set(gone.failed)].join(', ')})` });
     }
     if (gone.future) {
       const f = gone.future;
-      out.push({ label: `LINE chats: ${f === 1 ? '1 saved prompt is' : `${f} saved prompts are`} dated in the future, so the app does not remove ${f === 1 ? 'it' : 'them'} after a day; check the computer's date, or turn LINE chats off to remove every saved prompt`,
+      out.push({ label: en('said.main.promptsFuture', { n: f }),
         detail: linePromptDir });
     }
     linePruneProblems = out;
@@ -1613,7 +1619,7 @@ app.whenReady().then(() => {
     const n = lineLeftovers.size;
     if (!n) return [];
     return [{
-      label: `LINE chats: ${n === 1 ? 'a saved prompt' : `${n} saved prompts`} could not be removed after Claude did not start; close any app using the app's line-prompts folder, and the app tries again every hour`,
+      label: en('said.main.leftoverNotRemoved', { n }),
       detail: [...lineLeftovers].map(([name, code]) => `${path.join(linePromptDir, name)} (${code})`).join(', '),
     }];
   };
@@ -1649,7 +1655,7 @@ app.whenReady().then(() => {
   let botTriedAt = null;
   let botCollectedAt = null;
   let botMore = false; // the last collection stopped at linebot.ROUNDS with more waiting
-  const BOT_STALE = 'The relay link changed, or the bot was turned off, while collecting.';
+  const BOT_STALE = en('said.main.botStale');
   // An off not finished is off to the user: not "not collecting".
   const botWhyNot = () => lineBot.notCollecting({ on: line.enabled && botKeeper.on && !botKeeper.unfinished, stuck: botKeeper.stuck && botKeeper.state, link: botKeeper.settings.link, secretSaved: botSecretSaved, storage: botStorage });
   const botReady = () => line.enabled && botKeeper.ready && !botWhyNot();
@@ -1727,7 +1733,7 @@ app.whenReady().then(() => {
         else {
           // A bug: the stack goes to the system log (no secret: it is in no message).
           syslog?.write('errors', 'line-chats', { route: 'bot', error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
-          res = { error: new lineBot.LineBotError('internal', 'Something went wrong in the app while collecting; the system log has the reason. The app tries again in an hour, or press Refresh now.') };
+          res = { error: new lineBot.LineBotError('internal', en('said.main.botInternal')) };
         }
       }
       // Turned off, or another link saved, meanwhile: stopped (it wrote nothing after that).
@@ -1750,7 +1756,7 @@ app.whenReady().then(() => {
       return res.error ? { ok: false, collected: true, error: res.error.message } : { ok: true, collected: true };
     })().catch((err) => {
       syslog?.write('errors', 'line-chats', { route: 'bot', error: String(err?.stack ?? err).split('\n').slice(0, 3).join(' | ') });
-      botError = { message: 'Something went wrong in the app while collecting; the system log has the reason. The app tries again in an hour, or press Refresh now.', kind: 'internal', at: Date.now() };
+      botError = { message: en('said.main.botInternal'), kind: 'internal', at: Date.now() };
       return { ok: false, collected: true, error: botError.message };
     }).finally(() => {
       botRun = null;
@@ -1779,7 +1785,7 @@ app.whenReady().then(() => {
   // One change from Settings: { on } | { link } | { tick: { id, on } }, each
   // taken by the keeper only once written; else "not saved" with why.
   ipcMain.handle('home:line-bot-set', (_event, change = {}) => {
-    if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
+    if (!line.enabled) return { ok: false, error: en('said.main.lineOnFirst') };
     const c = change ?? {};
     let res;
     if ('on' in c) {
@@ -1798,12 +1804,12 @@ app.whenReady().then(() => {
         // The secret belongs to its relay: another link drops it, and asks again.
         if (botSecretSaved && botSecretFor !== res.deploymentId) {
           dropBotSecret();
-          if (!botSecretSaved) res = { ...res, secretNote: 'The saved secret was the old relay’s, so it was removed: save this relay’s secret.' };
+          if (!botSecretSaved) res = { ...res, secretNote: en('said.main.oldRelaySecret') };
         }
       }
     } else if ('tick' in c) {
       res = botKeeper.readGroup(String(c.tick?.id ?? ''), c.tick?.on === true);
-    } else return { ok: false, error: 'Nothing to change.' };
+    } else return { ok: false, error: en('said.main.nothingToChange') };
     if (!res.ok) {
       if (res.code) lineLog('on' in c ? 'bot not turned on' : 'bot store not saved', { code: res.code });
       return { ok: false, error: res.error };
@@ -1820,7 +1826,7 @@ app.whenReady().then(() => {
   // it was saved with (linebot.cursorFor), so a new one, even after a
   // restart, never sends the old cursor, and nothing need be written first.
   ipcMain.handle('home:line-bot-save-secret', (_event, text) => {
-    if (!line.enabled || !botKeeper.on) return { ok: false, error: 'Turn on Collect from my LINE bot first.' };
+    if (!line.enabled || !botKeeper.on) return { ok: false, error: en('said.main.botOnFirst') };
     if (!botKeeper.ready) return { ok: false, error: lineBot.UNREAD };
     const checked = lineBot.checkSecret(text, { available: safeStorage.isEncryptionAvailable(), backend: botBackend(), saved: botSecretSaved, link: botKeeper.settings.link });
     if (checked.error) return { ok: false, error: checked.error };
@@ -1837,7 +1843,7 @@ app.whenReady().then(() => {
         // Only the half-written copy is left, encrypted; the save's own error is what is said and logged.
       }
       lineLog('relay secret not saved', err);
-      return { ok: false, error: 'The secret could not be saved; see the system log, then try again.' };
+      return { ok: false, error: en('said.main.secretNotSaved') };
     }
     botSecretSaved = true;
     botSecretFor = checked.deploymentId;
@@ -1847,9 +1853,9 @@ app.whenReady().then(() => {
   });
   // Refresh now collects at once, with the settings as they are.
   ipcMain.handle('home:line-bot-refresh', async () => {
-    if (!line.enabled || !botKeeper.on) return { ok: false, error: 'Turn on Collect from my LINE bot first.' };
+    if (!line.enabled || !botKeeper.on) return { ok: false, error: en('said.main.botOnFirst') };
     const why = botWhyNot();
-    if (why) return { ok: false, error: `Not collecting: ${lineBot.inSettings(why)}.`, collected: false };
+    if (why) return { ok: false, error: en('said.main.notCollecting', { why: lineBot.inSettings(why) }), collected: false };
     const res = await collectBot();
     // Stale: collected again only while LINE chats and the bot are still on (not after an off).
     return res.error === BOT_STALE && botReady() ? collectBot() : res;
@@ -1861,7 +1867,7 @@ app.whenReady().then(() => {
       code = fs.readFileSync(path.join(app.getAppPath(), 'docs', 'line-bot-relay.gs'), 'utf8');
     } catch (err) {
       lineLog('relay script not read', err);
-      return { ok: false, error: 'The relay script that comes with the app is missing from this copy. Update the app (Settings → App → Updates) or install it again, then copy it.' };
+      return { ok: false, error: en('said.main.relayScriptMissing') };
     }
     clipboard.writeText(code);
     return { ok: true };
@@ -1892,7 +1898,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('home:line-choose-folder', async () => {
     const res = await dialog.showOpenDialog(win, {
-      title: 'Choose the folder you save LINE chats into',
+      title: i18n.translate(uiLanguage, 'dialog.lineFolder'),
       properties: ['openDirectory', 'createDirectory'],
     });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
@@ -1908,8 +1914,8 @@ app.whenReady().then(() => {
   // Add to project: the to-do goes through projects.js (read afresh, written
   // whole, unknown fields kept); then the item is remembered as added.
   ipcMain.handle('home:line-add', (_event, { key, project, text } = {}) => {
-    if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
-    if (!lineItem(key)) return { ok: false, error: 'That item is no longer listed; it may have been added or dismissed already.' };
+    if (!line.enabled) return { ok: false, error: en('said.main.lineOnFirst') };
+    if (!lineItem(key)) return { ok: false, error: en('said.main.itemGone') };
     try {
       lineChat.addTodo(projectsPath, { project, text });
     } catch (err) {
@@ -1918,8 +1924,8 @@ app.whenReady().then(() => {
       lineLog(`project list not ${verb}`, err);
       return {
         ok: false,
-        error: ['EBUSY', 'EPERM', 'EACCES'].includes(err.code) ? 'The project list is in use. Close other apps using it and try again.'
-          : `The project list could not be ${verb}. Try again; if it keeps failing, the system log has the reason.`,
+        error: ['EBUSY', 'EPERM', 'EACCES'].includes(err.code) ? en('said.main.projectsBusy')
+          : en(verb === 'read' ? 'said.main.projectsNotReadTry' : 'said.main.projectsNotSavedTry'),
       };
     }
     readProjects(true);
@@ -1927,7 +1933,7 @@ app.whenReady().then(() => {
       saveLine(lineChat.changeSettings(line, { mark: { key, what: 'added' } }).settings);
     } catch (err) {
       lineLog('added item not noted', err);
-      return { ok: true, stays: true, note: 'Added. The app could not note that it was, so the item stays listed: dismiss it when you are done.' };
+      return { ok: true, stays: true, note: en('said.main.addedNotNoted') };
     }
     return { ok: true };
   });
@@ -1940,7 +1946,7 @@ app.whenReady().then(() => {
     return lineTmux;
   });
   ipcMain.handle('home:line-browse', async () => {
-    const res = await dialog.showOpenDialog(win, { title: 'Choose the folder Claude works in', properties: ['openDirectory'] });
+    const res = await dialog.showOpenDialog(win, { title: i18n.translate(uiLanguage, 'dialog.claudeFolder'), properties: ['openDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, path: res.filePaths[0] };
   });
@@ -1949,11 +1955,11 @@ app.whenReady().then(() => {
   // command. For tmux, WSL is first asked which distro it runs (tmux is
   // there) and whether the folder is there.
   ipcMain.handle('home:line-start', async (_event, req = {}) => {
-    if (!line.enabled) return { ok: false, error: 'Turn LINE chats on first.' };
-    if (req.target !== 'tmux' && req.target !== 'wt') return { ok: false, error: 'Choose where Claude runs.' };
+    if (!line.enabled) return { ok: false, error: en('said.main.lineOnFirst') };
+    if (req.target !== 'tmux' && req.target !== 'wt') return { ok: false, error: en('said.main.chooseWhere') };
     let distro = null;
     if (req.target === 'tmux') {
-      if (!lineTmux.sessions.includes(req.session)) return { ok: false, error: 'That tmux session is not listed any more. Close this sheet and open it again to see the sessions running now.' };
+      if (!lineTmux.sessions.includes(req.session)) return { ok: false, error: en('said.main.tmuxGone') };
       let target;
       try {
         target = lineChat.wslTarget(req.cwd);
@@ -1965,7 +1971,7 @@ app.whenReady().then(() => {
         lineLog('WSL not asked', { code: probe.code });
         return { ok: false, error: probe.error };
       }
-      if (!probe.exists) return { ok: false, error: 'That folder is not there in WSL. Choose another folder.' };
+      if (!probe.exists) return { ok: false, error: en('said.main.notInWsl') };
       distro = probe.distro;
     } else if (typeof req.cwd === 'string' && /^[A-Za-z]:[\\/]|^\\\\/.test(req.cwd)) {
       let isDir = false;
@@ -1974,7 +1980,7 @@ app.whenReady().then(() => {
       } catch {
         isDir = false; // missing or unreadable: said below
       }
-      if (!isDir) return { ok: false, error: 'That folder is not there any more. Choose another folder.' };
+      if (!isDir) return { ok: false, error: en('said.main.folderGone') };
     }
     const promptFile = path.join(linePromptDir, `${Date.now()}-${require('crypto').randomBytes(3).toString('hex')}.txt`);
     let plan;
@@ -1993,7 +1999,7 @@ app.whenReady().then(() => {
         lineLeftovers.set(path.basename(plan.write.file), wrote.leftover);
         saveLeftovers();
       }
-      return { ok: false, error: 'The prompt could not be saved in the app’s data folder. Try again; if it keeps failing, the system log has the reason.' };
+      return { ok: false, error: en('said.main.promptNotSaved') };
     }
     return new Promise((resolve) => {
       // wsl.exe is a console program: hidden. wt.exe opens the terminal
@@ -2009,10 +2015,10 @@ app.whenReady().then(() => {
         lineLog(`start failed (${req.target})`, err);
         const tmux = req.target === 'tmux';
         const why = err.code === 'ENOENT'
-          ? (tmux ? 'WSL is not installed. Choose New Windows Terminal tab instead.' : 'Windows Terminal is not installed. Install it, or start a tmux session in WSL and open this sheet again.')
-          : err.killed ? 'Starting Claude took too long. Try again; if it keeps happening, the system log has the reason.'
-            : tmux ? 'tmux could not open the window. Check that the session is still running, then open this sheet again.'
-              : 'Windows Terminal could not open the tab. Try again; if it keeps failing, the system log has the reason.';
+          ? (tmux ? en('said.main.noWsl') : en('said.main.noTerminal'))
+          : err.killed ? en('said.main.startSlow')
+            : tmux ? en('said.main.tmuxFailed')
+              : en('said.main.terminalFailed');
         return resolve({ ok: false, error: why });
       });
     });
@@ -2182,7 +2188,7 @@ app.whenReady().then(() => {
       try {
         fs.writeFileSync(miniFile, JSON.stringify(mini.getBounds()));
       } catch (err) {
-        problem(`The mini window's place could not be saved (${err.code || err.message})`, miniFile);
+        problem(en('said.main.miniNotSaved', { code: err.code || err.message }), miniFile);
       }
     });
     mini.on('closed', () => { mini = undefined; });
@@ -2216,6 +2222,7 @@ app.whenReady().then(() => {
   // reloads both windows from here: they never navigate themselves.
   ipcMain.handle('home:language', (_event, id, { reload = false } = {}) => {
     if (!Object.hasOwn(i18n.TABLES, id)) return { ok: false, error: 'unknown language' };
+    uiLanguage = id;
     if (reload) for (const w of [win, mini]) if (w && !w.isDestroyed()) w.webContents.reload();
     return { ok: true };
   });
@@ -2236,7 +2243,7 @@ app.whenReady().then(() => {
     try {
       return loggedFromLog(syslog.lines('activity'));
     } catch (err) {
-      problem(`activity.log could not be read back (${err.code || err.message}), so what the app read again may be written twice`, logDir);
+      problem(en('said.main.activityNotRead', { code: err.code || err.message }), logDir);
       return loggedSoFar();
     }
   };
@@ -2309,7 +2316,7 @@ app.whenReady().then(() => {
     // each new kind of failure is shown once.
     if (syslog.failed && syslog.failed !== shownFailure) {
       shownFailure = syslog.failed;
-      problem(`The system log could not be written (${syslog.failed})`, logDir);
+      problem(en('said.main.logNotWritten', { code: syslog.failed }), logDir);
     }
   }, LOG_MS);
 
@@ -2359,10 +2366,10 @@ app.whenReady().then(() => {
         ...startupProblems, ...problems.values(), ...wsl.problems, ...roster.problems,
         ...cowork.problems.map((p) => ({ ...p, count: 1 })), ...fleetState.problems, ...jobs.problems,
         ...(work.problem ? [{ label: work.problem, detail: '', count: 1 }] : []),
-        ...projects.problems.map((label) => ({ label: `Project list: ${label}`, detail: projectsPath, count: 1 })),
-        ...assistant.problems.map((label) => ({ label: `Personal assistant: ${label}`, detail: assistantPath, count: 1 })),
-        ...(usageSummary?.problems ?? []).map((p) => ({ label: `A transcript ${p.what} while counting use`, detail: p.where, count: 1 })),
-        ...(usageSummary?.unreadable ? [{ label: 'Lines that could not be read while counting use', detail: '', count: usageSummary.unreadable }] : []),
+        ...projects.problems.map((label) => ({ label: en('said.main.projectList', { what: label }), detail: projectsPath, count: 1 })),
+        ...assistant.problems.map((label) => ({ label: en('said.main.assistant', { what: label }), detail: assistantPath, count: 1 })),
+        ...(usageSummary?.problems ?? []).map((p) => ({ label: en('said.main.usageTranscript', { what: p.what }), detail: p.where, count: 1 })),
+        ...(usageSummary?.unreadable ? [{ label: en('said.main.usageUnreadable'), detail: '', count: usageSummary.unreadable }] : []),
       ],
     };
     if (mainOpen) win.webContents.send('home:snapshot', payload);

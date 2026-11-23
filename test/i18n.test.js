@@ -149,3 +149,58 @@ test('a sign is sized for its words: Chinese characters take a whole em', async 
   assert.equal(textWidth('放射科', 11.5, 20), 60);
   assert.equal(textWidth('CMF 科', 10, 20), 4 * 10 + 20);
 });
+
+test('every sentence core says reads back as the entry that built it, filled as it was', async () => {
+  const { TABLES, unsay, placeholders } = await load();
+  const said = Object.entries(TABLES.en).filter(([key]) => key.startsWith('said.'));
+  assert.ok(said.length > 100, 'core\'s sentences are in the table');
+  for (const [key, value] of said) {
+    for (const [form, text] of typeof value === 'object' ? Object.entries(value) : [['', value]]) {
+      assert.doesNotMatch(text, /\}\{/, `${key}: two placeholders side by side cannot be told apart`);
+      const names = [...placeholders(text)];
+      const params = Object.fromEntries(names.map((name, i) => [name, name === 'n' ? (form === 'one' ? 1 : 7) : `‹${i}›`]));
+      const filled = text.replace(/\{(\w+)\}/g, (_, name) => String(params[name]));
+      const found = unsay(filled);
+      assert.equal(found?.key, key, `${key}${form ? ` (${form})` : ''} reads back as itself`);
+      for (const name of names) assert.equal(String(found.params[name]), String(params[name]), `${key}: {${name}}`);
+    }
+  }
+});
+
+test('a sentence from core is put in the window\'s language, with the sentences inside it', async () => {
+  const { sayIn } = await load();
+  const core = require('../src/core/i18n');
+  const ignored = core.en('said.main.layoutIgnored', { reason: core.en('said.main.notJson') });
+  assert.equal(ignored, 'layout.json ignored: it is not valid JSON; showing the core hospital', 'English as before');
+  assert.equal(sayIn('en', ignored), ignored);
+  assert.equal(sayIn('zh-TW', ignored), '未採用 layout.json：它不是有效的 JSON；先顯示基本醫院');
+  const one = core.en('said.main.promptsNotRemoved', { n: 1, again: core.en('said.main.pruneAgain') });
+  assert.equal(one, 'LINE chats: 1 saved prompt could not be removed; close any app using the app\'s line-prompts folder, and the app tries again within the hour');
+  assert.match(sayIn('zh-TW', one), /^LINE 聊天：有 1 份已存提示無法移除；.*App 會在一小時內再試$/);
+  const code = core.en('said.main.layoutNotSaved', { code: 'EBUSY' });
+  assert.equal(sayIn('zh-TW', code), '無法儲存配置（EBUSY）', 'a code stays as it is');
+});
+
+test('a core sentence Chinese lacks, and one no entry built, stay English and are told once', async () => {
+  const i18n = await load();
+  const core = require('../src/core/i18n');
+  const told = [];
+  i18n.onMissing((lang, key) => told.push(`${lang}:${key}`));
+  const zh = i18n.TABLES['zh-TW'];
+  const kept = zh['said.main.upToDate'];
+  delete zh['said.main.upToDate'];
+  try {
+    const text = core.en('said.main.upToDate');
+    assert.equal(i18n.sayIn('zh-TW', text), 'Already up to date.');
+    assert.equal(i18n.sayIn('zh-TW', `${text} `), 'Already up to date. ', 'and nothing else is read into it');
+    const inside = core.en('said.main.updateFailed', { why: text });
+    assert.equal(i18n.sayIn('zh-TW', inside), '更新沒有完成：Already up to date.', 'the sentence around it is still Chinese');
+    assert.deepEqual(told.filter((t) => t.endsWith('said.main.upToDate')), ['zh-TW:said.main.upToDate'], 'told once');
+    assert.equal(i18n.sayIn('zh-TW', 'Words from somewhere else'), 'Words from somewhere else');
+    assert.equal(i18n.sayIn('zh-TW', 'Words from somewhere else'), 'Words from somewhere else');
+    assert.deepEqual(told.filter((t) => t.includes('somewhere')), ['zh-TW:said: Words from somewhere else'], 'told once');
+  } finally {
+    zh['said.main.upToDate'] = kept;
+    i18n.onMissing(null);
+  }
+});
