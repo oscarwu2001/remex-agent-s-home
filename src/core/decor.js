@@ -1,6 +1,7 @@
 'use strict';
 
 const { SCENERY } = require('./rooms');
+const { en } = require('./i18n');
 
 // What people can choose when they make the hospital their own: a floor for
 // each room, every item in it (furniture and decorations, placed on the
@@ -10,12 +11,12 @@ const { SCENERY } = require('./rooms');
 
 // Floors any room can have.
 const FLOORS = [
-  { id: 'checker', name: 'Checker tiles' },
-  { id: 'tiles', name: 'Large tiles' },
-  { id: 'mosaic', name: 'Mosaic' },
-  { id: 'wood', name: 'Wooden boards' },
-  { id: 'terrazzo', name: 'Terrazzo' },
-  { id: 'vinyl', name: 'Plain vinyl' },
+  { id: 'checker', name: en('decor.floor.checker') },
+  { id: 'tiles', name: en('decor.floor.tiles') },
+  { id: 'mosaic', name: en('decor.floor.mosaic') },
+  { id: 'wood', name: en('decor.floor.wood') },
+  { id: 'terrazzo', name: en('decor.floor.terrazzo') },
+  { id: 'vinyl', name: en('decor.floor.vinyl') },
 ];
 const DEFAULT_FLOOR = 'checker';
 
@@ -25,32 +26,32 @@ const ROOM_SIZE = 6;
 // Decorations, and the rooms they make sense in. 'any' fits every room;
 // 'department' fits every department the user adds.
 const DECORATIONS = [
-  { id: 'plant', name: 'Potted plant', rooms: 'any' },
-  { id: 'tall-plant', name: 'Tall plant', rooms: 'any' },
-  { id: 'flowers', name: 'Vase of flowers', rooms: 'any' },
-  { id: 'water-cooler', name: 'Water cooler', rooms: ['nurses-station', 'research-office', 'general-ward', 'laboratory'] },
-  { id: 'sanitiser', name: 'Hand sanitiser stand', rooms: 'any' },
-  { id: 'visitor-chair', name: 'Visitor chair', rooms: ['nurses-station', 'general-ward', 'vision-clinic', 'research-office'] },
-  { id: 'waiting-bench', name: 'Waiting bench', rooms: ['nurses-station', 'vision-clinic', 'radiology'] },
-  { id: 'supply-trolley', name: 'Supply trolley', rooms: ['nurses-station', 'general-ward', 'operating-room', 'department'] },
-  { id: 'crash-cart', name: 'Crash cart', rooms: ['operating-room', 'general-ward', 'nurses-station', 'department'] },
-  { id: 'instrument-tray', name: 'Instrument tray', rooms: ['operating-room', 'department'] },
-  { id: 'scrub-sink', name: 'Scrub sink', rooms: ['operating-room', 'department'] },
-  { id: 'sharps-bin', name: 'Sharps bin', rooms: ['operating-room', 'general-ward', 'laboratory', 'department'] },
-  { id: 'specimen-fridge', name: 'Specimen fridge', rooms: ['laboratory'] },
-  { id: 'tube-rack', name: 'Test-tube rack', rooms: ['laboratory'] },
-  { id: 'eyewash', name: 'Eyewash station', rooms: ['laboratory'] },
-  { id: 'apron-rack', name: 'Lead apron rack', rooms: ['radiology', 'department'] },
-  { id: 'lightbox', name: 'X-ray lightbox', rooms: ['radiology', 'operating-room', 'department'] },
-  { id: 'eye-model', name: 'Eye model', rooms: ['vision-clinic'] },
-  { id: 'glasses-stand', name: 'Glasses display', rooms: ['vision-clinic'] },
-  { id: 'bookcase', name: 'Bookcase', rooms: ['research-office', 'nurses-station'] },
-  { id: 'globe', name: 'Globe', rooms: ['research-office'] },
-  { id: 'armchair', name: 'Reading armchair', rooms: ['research-office', 'general-ward'] },
-  { id: 'whiteboard', name: 'Whiteboard', rooms: ['research-office', 'laboratory', 'department'] },
-  { id: 'wheelchair', name: 'Wheelchair', rooms: ['general-ward', 'nurses-station', 'radiology'] },
-  { id: 'iv-pole', name: 'IV pole', rooms: ['general-ward', 'operating-room'] },
-  { id: 'spine-model', name: 'Spine model', rooms: ['department', 'radiology'] },
+  { id: 'plant', name: en('decor.item.plant'), rooms: 'any' },
+  { id: 'tall-plant', name: en('decor.item.tall-plant'), rooms: 'any' },
+  { id: 'flowers', name: en('decor.item.flowers'), rooms: 'any' },
+  { id: 'water-cooler', name: en('decor.item.water-cooler'), rooms: ['nurses-station', 'research-office', 'general-ward', 'laboratory'] },
+  { id: 'sanitiser', name: en('decor.item.sanitiser'), rooms: 'any' },
+  { id: 'visitor-chair', name: en('decor.item.visitor-chair'), rooms: ['nurses-station', 'general-ward', 'vision-clinic', 'research-office'] },
+  { id: 'waiting-bench', name: en('decor.item.waiting-bench'), rooms: ['nurses-station', 'vision-clinic', 'radiology'] },
+  { id: 'supply-trolley', name: en('decor.item.supply-trolley'), rooms: ['nurses-station', 'general-ward', 'operating-room', 'department'] },
+  { id: 'crash-cart', name: en('decor.item.crash-cart'), rooms: ['operating-room', 'general-ward', 'nurses-station', 'department'] },
+  { id: 'instrument-tray', name: en('decor.item.instrument-tray'), rooms: ['operating-room', 'department'] },
+  { id: 'scrub-sink', name: en('decor.item.scrub-sink'), rooms: ['operating-room', 'department'] },
+  { id: 'sharps-bin', name: en('decor.item.sharps-bin'), rooms: ['operating-room', 'general-ward', 'laboratory', 'department'] },
+  { id: 'specimen-fridge', name: en('decor.item.specimen-fridge'), rooms: ['laboratory'] },
+  { id: 'tube-rack', name: en('decor.item.tube-rack'), rooms: ['laboratory'] },
+  { id: 'eyewash', name: en('decor.item.eyewash'), rooms: ['laboratory'] },
+  { id: 'apron-rack', name: en('decor.item.apron-rack'), rooms: ['radiology', 'department'] },
+  { id: 'lightbox', name: en('decor.item.lightbox'), rooms: ['radiology', 'operating-room', 'department'] },
+  { id: 'eye-model', name: en('decor.item.eye-model'), rooms: ['vision-clinic'] },
+  { id: 'glasses-stand', name: en('decor.item.glasses-stand'), rooms: ['vision-clinic'] },
+  { id: 'bookcase', name: en('decor.item.bookcase'), rooms: ['research-office', 'nurses-station'] },
+  { id: 'globe', name: en('decor.item.globe'), rooms: ['research-office'] },
+  { id: 'armchair', name: en('decor.item.armchair'), rooms: ['research-office', 'general-ward'] },
+  { id: 'whiteboard', name: en('decor.item.whiteboard'), rooms: ['research-office', 'laboratory', 'department'] },
+  { id: 'wheelchair', name: en('decor.item.wheelchair'), rooms: ['general-ward', 'nurses-station', 'radiology'] },
+  { id: 'iv-pole', name: en('decor.item.iv-pole'), rooms: ['general-ward', 'operating-room'] },
+  { id: 'spine-model', name: en('decor.item.spine-model'), rooms: ['department', 'radiology'] },
 ];
 
 // Everything that can stand in a room: its furniture, the decorations above
@@ -59,34 +60,34 @@ const DECORATIONS = [
 // tiles (d x w when turned).
 const R = (...ids) => ids;
 const FURNITURE = [
-  { id: 'station-counter', name: "Nurses' counter", w: 4, d: 1, turns: true, suits: R('nurses-station') },
-  { id: 'office-chair', name: 'Office chair', w: 1, d: 1, suits: R('nurses-station', 'research-office') },
-  { id: 'operating-table', name: 'Operating table and lights', w: 2, d: 3, turns: true, suits: R('operating-room') },
-  { id: 'anaesthesia-machine', name: 'Anaesthesia machine', w: 2, d: 1, turns: true, suits: R('operating-room', 'department') },
-  { id: 'vitals-monitor', name: 'Vital signs monitor', w: 1, d: 1, suits: R('operating-room', 'general-ward', 'department') },
-  { id: 'bookshelf', name: 'Bookshelf', w: 1, d: 3, turns: true, suits: R('research-office') },
-  { id: 'desk', name: 'Desk with laptop', w: 2, d: 1, turns: true, suits: R('research-office', 'nurses-station') },
-  { id: 'lab-bench', name: 'Lab bench', w: 1, d: 4, turns: true, suits: R('laboratory') },
-  { id: 'fume-hood', name: 'Fume hood', w: 2, d: 1, turns: true, suits: R('laboratory') },
-  { id: 'centrifuge', name: 'Centrifuge', w: 1, d: 1, suits: R('laboratory') },
-  { id: 'mri-scanner', name: 'MRI scanner', w: 2, d: 4, turns: true, suits: R('radiology') },
-  { id: 'scanner-console', name: 'Scanner console', w: 1, d: 1, suits: R('radiology') },
-  { id: 'eye-chart', name: 'Eye chart', w: 2, d: 1, turns: true, suits: R('vision-clinic') },
-  { id: 'exam-chair', name: 'Exam chair', w: 1, d: 1, suits: R('vision-clinic') },
-  { id: 'slit-lamp', name: 'Slit lamp', w: 1, d: 1, suits: R('vision-clinic') },
-  { id: 'hospital-bed', name: 'Hospital bed', w: 3, d: 1, turns: true, suits: R('general-ward') },
-  { id: 'nav-table', name: 'Navigation table', w: 2, d: 3, turns: true, suits: R('department') },
-  { id: 'tracking-camera', name: 'Tracking camera', w: 1, d: 1, suits: R('department') },
-  { id: 'planning-cart', name: 'Planning cart', w: 1, d: 1, suits: R('department') },
+  { id: 'station-counter', name: en('decor.item.station-counter'), w: 4, d: 1, turns: true, suits: R('nurses-station') },
+  { id: 'office-chair', name: en('decor.item.office-chair'), w: 1, d: 1, suits: R('nurses-station', 'research-office') },
+  { id: 'operating-table', name: en('decor.item.operating-table'), w: 2, d: 3, turns: true, suits: R('operating-room') },
+  { id: 'anaesthesia-machine', name: en('decor.item.anaesthesia-machine'), w: 2, d: 1, turns: true, suits: R('operating-room', 'department') },
+  { id: 'vitals-monitor', name: en('decor.item.vitals-monitor'), w: 1, d: 1, suits: R('operating-room', 'general-ward', 'department') },
+  { id: 'bookshelf', name: en('decor.item.bookshelf'), w: 1, d: 3, turns: true, suits: R('research-office') },
+  { id: 'desk', name: en('decor.item.desk'), w: 2, d: 1, turns: true, suits: R('research-office', 'nurses-station') },
+  { id: 'lab-bench', name: en('decor.item.lab-bench'), w: 1, d: 4, turns: true, suits: R('laboratory') },
+  { id: 'fume-hood', name: en('decor.item.fume-hood'), w: 2, d: 1, turns: true, suits: R('laboratory') },
+  { id: 'centrifuge', name: en('decor.item.centrifuge'), w: 1, d: 1, suits: R('laboratory') },
+  { id: 'mri-scanner', name: en('decor.item.mri-scanner'), w: 2, d: 4, turns: true, suits: R('radiology') },
+  { id: 'scanner-console', name: en('decor.item.scanner-console'), w: 1, d: 1, suits: R('radiology') },
+  { id: 'eye-chart', name: en('decor.item.eye-chart'), w: 2, d: 1, turns: true, suits: R('vision-clinic') },
+  { id: 'exam-chair', name: en('decor.item.exam-chair'), w: 1, d: 1, suits: R('vision-clinic') },
+  { id: 'slit-lamp', name: en('decor.item.slit-lamp'), w: 1, d: 1, suits: R('vision-clinic') },
+  { id: 'hospital-bed', name: en('decor.item.hospital-bed'), w: 3, d: 1, turns: true, suits: R('general-ward') },
+  { id: 'nav-table', name: en('decor.item.nav-table'), w: 2, d: 3, turns: true, suits: R('department') },
+  { id: 'tracking-camera', name: en('decor.item.tracking-camera'), w: 1, d: 1, suits: R('department') },
+  { id: 'planning-cart', name: en('decor.item.planning-cart'), w: 1, d: 1, suits: R('department') },
   // just for fun
-  { id: 'sofa', name: 'Sofa', w: 2, d: 1, turns: true, suits: R('nurses-station') },
-  { id: 'rug', name: 'Round rug', w: 2, d: 2, suits: R() },
-  { id: 'coffee-table', name: 'Coffee table', w: 1, d: 1, suits: R() },
-  { id: 'fish-tank', name: 'Fish tank', w: 1, d: 1, suits: R('nurses-station', 'general-ward') },
-  { id: 'vending-machine', name: 'Vending machine', w: 1, d: 1, suits: R('nurses-station') },
-  { id: 'floor-lamp', name: 'Floor lamp', w: 1, d: 1, suits: R('research-office') },
-  { id: 'filing-cabinet', name: 'Filing cabinet', w: 1, d: 1, suits: R('research-office', 'nurses-station') },
-  { id: 'printer', name: 'Printer', w: 1, d: 1, suits: R('research-office', 'nurses-station') },
+  { id: 'sofa', name: en('decor.item.sofa'), w: 2, d: 1, turns: true, suits: R('nurses-station') },
+  { id: 'rug', name: en('decor.item.rug'), w: 2, d: 2, suits: R() },
+  { id: 'coffee-table', name: en('decor.item.coffee-table'), w: 1, d: 1, suits: R() },
+  { id: 'fish-tank', name: en('decor.item.fish-tank'), w: 1, d: 1, suits: R('nurses-station', 'general-ward') },
+  { id: 'vending-machine', name: en('decor.item.vending-machine'), w: 1, d: 1, suits: R('nurses-station') },
+  { id: 'floor-lamp', name: en('decor.item.floor-lamp'), w: 1, d: 1, suits: R('research-office') },
+  { id: 'filing-cabinet', name: en('decor.item.filing-cabinet'), w: 1, d: 1, suits: R('research-office', 'nurses-station') },
+  { id: 'printer', name: en('decor.item.printer'), w: 1, d: 1, suits: R('research-office', 'nurses-station') },
 ];
 const ROOM_ITEMS = [
   ...FURNITURE,
@@ -141,20 +142,20 @@ function itemsFor(room) {
 // covers w x d tiles; a bench turned round covers d x w.
 const GARDEN_SIZE = 4;
 const PLANTS = [
-  { id: 'tulips', name: 'Tulips', w: 1, d: 1 },
-  { id: 'daisies', name: 'Daisies', w: 1, d: 1 },
-  { id: 'lavender', name: 'Lavender', w: 1, d: 1 },
-  { id: 'roses', name: 'Rose bush', w: 1, d: 1 },
-  { id: 'shrub', name: 'Round shrub', w: 1, d: 1 },
-  { id: 'small-tree', name: 'Small tree', w: 1, d: 1 },
-  { id: 'lamp', name: 'Lamp post', w: 1, d: 1 },
-  { id: 'path', name: 'Stepping stones', w: 1, d: 1 },
-  { id: 'bench', name: 'Bench', w: 2, d: 1, turns: true },
-  { id: 'big-tree', name: 'Big tree', w: 2, d: 2 },
-  { id: 'blossom-tree', name: 'Blossom tree', w: 2, d: 2 },
-  { id: 'cherry-tree', name: 'Cherry blossom', w: 2, d: 2 },
-  { id: 'cherry-sapling', name: 'Young cherry', w: 1, d: 1 },
-  { id: 'fountain', name: 'Fountain', w: 2, d: 2 },
+  { id: 'tulips', name: en('decor.plant.tulips'), w: 1, d: 1 },
+  { id: 'daisies', name: en('decor.plant.daisies'), w: 1, d: 1 },
+  { id: 'lavender', name: en('decor.plant.lavender'), w: 1, d: 1 },
+  { id: 'roses', name: en('decor.plant.roses'), w: 1, d: 1 },
+  { id: 'shrub', name: en('decor.plant.shrub'), w: 1, d: 1 },
+  { id: 'small-tree', name: en('decor.plant.small-tree'), w: 1, d: 1 },
+  { id: 'lamp', name: en('decor.plant.lamp'), w: 1, d: 1 },
+  { id: 'path', name: en('decor.plant.path'), w: 1, d: 1 },
+  { id: 'bench', name: en('decor.plant.bench'), w: 2, d: 1, turns: true },
+  { id: 'big-tree', name: en('decor.plant.big-tree'), w: 2, d: 2 },
+  { id: 'blossom-tree', name: en('decor.plant.blossom-tree'), w: 2, d: 2 },
+  { id: 'cherry-tree', name: en('decor.plant.cherry-tree'), w: 2, d: 2 },
+  { id: 'cherry-sapling', name: en('decor.plant.cherry-sapling'), w: 1, d: 1 },
+  { id: 'fountain', name: en('decor.plant.fountain'), w: 2, d: 2 },
 ];
 const PLANT_BY_ID = Object.fromEntries(PLANTS.map((p) => [p.id, p]));
 
