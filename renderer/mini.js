@@ -10,13 +10,14 @@ import { personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 import { miniHtml } from './mini-view.js';
+import { shownPlan } from './usage-view.js';
 import { tr, localise, setLanguage, resolveLanguage, onMissing, said } from './i18n.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
 
 // The hospital window's preferences (same origin, same storage): privacy
-// mode, demo, colourway and language follow it, and change here when
+// mode, demo, colourway, plan and language follow it, and change here when
 // changed there. A new language comes with a reload: the main process
 // reloads both windows; the browser preview's tab reloads itself.
 const prefs = { private: true, demo: false, theme: 'blossom' };
@@ -58,7 +59,7 @@ const open = new Set(); // sessions whose whole to-do list is open
 let last = '';
 function render() {
   const snap = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : live;
-  const { list: html, head } = miniHtml(snap, { privacy: prefs.private, open, dismissed: loadDismissed(), now: Date.now() });
+  const { list: html, head } = miniHtml(snap, { privacy: prefs.private, open, dismissed: loadDismissed(), now: Date.now(), plan: shownPlan(prefs, snap) });
   // Redraw only on change, so an open list and the scroll position stay put.
   const sig = JSON.stringify([html.replace(/(data-since="\d+">)[^<]*/g, '$1'), prefs.private]);
   if ($('headline').dataset.sig !== head) {

@@ -108,7 +108,7 @@ function snapshot() {
   return {
     here: '工作站',
     sessions: [
-      { id: 's1', project: '專案甲', status: 'working', activity: { kind: 'read', label: 'Reading a file', labelKey: 'tool.read' }, startedAt: now - 30 * min, lastActivityAt: now, todos, agents: [helper('審查員', 'thinking'), helper('研究員', 'blocked'), helper('測試員', 'reporting'), helper('甲', 'working', { activity: { labelKey: 'tool.run', label: 'Running a command' } }), helper('乙', 'delegating', { activity: { labelKey: 'tool.delegate', labelParams: { type: '丙' }, label: 'Consulting 丙' } }), helper('丁', 'idle')] },
+      { id: 's1', project: '專案甲', status: 'working', context: { pct: 0.88 }, activity: { kind: 'read', label: 'Reading a file', labelKey: 'tool.read' }, startedAt: now - 30 * min, lastActivityAt: now, todos, agents: [helper('審查員', 'thinking'), helper('研究員', 'blocked'), helper('測試員', 'reporting'), helper('甲', 'working', { activity: { labelKey: 'tool.run', label: 'Running a command' } }), helper('乙', 'delegating', { activity: { labelKey: 'tool.delegate', labelParams: { type: '丙' }, label: 'Consulting 丙' } }), helper('丁', 'idle')] },
       { id: 's2', project: '專案乙', source: 'cowork', status: 'your-turn', startedAt: now - 90 * min, lastActivityAt: now - 12 * min, agents: [] },
       { id: 's3', project: '專案乙', source: 'wsl', status: 'delegating', activity: { labelKey: 'tool.delegate', labelParams: { type: '審查員' }, label: 'Consulting 審查員' }, startedAt: now - 3 * min, lastActivityAt: now, agents: [helper('審查員', 'working')] },
       { id: 's4', project: '專案丙', status: 'blocked', startedAt: now - 5 * min, lastActivityAt: now - 4 * min, agents: [] },
@@ -124,6 +124,9 @@ function snapshot() {
       { computer: '桌機', online: false, at: now - 90 * min, sessions: [] },
     ] },
     field: { enabled: true, summary: { newSince: 3 }, fetchedAt: now - 30 * min, error: '失敗' },
+    // Two 5-hour hits and one weekly hit for the plan shown, and 5 hours' use past their level.
+    usage: { last5h: { total: 2_627_000 }, today: { total: 2_627_000 }, week: { total: 29_752_000 },
+      limits: { paused: false, hits: [{ at: 1, plan: 'max5', window: '5h', tokens: 2_000_000 }, { at: 2, plan: 'max5', window: '5h', tokens: 2_400_000 }, { at: 3, plan: 'max5', window: 'week', tokens: 40_000_000 }] } },
   };
 }
 
@@ -133,8 +136,11 @@ test('the mini window\'s Now tab and headline read in Chinese, privacy mode on a
   setLanguage('zh-TW');
   try {
     for (const privacy of [true, false]) {
-      const { list, head } = miniHtml(snapshot(), { privacy, now });
+      const { list, head } = miniHtml(snapshot(), { privacy, now, plan: 'max5' });
       assert.deepEqual(latin(shown(list + head)), [], `privacy ${privacy}`);
+      assert.match(list, /估計：已超過/);
+      assert.match(list, /每週估計|每週用量/);
+      assert.match(list, /精確用量/);
       assert.match(list, /等你處理/);
       assert.match(list, /輪到你了/);
       assert.equal(list.includes('做乙中'), !privacy, 'to-do wording only with privacy off');

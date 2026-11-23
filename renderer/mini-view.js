@@ -8,6 +8,7 @@ import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup } from './people.js';
 import { fieldBadge } from './field-view.js';
+import { useCardHtml } from './usage-view.js';
 import { tr, escapeHtml as esc } from './i18n.js';
 
 export const glyph = (x) => `<svg class="glyph" viewBox="-16 -16 32 32" aria-hidden="true">${bubbleMarkup(glyphKey(x))}</svg>`;
@@ -50,8 +51,8 @@ function sessionCard(s, local, opts) {
 }
 
 // opts: { privacy, open: Set of sessions whose whole list is open,
-// dismissed: waits hidden, now }. Returns { list, head }.
-export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = new Set(), now = Date.now() } = {}) {
+// dismissed: waits hidden, now, plan: the plan shown }. Returns { list, head }.
+export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = new Set(), now = Date.now(), plan = 'none' } = {}) {
   const o = overview(snap.sessions ?? [], snap.here ?? tr('common.thisComputer'), snap.fleet?.computers ?? [], { jobs: snap.jobs ?? [], machine: snap.machine, work: snap.work ?? [] });
   const opts = { privacy, open, now };
   const groups = o.computers.filter((c) => c.sessions || c.local || (c.jobs ?? []).length || (c.work ?? []).length).map((c) => {
@@ -63,7 +64,7 @@ export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = n
   }).join('');
   const waits = clashHtml(snap.clashes) + waitingHtml(waitingList(snap.sessions ?? [], dismissed), now, glyph);
   return {
-    list: waits + (groups || `<p class="empty">${esc(tr('mini.noSessions'))}</p>`),
+    list: useCardHtml(snap, plan) + waits + (groups || `<p class="empty">${esc(tr('mini.noSessions'))}</p>`),
     head: headlineBadges(o) + fieldBadge(snap.field, now),
   };
 }

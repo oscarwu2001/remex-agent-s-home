@@ -92,6 +92,31 @@ body { min-height: 100vh; overflow-x: hidden; }
 .sess-what { min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
 .sess.running .sess-what { color: var(--ink); }
 
+/* ---- plan and use -------------------------------------------------------- */
+
+.use {
+  display: grid; gap: 6px; margin: var(--s-1) 0 var(--s-3); padding: var(--s-3);
+  background: var(--panel-raised); border: 1px solid var(--line); border-radius: var(--r-lg);
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.use-label, .use-basis, .use-wait, .use-exact, .use-sep { color: var(--ink-muted); }
+.use-plan { font-size: 13px; }
+.use-plan strong { margin-left: 2px; }
+.use-pick { color: var(--accent); }
+.use-est { overflow-wrap: anywhere; }
+.use-over { color: var(--warn); }
+.use-over .use-basis { color: var(--ink-muted); }
+.use-mark {
+  display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px;
+  border-radius: 50%; background: var(--warn-soft); color: var(--warn); font-size: 11px; line-height: 1;
+}
+.use-ctx { display: grid; grid-template-columns: auto minmax(32px, 1fr) auto; align-items: center; column-gap: var(--s-2); }
+.use-bar { height: 6px; border-radius: 999px; background: var(--panel-sunk); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.use-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.use-ctx.full .use-bar > span { background: var(--warn); }
+.use-full { grid-column: 2 / -1; justify-self: end; color: var(--warn); font-size: 11.5px; }
+.use-exact { font-size: 11.5px; }
+
 /* ---- to-dos -------------------------------------------------------------- */
 
 .todo-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-top: var(--s-2); }
