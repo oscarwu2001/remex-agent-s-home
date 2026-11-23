@@ -2,7 +2,7 @@
 // the live snapshots, so the hospital can be seen without a running session.
 // Everything here is made up.
 
-import { translate } from './i18n.js';
+import { translate, english } from './i18n.js';
 
 const LOOP_S = 60;
 
@@ -87,6 +87,9 @@ function activity(tool) {
   const [key, kind, detail] = DETAILS[tool];
   return { ...said(key), kind, detail };
 }
+
+// The demo's Needs attention row for its unchosen column, in the words fieldProblems builds it with.
+const fieldRow = (key) => english('said.fs.row', { what: english(key, { words: english('said.fs.needsChoice', { n: 1 }), where: english('said.fs.checkWhere') }) });
 
 export function demoSnapshot(nowMs, epochMs) {
   const elapsed = (nowMs - epochMs) / 1000;
@@ -200,10 +203,9 @@ export function demoSnapshot(nowMs, epochMs) {
       { name: 'ui-reviewer', room: 'vision-clinic', summary: 'Independent interface reviewer.' },
     ],
     // The line the main process adds for the sample's unchosen column (fieldProblems).
-    problems: [{ label: 'Field feedback: 1 column needs a choice (Settings → Connections → Field feedback → Check the columns, with privacy mode off)',
-      labelPrivacyOff: 'Field feedback: 1 column needs a choice (Settings → Connections → Field feedback → Check the columns)', detail: '', count: 1, fix: 'check' },
+    problems: [{ label: fieldRow('said.fs.whereOff'), labelPrivacyOff: fieldRow('said.fs.whereOn'), detail: '', count: 1, fix: 'check' },
     // The line the main process adds when an export holds lines in a format it does not know (lineProblems).
-    { label: 'LINE chats: 2 lines in the chats you read are not in a format the app knows, so they were left out', detail: '[LINE] Sample crew.txt', count: 1 }],
+    { label: english('said.line.row', { what: english('said.lc.oddLines', { n: 2 }) }), detail: '[LINE] Sample crew.txt', count: 1 }],
     field: demoField(nowMs),
     line: demoLine(nowMs),
     usage: {
