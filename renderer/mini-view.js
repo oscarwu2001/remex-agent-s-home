@@ -64,7 +64,7 @@ export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = n
   }).join('');
   const waits = clashHtml(snap.clashes) + waitingHtml(waitingList(snap.sessions ?? [], dismissed), now, glyph);
   return {
-    list: useCardHtml(snap, plan) + waits + (groups || `<p class="empty">${esc(tr('mini.noSessions'))}</p>`),
+    list: waits + useCardHtml(snap, plan) + (groups || `<p class="empty">${esc(tr('mini.noSessions'))}</p>`),
     head: headlineBadges(o) + fieldBadge(snap.field, now),
   };
 }

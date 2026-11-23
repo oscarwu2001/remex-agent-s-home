@@ -10,7 +10,7 @@ import { personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 import { miniHtml } from './mini-view.js';
-import { shownPlan } from './usage-view.js';
+import { shownPlan, OPEN_PLAN } from './usage-view.js';
 import { tr, localise, setLanguage, resolveLanguage, onMissing, said } from './i18n.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
@@ -126,6 +126,17 @@ setInterval(() => { render(); renderProjects(); }, 500);
 render();
 
 $('list').addEventListener('click', (e) => {
+  if (e.target.closest('.use-pick')) {
+    // The hospital window opens Settings at the plan picker when it sees this.
+    try {
+      localStorage.setItem(OPEN_PLAN, String(Date.now()));
+    } catch {
+      // Storage blocked: the hospital window still comes up, at its own place.
+    }
+    if (bridge.showMain) bridge.showMain();
+    else window.open('index.html', '_blank');
+    return;
+  }
   const dismiss = e.target.closest('.wait-dismiss');
   if (dismiss) {
     dismissWait(dismiss.dataset.key);

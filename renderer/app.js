@@ -19,7 +19,7 @@ import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, 
 import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english, dateLocale } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
-import { compact, CONTEXT_WARN, planWords, shownPlan } from './usage-view.js';
+import { compact, CONTEXT_WARN, planRowsHtml, shownPlan, OPEN_PLAN } from './usage-view.js';
 import { PLANS, isPlan } from './plans.js';
 
 installTips();
@@ -103,7 +103,8 @@ if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.tim
 const WEATHERS = ['clear', 'cloudy', 'rain', 'snow', 'fog'];
 const weatherName = (w) => tr(`weather.${w}`);
 if (!WEATHERS.includes(prefs.weather) && prefs.weather !== 'changing') prefs.weather = 'clear';
-if (prefs.plan !== undefined && !isPlan(prefs.plan)) delete prefs.plan; // not set
+// A saved plan this version does not know counts as none, and Settings says so.
+const unknownPlan = prefs.plan !== undefined && !isPlan(prefs.plan) ? String(prefs.plan) : null;
 if (!prefs.live || typeof prefs.live !== 'object') prefs.live = { on: false, place: null, unit: 'celsius' };
 prefs.live = { on: prefs.live.on === true, place: prefs.live.place ?? null, unit: prefs.live.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius' };
 
@@ -1644,13 +1645,7 @@ function renderUsage(s) {
     })()
     : '';
   const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(u.limitNotice.text)}</p>` : '';
-  const p = planWords(u, shownPlan(prefs, s));
-  const plan = p.plan
-    ? `<div class="usage-row"><span>${escapeXml(tr('use.plan'))}</span><strong>${escapeXml(p.plan)}</strong></div>`
-    : `<p class="hint">${escapeXml(tr('use.pickPlan'))}</p>`;
-  // Past the learned level reads like Claude Code's own limit message.
-  const estimates = p.lines.map((l) => `<p class="${l.kind === 'over' ? 'form-error' : 'hint'}">${l.kind === 'over' ? '⚠ ' : ''}${escapeXml(l.text)}${l.basis ? ` <span class="muted">${escapeXml(l.basis)}</span>` : ''}</p>`).join('');
-  $('usage-body').innerHTML = `${limit}${plan}${estimates}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}
+  $('usage-body').innerHTML = `${limit}${planRowsHtml(u, shownPlan(prefs, s))}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}
     <p class="hint">${escapeXml(tr('use.exact'))}</p>`;
 }
 
@@ -1726,6 +1721,10 @@ function tellPlan() {
   const pick = $('opt-plan');
   pick.innerHTML = PLANS.map((id) => `<option value="${id}">${escapeXml(tr(`plan.${id}`))}</option>`).join('');
   pick.value = isPlan(prefs.plan) ? prefs.plan : 'none';
+  if (unknownPlan) {
+    $('plan-note').textContent = tr('settings.plan.unknown', { plan: unknownPlan });
+    $('plan-note').hidden = false;
+  }
   pick.addEventListener('change', () => {
     prefs.plan = pick.value;
     const note = $('plan-note');
@@ -1736,6 +1735,22 @@ function tellPlan() {
   });
   tellPlan();
 }
+// The mini window's "Pick your plan" asks for Settings at the plan picker
+// through the shared storage (fresh asks only), then brings this window up.
+function openPlanIfAsked() {
+  let asked;
+  try {
+    asked = Number(localStorage.getItem(OPEN_PLAN));
+    if (asked) localStorage.removeItem(OPEN_PLAN);
+  } catch {
+    return; // storage unavailable: the mini window's button only brings this window up
+  }
+  if (asked && Date.now() - asked < 60_000) {
+    showInSettings('plan-h');
+    $('opt-plan').focus({ preventScroll: true });
+  }
+}
+addEventListener('storage', (e) => { if (e.key === OPEN_PLAN && e.newValue) openPlanIfAsked(); });
 
 $('opt-budget').value = prefs.budget5h > 0 ? String(prefs.budget5h) : '';
 $('opt-notify').checked = prefs.notify !== false;
@@ -3697,7 +3712,7 @@ function groupSummaries() {
           : f.fetchedAt ? 'summary.field.updated' : 'summary.field.notYet', { age: f?.fetchedAt ? fieldAge(f.fetchedAt) : '' });
   return {
     look: `${theme} · ${time}`,
-    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${isPlan(prefs.plan) && prefs.plan !== 'none' ? tr(`plan.${prefs.plan}`) : tr('summary.plan.none')} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
+    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${tr('summary.plan', { plan: tr(`plan.${isPlan(prefs.plan) ? prefs.plan : 'none'}`) })} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
     connect: `${field} · ${lineSummary(lineState())} · ${tr(snapshot?.fleet?.on ? 'summary.fleet.on' : 'summary.fleet.off')}`,
     agents: tr('summary.report', { period: $('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? tr('settings.report.days', { n: 28 }).toLowerCase() }),
     app: `${updateSummary}${prefs.demo ? ` · ${tr('summary.demoOn')}` : ''}`,
@@ -3755,3 +3770,5 @@ try {
 } catch {
   // Storage blocked: Settings stays closed after the switch, as on any start.
 }
+// Opened by the mini window's "Pick your plan": Settings at the plan picker.
+openPlanIfAsked();
