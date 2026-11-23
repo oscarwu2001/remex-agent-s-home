@@ -378,7 +378,7 @@ test('a reason left unread in a {why} or {reason} the tables fill is told by its
 // from its source as they are and run here with the core's en().
 function fromMain(...names) {
   const vm = require('node:vm');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const src = names.map((name) => {
     const at = main.indexOf(`\nfunction ${name}(`);
     assert.ok(at >= 0, `main.js has ${name}()`);
@@ -400,7 +400,7 @@ test('a report that failed reads in Chinese as "could not be built" around the r
   assert.equal(i18n.sayIn('zh-TW', reportFailedText(null, undefined)), i18n.translate('zh-TW', 'said.main.reportFailed'), 'a reply with no reason');
   assert.equal(reportFailedText(module, 1), "The report could not be built (exit 1): Error (MODULE_NOT_FOUND): Cannot find module '…'", 'English as before, with the reason');
   assert.ok(!/Jane Doe/.test(reportFailedText(module, 1)));
-  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const handler = main.slice(main.indexOf("ipcMain.handle('home:build-report'"), main.indexOf('function openReport('));
   assert.equal(handler.match(/resolve\(\{ ok: false, error: reportFailedText\(/g)?.length, 2, 'the report\'s reply and its exit both answer with it');
 });

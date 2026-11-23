@@ -492,7 +492,7 @@ test('the bot part, off: the switch reads “to my relay only”; when turning i
 });
 
 test('a switch keeps its size beside long words', () => {
-  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'styles.css'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(css, /\.switch input \{[^}]*flex-shrink: 0;/);
 });
 

@@ -13,7 +13,7 @@ const path = require('path');
 const vm = require('vm');
 const B = require('../src/core/linebot');
 
-const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'docs', 'line-bot-relay.gs'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'docs', 'line-bot-relay.gs'), 'utf8').replace(/\r\n/g, '\n');
 const DAY = 86_400_000;
 
 // ---- a stand-in for Apps Script --------------------------------------------------------------

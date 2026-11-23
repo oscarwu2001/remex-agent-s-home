@@ -656,7 +656,7 @@ test('in Settings a relay message names the control in view; the board keeps the
 // ---- the relay script ----------------------------------------------------------------------
 
 test('the relay script that ships asks only for its own sheet, drops reply tokens, refuses a short secret and never sends to LINE', () => {
-  const text = fs.readFileSync(path.join(__dirname, '..', 'docs', 'line-bot-relay.gs'), 'utf8');
+  const text = fs.readFileSync(path.join(__dirname, '..', 'docs', 'line-bot-relay.gs'), 'utf8').replace(/\r\n/g, '\n');
   const lines = text.split(/\r?\n/);
   assert.equal(lines[0], '/** @OnlyCurrentDoc */');
   const code = lines.filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');

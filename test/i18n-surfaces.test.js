@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const load = () => import('../renderer/i18n.js');
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
+const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8').replace(/\r\n/g, '\n');
 
 const ALLOW = new Set([
   'Claude', 'Code', 'LINE', "Agent's", 'Home', 'Cowork', 'WSL', 'GPU', 'CPU', 'GB', 'token', 'App', 'Windows',

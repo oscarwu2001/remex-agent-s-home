@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'tokens.css'), 'utf8');
+const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'tokens.css'), 'utf8').replace(/\r\n/g, '\n');
 
 function blocks() {
   const out = [];
