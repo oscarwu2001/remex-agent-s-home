@@ -167,14 +167,19 @@ app itself never removes anything, and only looks when you press the button.
 ## Mini window
 
 **Mini window** (top of the map) opens a small window that stays on top of
-your other windows, like a music player's mini mode. It has two tabs:
+your other windows, like a music player's mini mode. Its head always
+shows three rows, on both tabs: **Context** (the fullest running session's,
+else the fullest waiting for your turn, with its percent written out and a
+bar), **5 hours** and **7 days** (the tokens used, and once the learned
+estimate below has one, its share and a bar; past the learned level, a mark
+and "over"). The line under them names that session, or says in words that
+its context is nearly full. It has two tabs:
 
 - **Now**: under the waiting list and any same-folder warning, your **plan
   and use**: the plan you picked in Settings (with none, a button that opens
-  Settings at the plan picker), the learned estimate (below), the running
-  session whose context is fullest, by name and with its percent written
-  out, and the tokens of the last 5 hours and 7 days. "Exact limits: Claude
-  app → Settings → Usage" says where the Claude app shows the real numbers.
+  Settings at the plan picker), the learned estimate (below) and what waits
+  or is not counted. "Exact limits: Claude app → Settings → Usage" says
+  where the Claude app shows the real numbers.
   Below it, every live session by computer and project, each with its status
   glyph, its helpers and its to-do list as pips (a ring for to do, a
   half-filled ring for in progress, a ticked square for done). With privacy

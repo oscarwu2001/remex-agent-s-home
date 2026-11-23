@@ -132,54 +132,65 @@ test('an unreadable hits file pauses the estimate, pointing to Needs attention i
   assert.doesNotMatch(t, /about 25%|usage-limits/);
 });
 
-// The three meters in the mini window's head, each as { kind, title, label, side, value }.
-const meters = (html) => [...html.matchAll(/<div class="meter meter-(\w+)[^"]*" title="([^"]*)"><span class="meter-label">([^<]*)<\/span><strong class="meter-value">([^<]*)<\/strong><span class="meter-bar.*?<span class="meter-side">(.*?)<\/span><\/div>/g)]
-  .map((m) => ({ kind: m[1], title: m[2].replace(/&#39;/g, "'"), label: m[3], value: m[4], side: text(m[5]) }));
+// The three meters in the mini window's head, each as { kind, title, label, value, side }.
+const meters = (html) => [...html.matchAll(/<div class="meter meter-(\w+)[^"]*" title="([^"]*)"><span class="meter-label">([^<]*)<\/span>(<strong class="meter-value">.*?<\/strong>)<span class="meter-bar.*?<span class="meter-side">(.*?)<\/span><\/div>/g)]
+  .map((m) => ({ kind: m[1], title: m[2].replace(/&#39;/g, "'"), label: m[3], value: text(m[4]), side: text(m[5]) }));
+// The line under them.
+const note = (html) => text(html.match(/<p class="meters-note[^"]*"[^>]*>(.*?)<\/p>/)[1]).replace(/&#39;/g, "'");
 
-test('the head\'s three meters are always there, in order: context, 5 hours, 7 days, even with nothing to show', async () => {
+test('the head\'s three meters and the line under them are always there, in order: context, 5 hours, 7 days, even with nothing to show', async () => {
   const { metersHtml } = await load();
-  for (const s of [{}, { sessions: [] }, snap([]), snap(twoHits, { last5h: 3000 })]) {
-    const m = meters(metersHtml(s, 'pro'));
-    assert.deepEqual(m.map((x) => x.label), ['Context', '5 hours', '7 days']);
-    // Each keeps a bar's place, so the head never changes height.
-    assert.equal(metersHtml(s, 'pro').match(/class="meter-bar/g).length, 3);
+  for (const s of [{}, { sessions: [] }, snap([]), snap(twoHits, { last5h: 3000 }), snap([], { sessions: [{ id: 'a', project: 'alpha', status: 'working', context: { pct: 0.95 } }] })]) {
+    const html = metersHtml(s, 'pro');
+    assert.deepEqual(meters(html).map((x) => x.label), ['Context', '5 hours', '7 days']);
+    // Each keeps a bar's place and the line is always one line, so the head never changes height.
+    assert.equal(html.match(/class="meter-bar/g).length, 3);
+    assert.equal(html.match(/class="meters-note/g).length, 1);
   }
   const none = meters(metersHtml({}, 'none'));
   assert.deepEqual(none.map((x) => x.value), ['—', '—', '—']);
-  assert.deepEqual(none.map((x) => x.title), ['No session is running', 'Not counted yet', 'Not counted yet']);
+  assert.deepEqual(none.map((x) => x.title), ['No context to show yet: no session is running, or none has replied', 'Not read yet', 'Not read yet']);
+  assert.equal(note(metersHtml({}, 'none')), 'No context to show yet');
   assert.match(metersHtml({}, 'none'), /role="group" aria-label="Context and use"/);
 });
 
-test('the context meter: the fullest running session, else the fullest waiting for your turn; idle sessions do not count', async () => {
+test('the context meter: the fullest running session, else the fullest waiting for your turn; idle sessions and sessions with no context yet do not count', async () => {
   const { metersHtml } = await load();
   const sessions = [
     { id: 'a', project: 'alpha', status: 'working', context: { pct: 0.412 } },
     { id: 'b', project: 'beta', status: 'blocked', context: { pct: 0.88 } },
     { id: 'c', project: 'gamma', status: 'idle', context: { pct: 0.97 } },
     { id: 'd', project: 'delta', status: 'your-turn', context: { pct: 0.6 } },
+    { id: 'e', project: 'epsilon', status: 'working' },
+    { id: 'f', project: 'zeta', status: 'working', context: { pct: NaN } },
   ];
   const html = metersHtml(snap([], { sessions }), 'pro');
   const [ctx] = meters(html);
   assert.equal(ctx.value, '88%');
+  assert.equal(ctx.side, '!');
   assert.equal(ctx.title, 'Fullest context: beta, 88% used');
   assert.match(html, /aria-valuenow="88"/);
-  assert.match(text(html).replace(/&#39;/g, "'"), /beta's context is nearly full: save your work/);
-  assert.equal(meters(metersHtml(snap([], { sessions: [sessions[0]] }), 'pro'))[0].value, '41%');
-  assert.doesNotMatch(metersHtml(snap([], { sessions: [sessions[0]] }), 'pro'), /save your work|use-mark/);
+  assert.equal(note(html), '! beta\'s context is nearly full: save your work');
+  assert.match(html, /class="meters-note warn" title="beta&#39;s context is nearly full: save your work"/);
+  const calm = metersHtml(snap([], { sessions: [sessions[0]] }), 'pro');
+  assert.equal(meters(calm)[0].value, '41%');
+  assert.equal(note(calm), 'Fullest context: alpha');
+  assert.doesNotMatch(calm, /save your work|use-mark/);
   // Nothing running: the one waiting for your turn, not the idle one.
   assert.equal(meters(metersHtml(snap([], { sessions: sessions.slice(2) }), 'pro'))[0].title, 'Fullest context: delta, 60% used');
   assert.equal(meters(metersHtml(snap([], { sessions: [sessions[2]] }), 'pro'))[0].value, '—');
+  // Running, but no reply yet (or a Cowork task): no context to show.
+  assert.equal(meters(metersHtml(snap([], { sessions: sessions.slice(4) }), 'pro'))[0].value, '—');
   const full = metersHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 1.02 } }] }), 'pro');
   assert.equal(meters(full)[0].value, '102%');
   assert.match(full, /aria-valuenow="100"/);
-  assert.match(text(full), /alpha's context is full: save your work/);
+  assert.equal(note(full), '! alpha\'s context is full: save your work');
 });
 
-test('the 5-hour and 7-day meters: tokens always, the estimate\'s share and bar once there is one, a mark past the learned level', async () => {
+test('the 5-hour and 7-day meters: tokens with their unit always, the estimate\'s share and bar once there is one, a mark and a word past the learned level', async () => {
   const { metersHtml } = await load();
   const [, h5, wk] = meters(metersHtml(snap([]), 'pro'));
-  assert.deepEqual([h5.value, wk.value], ['2.6M', '30M']);
-  assert.deepEqual([h5.title, wk.title], ['2.6M tokens in the last 5 hours', '30M tokens in the last 7 days']);
+  assert.deepEqual([h5.value, wk.value], ['2.6M tokens', '30M tokens']);
   assert.equal(metersHtml(snap([]), 'pro').match(/meter-bar none/g).length, 3, 'no session and no estimate: no bars, their places kept');
   const est = metersHtml(snap(twoHits, { last5h: 3000 }), 'pro');
   const [, e5, ew] = meters(est);
@@ -188,11 +199,28 @@ test('the 5-hour and 7-day meters: tokens always, the estimate\'s share and bar 
   assert.match(est, /aria-valuenow="25"/);
   assert.equal(ew.side, '', 'the week has no hits, so no estimate');
   const over = metersHtml(snap(twoHits, { last5h: 30_000 }), 'pro');
-  assert.equal(meters(over)[1].side, '!');
+  assert.equal(meters(over)[1].side, '! over');
   assert.match(meters(over)[1].title, /Estimate: past where your 5-hour limit was reached before/);
   assert.doesNotMatch(text(over), /\d{3,}%/);
-  // Another plan's hits make no share.
-  assert.equal(meters(metersHtml(snap(twoHits, { last5h: 3000 }), 'max5'))[1].side, '');
+  // One token is one token.
+  assert.equal(meters(metersHtml(snap([], { last5h: 1 }), 'pro'))[1].value, '1 token');
+  assert.equal(meters(metersHtml(snap([], { last5h: 1 }), 'pro'))[1].title.split('.')[0], '1 token in the last 5 hours');
+  // Totals not read, or not numbers: a dash, never NaN.
+  for (const bad of [NaN, Infinity, '12', null]) {
+    const s = { usage: { last5h: { total: bad }, week: { total: 5 } } };
+    const [, b5, b7] = meters(metersHtml(s, 'pro'));
+    assert.deepEqual([b5.value, b5.title, b7.value], ['—', 'Not read yet', '5 tokens'], String(bad));
+  }
+});
+
+test('a window\'s hover says why it has no share yet: no plan, too few limit hits, another plan\'s hits, or the estimate paused', async () => {
+  const { metersHtml } = await load();
+  const title = (s, plan, i = 1) => meters(metersHtml(s, plan))[i].title;
+  assert.equal(title(snap(twoHits, { last5h: 3000 }), 'none'), '3.0k tokens in the last 5 hours. For an estimate, pick your plan in Agent\'s Home Settings');
+  assert.equal(title(snap([hit(1, 'pro', '5h', 10_000)], { last5h: 3000 }), 'pro'), '3.0k tokens in the last 5 hours. 5-hour estimate: after 1 more limit hit');
+  assert.equal(title(snap(twoHits, { last5h: 3000 }), 'max5'), '3.0k tokens in the last 5 hours. The estimate starts after 2 limit hits');
+  assert.equal(title(snap(twoHits, { last5h: 3000 }), 'pro', 2), '30M tokens in the last 7 days. The estimate starts after 2 limit hits');
+  assert.equal(title(snap(twoHits, { last5h: 3000, paused: true }), 'pro'), '3.0k tokens in the last 5 hours. Estimate paused: see Needs attention in the hospital window');
 });
 
 test('the card no longer repeats context or tokens: they are in the head', async () => {
@@ -210,10 +238,16 @@ test('the head in Chinese', async () => {
     const html = metersHtml(snap(twoHits, { last5h: 3000, sessions }), 'pro');
     const m = meters(html);
     assert.deepEqual(m.map((x) => x.label), ['上下文', '5 小時', '7 天']);
+    assert.deepEqual(m.map((x) => x.value), ['90%', '3.0k token', '30M token']);
     assert.equal(m[1].side, '約 25%');
     assert.equal(m[1].title, '過去 5 小時用了 3.0k token。估計：5 小時上限已用約 25%');
-    assert.match(text(html), /alpha 的上下文快滿了，請先儲存/);
+    assert.equal(m[2].title, '過去 7 天用了 30M token。碰到 2 次上限後開始估計');
+    assert.equal(note(html), '! alpha 的上下文快滿了，請先儲存');
     assert.match(html, /aria-label="上下文與用量"/);
+    assert.equal(meters(metersHtml(snap(twoHits, { last5h: 30_000 }), 'pro'))[1].side, '! 已超過');
+    assert.equal(note(metersHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 0.3 } }] }), 'pro')), '最滿的上下文：alpha');
+    assert.equal(note(metersHtml({}, 'pro')), '還沒有可顯示的上下文');
+    assert.equal(meters(metersHtml(snap(twoHits), 'none'))[1].title, '過去 5 小時用了 2.6M token。要看估計，請在 Agent\'s Home 的設定中選擇方案');
   } finally {
     setLanguage('en');
   }

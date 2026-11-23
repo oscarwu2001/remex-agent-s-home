@@ -117,48 +117,69 @@ export const shownContext = (sessions) => fullestContext(sessions) ?? fullest(wi
 
 const METER_TOKENS = { '5h': 'last5h', week: 'week' };
 
-// A meter's bar: its share written out for screen readers (the text above
-// it says it for everyone). With nothing to show, an empty bar keeps its
-// place, so the head never changes height.
+// A meter's bar: its share written out for screen readers (the words beside
+// it say it for everyone). With nothing to show, an empty bar keeps its
+// place, so the rows never move.
 const meterBar = (pct, label) => (pct === null
   ? '<span class="meter-bar none" aria-hidden="true"></span>'
   : `<span class="meter-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${esc(label)}"><span style="width:${pct}%"></span></span>`);
 const mark = '<span class="use-mark" aria-hidden="true">!</span>';
+const dash = '<strong class="meter-value">—</strong>';
 
-// One row: label, value, bar, and its side (the estimate's share, or a mark).
-function meter({ kind, cls = '', title, side = '', value, bar }) {
-  return `<div class="meter meter-${kind}${cls}" title="${esc(title)}"><span class="meter-label">${esc(tr(`use.meter.${kind}`))}</span><strong class="meter-value">${esc(value)}</strong>${bar}<span class="meter-side">${side}</span></div>`;
+// One row: label, value, bar, and its side (the estimate's share, or a mark
+// with its word).
+function meter({ kind, cls = '', title, side = '', value = dash, bar }) {
+  return `<div class="meter meter-${kind}${cls}" title="${esc(title)}"><span class="meter-label">${esc(tr(`use.meter.${kind}`))}</span>${value}${bar}<span class="meter-side">${side}</span></div>`;
 }
 
 function contextMeter(s) {
-  if (!s) return meter({ kind: 'context', title: tr('use.meter.noContext'), value: '—', bar: meterBar(null) });
+  if (!s) return meter({ kind: 'context', title: tr('use.meter.noContext'), bar: meterBar(null) });
   const pct = Math.round(s.context.pct * 100);
   const warn = s.context.pct >= CONTEXT_WARN;
   const words = tr('use.contextOf', { project: s.project, pct });
-  return meter({ kind: 'context', cls: warn ? ' warn' : '', title: words, side: warn ? mark : '', value: `${pct}%`, bar: meterBar(Math.min(100, pct), words) });
+  return meter({ kind: 'context', cls: warn ? ' warn' : '', title: words, side: warn ? mark : '', value: `<strong class="meter-value">${pct}%</strong>`, bar: meterBar(Math.min(100, pct), words) });
 }
 
-function windowMeter(w, usage, line) {
+// Why a window shows no share yet: no plan, the estimate paused, how many
+// more limit hits it needs.
+function whyNoShare(w, p, plan, usage) {
+  if (!isPlan(plan) || plan === 'none') return tr('use.meter.whyPlan');
+  if (usage?.limits?.paused) return tr('use.paused');
+  return p.lines.find((l) => l.window === w && l.kind === 'wait')?.text ?? tr('use.meter.whyHits', { n: HITS_NEEDED });
+}
+
+function windowMeter(w, usage, p, plan) {
   const total = usage?.[METER_TOKENS[w]]?.total;
-  if (!Number.isFinite(total)) return meter({ kind: w, title: tr('use.meter.notYet'), value: '—', bar: meterBar(null) });
-  const tokens = tr(`use.meter.tokens.${w}`, { n: compact(total) });
-  if (!line) return meter({ kind: w, title: tokens, value: compact(total), bar: meterBar(null) });
+  if (!Number.isFinite(total)) return meter({ kind: w, title: tr('use.meter.notYet'), bar: meterBar(null) });
+  const amount = compact(total);
+  const tokens = tr(`use.meter.tokens.${w}`, { n: total, amount });
+  const value = `<strong class="meter-value">${esc(amount)} <span class="meter-unit">${esc(tr('use.meter.unit', { n: total }))}</span></strong>`;
+  const line = p.lines.find((l) => l.window === w && l.kind !== 'wait');
+  if (!line) return meter({ kind: w, title: tr('use.meter.titleWith', { tokens, estimate: whyNoShare(w, p, plan, usage) }), value, bar: meterBar(null) });
   const title = tr('use.meter.titleWith', { tokens, estimate: line.text });
-  if (line.kind === 'over') return meter({ kind: w, cls: ' over', title, side: mark, value: compact(total), bar: meterBar(100, line.text) });
-  return meter({ kind: w, title, side: esc(tr('use.meter.about', { pct: line.pct })), value: compact(total), bar: meterBar(line.pct, line.text) });
+  if (line.kind === 'over') return meter({ kind: w, cls: ' over', title, side: `${mark}${esc(tr('use.meter.over'))}`, value, bar: meterBar(100, line.text) });
+  return meter({ kind: w, title, side: esc(tr('use.meter.about', { pct: line.pct })), value, bar: meterBar(line.pct, line.text) });
+}
+
+// The line under the rows, always there so the head never changes height:
+// whose context the first row is, or that it is nearly full, in words.
+function contextCaption(s) {
+  if (!s) return `<p class="meters-note">${esc(tr('use.meter.noContextShort'))}</p>`;
+  const state = s.context.pct >= 1 ? 'use.meter.full' : s.context.pct >= CONTEXT_WARN ? 'use.meter.nearlyFull' : null;
+  if (!state) return `<p class="meters-note">${esc(tr('use.meter.whose', { project: s.project }))}</p>`;
+  const words = tr(state, { project: s.project });
+  return `<p class="meters-note warn" title="${esc(words)}">${mark}<span>${esc(words)}</span></p>`;
 }
 
 // The mini window's head: context, 5 hours and 7 days, always the same
-// three, on both tabs. Tokens always; a window's estimate share and its bar
-// once it has one; past the learned level, a mark and the words on hover.
-// A context near full says so in words under them.
+// three rows and the line under them, on both tabs. Tokens always; a
+// window's estimate share and its bar once it has one (its hover says why
+// not yet); past the learned level, a mark and a word.
 export function metersHtml(snap, plan) {
   const usage = snap?.usage;
   const s = shownContext(snap?.sessions);
-  const lines = Object.fromEntries(planWords(usage, plan).lines.filter((l) => l.kind !== 'wait').map((l) => [l.window, l]));
-  const state = !s ? null : s.context.pct >= 1 ? 'use.meter.full' : s.context.pct >= CONTEXT_WARN ? 'use.meter.nearlyFull' : null;
-  const warn = state ? `<p class="meters-warn">${mark}${esc(tr(state, { project: s.project }))}</p>` : '';
-  return `<div class="meters-row" role="group" aria-label="${esc(tr('use.meters'))}">${contextMeter(s)}${WINDOWS.map((w) => windowMeter(w, usage, lines[w])).join('')}</div>${warn}`;
+  const p = planWords(usage, plan);
+  return `<div class="meters-row" role="group" aria-label="${esc(tr('use.meters'))}">${contextMeter(s)}${WINDOWS.map((w) => windowMeter(w, usage, p, plan)).join('')}</div>${contextCaption(s)}`;
 }
 
 // The mini window's card: plan and estimate, what waits or is not counted,
