@@ -2494,7 +2494,7 @@ $('update-agents').addEventListener('click', async () => {
       res.edited.length ? tr('pack.edited', { list: list(res.edited) }) : '',
       tr(res.updated.length ? 'pack.newSession' : res.upToDate.length || res.edited.length ? 'pack.upToDate' : 'pack.noneAdded'),
       ownText(res.own),
-      res.errors.length ? tr('pack.problems', { list: res.errors.join(tr('common.semiSep')) }) : '',
+      res.errors.length ? tr('pack.problems', { list: res.errors.map((e) => said(e)).join(tr('common.semiSep')) }) : '',
     ].filter(Boolean);
     status.textContent = parts.join(tr('common.sentenceSep'));
     status.classList.toggle('form-error', res.errors.length > 0);
@@ -2618,7 +2618,7 @@ async function addPack(names) {
   const res = await bridge.packInstall(names);
   const added = res.installed?.length ?? 0;
   packNote = added ? tr('pack.added', { n: added }) : '';
-  if (res.errors?.length) packError = res.errors.join('; ');
+  if (res.errors?.length) packError = res.errors.map((e) => said(e)).join(tr('common.semiSep'));
   else if (!res.ok) packError = said(res.error);
   await loadPack();
 }

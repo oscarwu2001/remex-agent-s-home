@@ -54,9 +54,9 @@ function loadAssistant(dir, fsys = fs) {
     .filter((x) => x && typeof x === 'object' && x.status === 'open' && str(x.text, 300))
     .map((x) => ({ key: str(x.key, 200), text: str(x.text, 300), project: str(x.project, 80) || undefined }));
   const notes = [];
-  if (str(state.popupError, 200)) notes.push('Pop-ups are not working, so its questions only show here.');
+  if (str(state.popupError, 200)) notes.push(en('said.assistant.popups'));
   const unreadable = (Array.isArray(state.unreadable) ? state.unreadable : []).map((n) => str(n, 120)).filter(Boolean);
-  if (unreadable.length) notes.push(`Git could not read a folder in ${unreadable.join(', ')}. New work there is logged once it can.`);
+  if (unreadable.length) notes.push(en('said.assistant.gitUnreadable', { folders: unreadable.join(', ') }));
   const failures = Number.isInteger(state.failures) && state.failures > 0 ? state.failures : 0;
   return {
     on: !s.missing,

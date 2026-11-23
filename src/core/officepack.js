@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { parseFrontmatter } = require('./roster');
-const { translate } = require('./i18n');
+const { translate, en } = require('./i18n');
 
 const HOOK_FILE = 'hooks/agents-home-router.sh';
 const HOOK_MARK = 'agents-home-router';
@@ -110,7 +110,7 @@ function readSettings(claudeDir) {
     throw err;
   }
   const settings = text.trim() ? JSON.parse(text) : {};
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('settings.json is not a JSON object');
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error(en('said.pack.notObject'));
   return { file, settings, existed: true, text };
 }
 
@@ -131,15 +131,15 @@ function turnOnHook(claudeDir) {
   try {
     read = readSettings(claudeDir);
   } catch (err) {
-    throw new Error(`settings.json could not be read (${err.code || err.message}); it was left alone`);
+    throw new Error(en('said.pack.settingsUnreadable', { why: err.code || err.message }));
   }
   const { file, settings, existed, text } = read;
   if (JSON.stringify(settings.hooks?.UserPromptSubmit ?? []).includes(HOOK_MARK)) return false;
   if (settings.hooks !== undefined && (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) {
-    throw new Error('settings.json has a "hooks" entry the app does not understand; it was left alone');
+    throw new Error(en('said.pack.oddHooks'));
   }
   const list = settings.hooks?.UserPromptSubmit ?? [];
-  if (!Array.isArray(list)) throw new Error('settings.json has a UserPromptSubmit entry the app does not understand; it was left alone');
+  if (!Array.isArray(list)) throw new Error(en('said.pack.oddPromptHook'));
   settings.hooks = { ...(settings.hooks ?? {}), UserPromptSubmit: [...list, { hooks: [{ type: 'command', command: hookCommand(claudeDir), timeout: 5 }] }] };
   if (existed && !fs.existsSync(`${file}.agents-home-backup`)) fs.writeFileSync(`${file}.agents-home-backup`, text, { flag: 'wx' });
   replaceFile(file, `${JSON.stringify(settings, null, 2)}\n`);
@@ -188,7 +188,7 @@ function installPack(packDir, claudeDir, names) {
   for (const name of names) {
     const item = items.get(name);
     if (!item) {
-      result.errors.push(`"${String(name).slice(0, 40)}" is not in the office pack`);
+      result.errors.push(en('said.pack.notInPack', { name: String(name).slice(0, 40) }));
       continue;
     }
     const target = path.join(claudeDir, item.to);
@@ -199,7 +199,7 @@ function installPack(packDir, claudeDir, names) {
         if (turnOnHook(claudeDir)) result.installed.push(name);
         else result.skipped.push(name);
       } catch (err) {
-        result.errors.push(`The team reminders could not be turned on: ${err.message}`);
+        result.errors.push(en('said.pack.remindersFailed', { why: err.message }));
       }
       continue;
     }
@@ -213,7 +213,7 @@ function installPack(packDir, claudeDir, names) {
       else copyDir(path.join(packDir, item.from), target);
       result.installed.push(name);
     } catch (err) {
-      result.errors.push(`${name} could not be added (${err.code || err.message})`);
+      result.errors.push(en('said.pack.notAdded', { name, why: err.code || err.message }));
     }
   }
   return result;
@@ -254,7 +254,7 @@ function updatePack(packDir, claudeDir, versions) {
   try {
     result.own = ownItems(packDir, claudeDir);
   } catch (err) {
-    result.errors.push(`your own agents and skills could not be counted (${err.code || err.message}); they were still not touched`);
+    result.errors.push(en('said.pack.notCounted', { why: err.code || err.message }));
   }
   const known = (rel, text) => (versions[rel] ?? []).includes(fingerprint(text));
   const files = packFiles(packDir);
@@ -285,7 +285,7 @@ function updatePack(packDir, claudeDir, versions) {
         else writes.push([dest, fresh]);
       }
     } catch (err) {
-      result.errors.push(`${item.name} could not be read (${err.code || err.message})`);
+      result.errors.push(en('said.pack.notRead', { name: item.name, why: err.code || err.message }));
       continue;
     }
     let changed = false;
@@ -297,7 +297,7 @@ function updatePack(packDir, claudeDir, versions) {
           changed = true;
         }
       } catch (err) {
-        result.errors.push(`${item.name} could not be updated (${err.code || err.message})`);
+        result.errors.push(en('said.pack.notUpdated', { name: item.name, why: err.code || err.message }));
         continue;
       }
     }

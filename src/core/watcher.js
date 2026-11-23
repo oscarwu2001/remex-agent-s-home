@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseLine } = require('./transcript');
+const { en } = require('./i18n');
 
 const DEFAULTS = {
   tickMs: 750,
@@ -151,7 +152,7 @@ class TranscriptWatcher {
       stat = fs.statSync(file);
     } catch (err) {
       this.files.delete(file);
-      if (err.code !== 'ENOENT') this.onProblem(`Stopped reading a transcript (${err.code || 'error'})`, file);
+      if (err.code !== 'ENOENT') this.onProblem(en('said.watcher.stopped', { code: err.code || 'error' }), file);
       return;
     }
     if (stat.size < state.offset) {
@@ -179,7 +180,7 @@ class TranscriptWatcher {
       buf = buf.subarray(0, read);
       state.offset += read;
     } catch (err) {
-      this.onProblem(`Reading a transcript failed (${err.code || 'error'})`, file);
+      this.onProblem(en('said.watcher.failed', { code: err.code || 'error' }), file);
       return;
     } finally {
       if (fd !== undefined) fs.closeSync(fd);

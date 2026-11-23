@@ -5,7 +5,7 @@
 
 import { icon, badge, runningBadge, todoPips, isRunning } from './overview.js';
 import { boardTime } from './dates.js';
-import { tr, trHtml, dateLocale } from './i18n.js';
+import { tr, trHtml, dateLocale, said } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ORDER = { active: 0, paused: 1, done: 2 };
@@ -72,7 +72,7 @@ function assistantHtml(a, list, privacy, check = '') {
   const notes = [
     ...(a.failures && a.lastError && !privacy ? [tr('proj.lastError', { error: a.lastError })] : []),
     ...(a.failures && (!a.lastError || privacy) ? [tr('proj.details')] : []),
-    ...(a.notes ?? []),
+    ...(a.notes ?? []).map((n) => said(n)),
   ].map((n) => `<p class="hint asst-note">${esc(n)}</p>`).join('');
   const checkLine = check ? `<p class="hint asst-check">${check}</p>` : '';
   if (!a.questions.length) return `<section class="asst" aria-labelledby="asst-head">${head}${checkLine}${notes}</section>`;

@@ -13,6 +13,7 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { en } = require('./i18n');
 
 // No prompts, no index writes, no lazy fetches in a partial clone, and none
 // of the variables that would point git at another repository than -C.
@@ -57,12 +58,12 @@ async function defaultBranch(repo, run) {
 }
 
 async function inspectWorktrees(repo, { run = execFile, now = Date.now() } = {}) {
-  if (!repo || !fs.existsSync(repo)) return { ok: false, error: 'The project folder is not on this computer.' };
+  if (!repo || !fs.existsSync(repo)) return { ok: false, error: en('said.worktrees.notHere') };
   let list;
   try {
     list = parseWorktreeList(await git(repo, ['worktree', 'list', '--porcelain'], run));
   } catch (err) {
-    return { ok: false, error: 'This folder is not a git repository, or git could not read it.', detail: err.message };
+    return { ok: false, error: en('said.worktrees.notRepo'), detail: err.message };
   }
   const base = await defaultBranch(repo, run).catch(() => undefined);
   let merged = new Set();

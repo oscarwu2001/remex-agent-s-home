@@ -666,7 +666,7 @@ app.whenReady().then(() => {
     }
   }
   function readFieldKey() {
-    if (!field.keyPath) throw new fieldSurvey.FieldSurveyError('setup', 'Choose the key file in Settings → Connections → Field feedback.');
+    if (!field.keyPath) throw new fieldSurvey.FieldSurveyError('setup', en('said.fs.chooseKeyIn', { settings: en('said.fs.settings') }));
     let text;
     try {
       text = fs.readFileSync(field.keyPath, 'utf8');

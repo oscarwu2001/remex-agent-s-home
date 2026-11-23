@@ -31,7 +31,7 @@ const ALLOW = new Set([
   'gid', 'RSA', 'Sheets', 'API', 'dev', 'TAB', // a sheet link's gid, Google's names, the test link's /dev, the reader script's TAB
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
   'MRI', 'X', // as Taiwan's hospitals write them: MRI 掃描儀, X 光
-  'frontmatter', '.claude', // an agent definition's frontmatter, the .claude folder by name
+  'frontmatter', '.claude', 'UserPromptSubmit', // an agent definition's frontmatter, the .claude folder and a settings.json hook event by name
 ]);
 // Links, script properties and key fields (READER_SECRET, client_email), a key's "type", a link's ?k=
 // and drives (C:) are typed as they are.
