@@ -81,12 +81,12 @@ test('limit messages that named no limit are said as not counted; hits that wait
   assert.doesNotMatch(board, /pick a plan/);
 });
 
-test('the notes come after the tokens line on the card, just before Exact limits, and after the rows on the board', async () => {
+test('the notes come after the estimate on the card, just before Exact limits, and after the rows on the board', async () => {
   const { useCardHtml, planRowsHtml } = await load();
   const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 1 }, unnamed: 2, expiredPlan: 1 });
   const card = text(useCardHtml(s, 'pro'));
   // What waits, then what is not counted, together.
-  const order = ['Estimate:', 'Tokens', 'until WSL is running', 'not counted: it waited', 'not counted: their messages', 'Exact limits'].map((w) => card.indexOf(w));
+  const order = ['Estimate:', 'until WSL is running', 'not counted: it waited', 'not counted: their messages', 'Exact limits'].map((w) => card.indexOf(w));
   assert.ok(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), card);
   const board = text(planRowsHtml(s.usage, 'pro'));
   assert.ok(board.indexOf('learned from') < board.indexOf('until WSL is running'), board);
@@ -132,26 +132,91 @@ test('an unreadable hits file pauses the estimate, pointing to Needs attention i
   assert.doesNotMatch(t, /about 25%|usage-limits/);
 });
 
-test('the fullest running session\'s context, named and with its percent written out; idle sessions do not count', async () => {
-  const { useCardHtml } = await load();
+// The three meters in the mini window's head, each as { kind, title, label, side, value }.
+const meters = (html) => [...html.matchAll(/<div class="meter meter-(\w+)[^"]*" title="([^"]*)"><span class="meter-label">([^<]*)<\/span><strong class="meter-value">([^<]*)<\/strong><span class="meter-bar.*?<span class="meter-side">(.*?)<\/span><\/div>/g)]
+  .map((m) => ({ kind: m[1], title: m[2].replace(/&#39;/g, "'"), label: m[3], value: m[4], side: text(m[5]) }));
+
+test('the head\'s three meters are always there, in order: context, 5 hours, 7 days, even with nothing to show', async () => {
+  const { metersHtml } = await load();
+  for (const s of [{}, { sessions: [] }, snap([]), snap(twoHits, { last5h: 3000 })]) {
+    const m = meters(metersHtml(s, 'pro'));
+    assert.deepEqual(m.map((x) => x.label), ['Context', '5 hours', '7 days']);
+    // Each keeps a bar's place, so the head never changes height.
+    assert.equal(metersHtml(s, 'pro').match(/class="meter-bar/g).length, 3);
+  }
+  const none = meters(metersHtml({}, 'none'));
+  assert.deepEqual(none.map((x) => x.value), ['—', '—', '—']);
+  assert.deepEqual(none.map((x) => x.title), ['No session is running', 'Not counted yet', 'Not counted yet']);
+  assert.match(metersHtml({}, 'none'), /role="group" aria-label="Context and use"/);
+});
+
+test('the context meter: the fullest running session, else the fullest waiting for your turn; idle sessions do not count', async () => {
+  const { metersHtml } = await load();
   const sessions = [
     { id: 'a', project: 'alpha', status: 'working', context: { pct: 0.412 } },
     { id: 'b', project: 'beta', status: 'blocked', context: { pct: 0.88 } },
     { id: 'c', project: 'gamma', status: 'idle', context: { pct: 0.97 } },
+    { id: 'd', project: 'delta', status: 'your-turn', context: { pct: 0.6 } },
   ];
-  const html = useCardHtml(snap([], { sessions }), 'pro');
-  assert.match(text(html), /Context · beta 88% nearly full: save your work/);
+  const html = metersHtml(snap([], { sessions }), 'pro');
+  const [ctx] = meters(html);
+  assert.equal(ctx.value, '88%');
+  assert.equal(ctx.title, 'Fullest context: beta, 88% used');
   assert.match(html, /aria-valuenow="88"/);
-  assert.match(html, /title="Fullest context: beta, 88% used"/);
-  assert.doesNotMatch(text(useCardHtml(snap([], { sessions: [sessions[0]] }), 'pro')), /save your work/);
-  assert.match(text(useCardHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 1.02 } }] }), 'pro')), /Context · alpha 102% full: save your work/);
-  assert.doesNotMatch(useCardHtml(snap([], { sessions: [sessions[2]] }), 'pro'), /use-ctx/, 'no running session, no bar');
+  assert.match(text(html).replace(/&#39;/g, "'"), /beta's context is nearly full: save your work/);
+  assert.equal(meters(metersHtml(snap([], { sessions: [sessions[0]] }), 'pro'))[0].value, '41%');
+  assert.doesNotMatch(metersHtml(snap([], { sessions: [sessions[0]] }), 'pro'), /save your work|use-mark/);
+  // Nothing running: the one waiting for your turn, not the idle one.
+  assert.equal(meters(metersHtml(snap([], { sessions: sessions.slice(2) }), 'pro'))[0].title, 'Fullest context: delta, 60% used');
+  assert.equal(meters(metersHtml(snap([], { sessions: [sessions[2]] }), 'pro'))[0].value, '—');
+  const full = metersHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 1.02 } }] }), 'pro');
+  assert.equal(meters(full)[0].value, '102%');
+  assert.match(full, /aria-valuenow="100"/);
+  assert.match(text(full), /alpha's context is full: save your work/);
 });
 
-test('tokens for the last 5 hours and 7 days', async () => {
+test('the 5-hour and 7-day meters: tokens always, the estimate\'s share and bar once there is one, a mark past the learned level', async () => {
+  const { metersHtml } = await load();
+  const [, h5, wk] = meters(metersHtml(snap([]), 'pro'));
+  assert.deepEqual([h5.value, wk.value], ['2.6M', '30M']);
+  assert.deepEqual([h5.title, wk.title], ['2.6M tokens in the last 5 hours', '30M tokens in the last 7 days']);
+  assert.equal(metersHtml(snap([]), 'pro').match(/meter-bar none/g).length, 3, 'no session and no estimate: no bars, their places kept');
+  const est = metersHtml(snap(twoHits, { last5h: 3000 }), 'pro');
+  const [, e5, ew] = meters(est);
+  assert.equal(e5.side, '≈25%');
+  assert.equal(e5.title, '3.0k tokens in the last 5 hours. Estimate: about 25% of your 5-hour limit used');
+  assert.match(est, /aria-valuenow="25"/);
+  assert.equal(ew.side, '', 'the week has no hits, so no estimate');
+  const over = metersHtml(snap(twoHits, { last5h: 30_000 }), 'pro');
+  assert.equal(meters(over)[1].side, '!');
+  assert.match(meters(over)[1].title, /Estimate: past where your 5-hour limit was reached before/);
+  assert.doesNotMatch(text(over), /\d{3,}%/);
+  // Another plan's hits make no share.
+  assert.equal(meters(metersHtml(snap(twoHits, { last5h: 3000 }), 'max5'))[1].side, '');
+});
+
+test('the card no longer repeats context or tokens: they are in the head', async () => {
   const { useCardHtml } = await load();
-  assert.match(text(useCardHtml(snap([]), 'pro')), /Tokens 2\.6M in 5 hours · 30M in 7 days/);
-  assert.doesNotMatch(useCardHtml({ sessions: [] }, 'pro'), /use-tokens/, 'not counted yet');
+  const sessions = [{ id: 'a', project: 'alpha', status: 'working', context: { pct: 0.9 } }];
+  const t = text(useCardHtml(snap(twoHits, { last5h: 3000, sessions }), 'pro'));
+  assert.doesNotMatch(t, /Context|Tokens|alpha|3\.0k|30M/);
+});
+
+test('the head in Chinese', async () => {
+  const { metersHtml, setLanguage } = await load();
+  setLanguage('zh-TW');
+  try {
+    const sessions = [{ id: 'a', project: 'alpha', status: 'working', context: { pct: 0.9 } }];
+    const html = metersHtml(snap(twoHits, { last5h: 3000, sessions }), 'pro');
+    const m = meters(html);
+    assert.deepEqual(m.map((x) => x.label), ['上下文', '5 小時', '7 天']);
+    assert.equal(m[1].side, '約 25%');
+    assert.equal(m[1].title, '過去 5 小時用了 3.0k token。估計：5 小時上限已用約 25%');
+    assert.match(text(html), /alpha 的上下文快滿了，請先儲存/);
+    assert.match(html, /aria-label="上下文與用量"/);
+  } finally {
+    setLanguage('en');
+  }
 });
 
 test('the board: the plan as a row ("Not set" with none), each estimate a row with its share in bold and the basis under it', async () => {

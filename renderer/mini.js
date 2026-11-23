@@ -59,12 +59,17 @@ const open = new Set(); // sessions whose whole to-do list is open
 let last = '';
 function render() {
   const snap = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : live;
-  const { list: html, head } = miniHtml(snap, { privacy: prefs.private, open, dismissed: loadDismissed(), now: Date.now(), plan: shownPlan(prefs, snap) });
+  const { list: html, head, meters } = miniHtml(snap, { privacy: prefs.private, open, dismissed: loadDismissed(), now: Date.now(), plan: shownPlan(prefs, snap) });
   // Redraw only on change, so an open list and the scroll position stay put.
   const sig = JSON.stringify([html.replace(/(data-since="\d+">)[^<]*/g, '$1'), prefs.private]);
   if ($('headline').dataset.sig !== head) {
     $('headline').innerHTML = `<span class="badges">${head}</span>`;
     $('headline').dataset.sig = head;
+  }
+  // Context, 5 hours and 7 days: in the head, so always in view on both tabs.
+  if ($('meters').dataset.sig !== meters) {
+    $('meters').innerHTML = meters;
+    $('meters').dataset.sig = meters;
   }
   if (sig !== last) {
     last = sig;

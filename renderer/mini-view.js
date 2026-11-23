@@ -8,7 +8,7 @@ import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { statusText, glyphKey, elapsed } from './status.js';
 import { bubbleMarkup } from './people.js';
 import { fieldBadge } from './field-view.js';
-import { useCardHtml } from './usage-view.js';
+import { useCardHtml, metersHtml } from './usage-view.js';
 import { tr, escapeHtml as esc } from './i18n.js';
 
 export const glyph = (x) => `<svg class="glyph" viewBox="-16 -16 32 32" aria-hidden="true">${bubbleMarkup(glyphKey(x))}</svg>`;
@@ -51,7 +51,8 @@ function sessionCard(s, local, opts) {
 }
 
 // opts: { privacy, open: Set of sessions whose whole list is open,
-// dismissed: waits hidden, now, plan: the plan shown }. Returns { list, head }.
+// dismissed: waits hidden, now, plan: the plan shown }. Returns { list, head,
+// meters: context, 5 hours and 7 days for the window's head }.
 export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = new Set(), now = Date.now(), plan = 'none' } = {}) {
   const o = overview(snap.sessions ?? [], snap.here ?? tr('common.thisComputer'), snap.fleet?.computers ?? [], { jobs: snap.jobs ?? [], machine: snap.machine, work: snap.work ?? [] });
   const opts = { privacy, open, now };
@@ -66,5 +67,6 @@ export function miniHtml(snap, { privacy = true, open = new Set(), dismissed = n
   return {
     list: waits + useCardHtml(snap, plan) + (groups || `<p class="empty">${esc(tr('mini.noSessions'))}</p>`),
     head: headlineBadges(o) + fieldBadge(snap.field, now),
+    meters: metersHtml(snap, plan),
   };
 }

@@ -67,7 +67,7 @@ function planWordsAsSeen(usage, plan) {
       const row = tr(`use.row.${w}`);
       lines.push(e.over
         ? { kind: 'over', window: w, text: tr(`use.over.${w}`), row, value: tr('use.row.over'), basis }
-        : { kind: 'estimate', window: w, text: tr(`use.estimate.${w}`, { pct: e.pct }), row, value: tr('use.row.about', { pct: e.pct }), basis });
+        : { kind: 'estimate', window: w, text: tr(`use.estimate.${w}`, { pct: e.pct }), row, value: tr('use.row.about', { pct: e.pct }), basis, pct: e.pct });
     }
   }
   // On the card only while the estimate they would have helped still waits.
@@ -103,35 +103,70 @@ export function limitText(text, privacy) {
   return privacy ? t.replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b(?:\/\S*)?/gi, tr('use.linkHidden')) : t;
 }
 
+const fullest = (sessions) => sessions.reduce((best, s) => (!best || s.context.pct > best.context.pct ? s : best), null);
+const withContext = (sessions, keep) => (sessions ?? []).filter((s) => keep(s.status) && Number.isFinite(s.context?.pct));
+
 // The running session whose context is fullest, on this computer (other
 // computers share no context).
-export function fullestContext(sessions) {
-  return (sessions ?? []).filter((s) => isRunning(s.status) && Number.isFinite(s.context?.pct))
-    .reduce((best, s) => (!best || s.context.pct > best.context.pct ? s : best), null);
+export const fullestContext = (sessions) => fullest(withContext(sessions, isRunning));
+
+// The context the mini window's head shows: the fullest running session's,
+// else the fullest of those waiting for your turn (the next prompt starts
+// from it). Idle and finished sessions do not count.
+export const shownContext = (sessions) => fullestContext(sessions) ?? fullest(withContext(sessions, (st) => st === 'your-turn'));
+
+const METER_TOKENS = { '5h': 'last5h', week: 'week' };
+
+// A meter's bar: its share written out for screen readers (the text above
+// it says it for everyone). With nothing to show, an empty bar keeps its
+// place, so the head never changes height.
+const meterBar = (pct, label) => (pct === null
+  ? '<span class="meter-bar none" aria-hidden="true"></span>'
+  : `<span class="meter-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${esc(label)}"><span style="width:${pct}%"></span></span>`);
+const mark = '<span class="use-mark" aria-hidden="true">!</span>';
+
+// One row: label, value, bar, and its side (the estimate's share, or a mark).
+function meter({ kind, cls = '', title, side = '', value, bar }) {
+  return `<div class="meter meter-${kind}${cls}" title="${esc(title)}"><span class="meter-label">${esc(tr(`use.meter.${kind}`))}</span><strong class="meter-value">${esc(value)}</strong>${bar}<span class="meter-side">${side}</span></div>`;
 }
 
-function contextLine(s) {
-  if (!s) return '';
+function contextMeter(s) {
+  if (!s) return meter({ kind: 'context', title: tr('use.meter.noContext'), value: '—', bar: meterBar(null) });
   const pct = Math.round(s.context.pct * 100);
-  const state = s.context.pct >= 1 ? 'use.full' : s.context.pct >= CONTEXT_WARN ? 'use.nearlyFull' : null;
+  const warn = s.context.pct >= CONTEXT_WARN;
   const words = tr('use.contextOf', { project: s.project, pct });
-  return `<div class="use-ctx${state ? ' full' : ''}" title="${esc(words)}">
-      <p class="use-ctx-head"><span class="use-label">${esc(tr('use.context', { project: s.project }))}</span><strong class="use-pct">${pct}%</strong></p>
-      <span class="use-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, pct)}" aria-label="${esc(words)}"><span style="width:${Math.min(100, pct)}%"></span></span>
-      ${state ? `<p class="use-full">${esc(tr(state))}</p>` : ''}</div>`;
+  return meter({ kind: 'context', cls: warn ? ' warn' : '', title: words, side: warn ? mark : '', value: `${pct}%`, bar: meterBar(Math.min(100, pct), words) });
 }
 
-function tokensLine(usage) {
-  if (!usage?.last5h || !usage?.week) return '';
-  return `<p class="use-tokens"><span class="use-label">${esc(tr('use.tokens'))}</span> <span>${esc(tr('use.tokens5h', { n: compact(usage.last5h.total) }))}</span>
-      <span class="use-sep" aria-hidden="true">·</span> <span>${esc(tr('use.tokensWeek', { n: compact(usage.week.total) }))}</span></p>`;
+function windowMeter(w, usage, line) {
+  const total = usage?.[METER_TOKENS[w]]?.total;
+  if (!Number.isFinite(total)) return meter({ kind: w, title: tr('use.meter.notYet'), value: '—', bar: meterBar(null) });
+  const tokens = tr(`use.meter.tokens.${w}`, { n: compact(total) });
+  if (!line) return meter({ kind: w, title: tokens, value: compact(total), bar: meterBar(null) });
+  const title = tr('use.meter.titleWith', { tokens, estimate: line.text });
+  if (line.kind === 'over') return meter({ kind: w, cls: ' over', title, side: mark, value: compact(total), bar: meterBar(100, line.text) });
+  return meter({ kind: w, title, side: esc(tr('use.meter.about', { pct: line.pct })), value: compact(total), bar: meterBar(line.pct, line.text) });
 }
 
-// The mini window's card: plan and estimate, the fullest context, tokens
-// over 5 hours and 7 days, and where the exact numbers are.
+// The mini window's head: context, 5 hours and 7 days, always the same
+// three, on both tabs. Tokens always; a window's estimate share and its bar
+// once it has one; past the learned level, a mark and the words on hover.
+// A context near full says so in words under them.
+export function metersHtml(snap, plan) {
+  const usage = snap?.usage;
+  const s = shownContext(snap?.sessions);
+  const lines = Object.fromEntries(planWords(usage, plan).lines.filter((l) => l.kind !== 'wait').map((l) => [l.window, l]));
+  const state = !s ? null : s.context.pct >= 1 ? 'use.meter.full' : s.context.pct >= CONTEXT_WARN ? 'use.meter.nearlyFull' : null;
+  const warn = state ? `<p class="meters-warn">${mark}${esc(tr(state, { project: s.project }))}</p>` : '';
+  return `<div class="meters-row" role="group" aria-label="${esc(tr('use.meters'))}">${contextMeter(s)}${WINDOWS.map((w) => windowMeter(w, usage, lines[w])).join('')}</div>${warn}`;
+}
+
+// The mini window's card: plan and estimate, what waits or is not counted,
+// and where the exact numbers are. Context and tokens are in the head
+// (metersHtml), always in view.
 export function useCardHtml(snap, plan) {
   const usage = snap?.usage;
-  return `<section class="use" aria-label="${esc(tr('use.title'))}">${planLines(usage, plan)}${contextLine(fullestContext(snap?.sessions))}${tokensLine(usage)}${planNotesHtml(usage, plan)}
+  return `<section class="use" aria-label="${esc(tr('use.title'))}">${planLines(usage, plan)}${planNotesHtml(usage, plan)}
       <p class="use-exact">${exactHtml()}</p></section>`;
 }
 

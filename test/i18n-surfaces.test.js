@@ -138,8 +138,9 @@ test('the mini window\'s Now tab and headline read in Chinese, privacy mode on a
   setLanguage('zh-TW');
   try {
     for (const privacy of [true, false]) {
-      const { list, head } = miniHtml(snapshot(), { privacy, now, plan: 'max5' });
-      assert.deepEqual(latin(shown(list + head)), [], `privacy ${privacy}`);
+      const { list, head, meters } = miniHtml(snapshot(), { privacy, now, plan: 'max5' });
+      assert.deepEqual(latin(shown(list + head + meters)), [], `privacy ${privacy}`);
+      for (const words of [/上下文/, /5 小時/, /7 天/, /過去 7 天用了/]) assert.match(meters, words);
       assert.match(list, /估計：已超過/);
       assert.match(list, /每週估計|每週用量/);
       assert.match(list, /精確用量/);
