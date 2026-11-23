@@ -15,6 +15,7 @@
 // secret to the reader itself.
 
 const crypto = require('crypto');
+const { en } = require('./i18n');
 
 const TOKEN_HOST = 'oauth2.googleapis.com';
 const SHEETS_HOST = 'sheets.googleapis.com';
@@ -45,32 +46,32 @@ const TRANSIENT = new Set(['network', 'busy', 'google', 'answer', 'keyfile', 'se
 
 // ---- the sheet link -------------------------------------------------------------
 
-const LINK_HELP = 'Paste the link from the sheet’s address bar; it starts with https://docs.google.com/spreadsheets/d/';
+const LINK_HELP = en('said.fs.linkHelp');
 
 // "https://docs.google.com/spreadsheets/d/<id>/edit?gid=N#gid=N" ->
 // { spreadsheetId, gid }. gid is null when the link names no tab (the first
 // tab is read then).
 function parseSheetLink(text) {
   const raw = String(text ?? '').trim();
-  if (!raw) throw new RangeError(`No sheet link yet. ${LINK_HELP}`);
+  if (!raw) throw new RangeError(en('said.fs.noSheetLink', { help: LINK_HELP }));
   let u;
   try {
     u = new URL(raw);
   } catch {
-    throw new RangeError(`That is not a link. ${LINK_HELP}`);
+    throw new RangeError(en('said.fs.notALink', { help: LINK_HELP }));
   }
-  if (u.protocol !== 'https:' || u.hostname !== 'docs.google.com') throw new RangeError(`That link is not a Google Sheet. ${LINK_HELP}`);
+  if (u.protocol !== 'https:' || u.hostname !== 'docs.google.com') throw new RangeError(en('said.fs.notASheet', { help: LINK_HELP }));
   if (/^\/forms\//.test(u.pathname)) {
-    throw new RangeError('That is the form’s link. Open the form’s Responses tab, choose “View in Sheets” and copy that sheet’s link.');
+    throw new RangeError(en('said.fs.formLink'));
   }
   const m = /^\/spreadsheets(?:\/u\/\d+)?\/d\/([^/]+)/.exec(u.pathname);
-  if (!m) throw new RangeError(`That link is not a Google Sheet. ${LINK_HELP}`);
-  if (m[1] === 'e') throw new RangeError('That is a “published to the web” link. Open the sheet itself and copy the link from the address bar.');
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The sheet id in that link looks cut short. ${LINK_HELP}`);
+  if (!m) throw new RangeError(en('said.fs.notASheet', { help: LINK_HELP }));
+  if (m[1] === 'e') throw new RangeError(en('said.fs.publishedLink'));
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(en('said.fs.sheetIdShort', { help: LINK_HELP }));
   // The tab being looked at is after the #; a gid in the query may be stale.
   const fromHash = /(?:^#|&)gid=([^&]*)/.exec(u.hash)?.[1];
   const gid = fromHash ?? u.searchParams.get('gid');
-  if (gid != null && !/^\d+$/.test(gid)) throw new RangeError('The tab number in that link (gid) is not a number. Open the responses tab and copy the link again.');
+  if (gid != null && !/^\d+$/.test(gid)) throw new RangeError(en('said.fs.gidNotNumber'));
   return { spreadsheetId: m[1], gid: gid == null ? null : Number(gid) };
 }
 
@@ -84,24 +85,24 @@ function readKey(text) {
   try {
     k = typeof text === 'string' ? JSON.parse(text) : text;
   } catch {
-    throw new TypeError('The key file is not JSON. In Google Cloud, create a key for the service account as JSON and choose that file.');
+    throw new TypeError(en('said.fs.keyNotJson'));
   }
-  if (!k || typeof k !== 'object') throw new TypeError('The key file is not JSON. In Google Cloud, create a key for the service account as JSON and choose that file.');
-  if (k.type !== 'service_account') throw new TypeError('The key file is not a service account key (its "type" is not "service_account").');
+  if (!k || typeof k !== 'object') throw new TypeError(en('said.fs.keyNotJson'));
+  if (k.type !== 'service_account') throw new TypeError(en('said.fs.keyNotServiceAccount'));
   if (typeof k.client_email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(k.client_email)) {
-    throw new TypeError('The key file has no service account email (client_email).');
+    throw new TypeError(en('said.fs.keyNoEmail'));
   }
   if (k.token_uri !== TOKEN_URL) {
-    throw new TypeError(`The key file signs in somewhere other than Google (its token_uri is not ${TOKEN_URL}), so it is not used.`);
+    throw new TypeError(en('said.fs.keyElsewhere', { url: TOKEN_URL }));
   }
-  if (typeof k.private_key !== 'string' || !k.private_key.includes('PRIVATE KEY')) throw new TypeError('The key file has no private key.');
+  if (typeof k.private_key !== 'string' || !k.private_key.includes('PRIVATE KEY')) throw new TypeError(en('said.fs.keyNoPrivate'));
   let privateKey;
   try {
     privateKey = crypto.createPrivateKey(k.private_key);
   } catch {
-    throw new TypeError('The key file’s private key cannot be read. Create a new key in Google Cloud and choose it.');
+    throw new TypeError(en('said.fs.keyUnreadable'));
   }
-  if (privateKey.asymmetricKeyType !== 'rsa') throw new TypeError('The key file’s private key is not an RSA key, which Google’s service accounts use.');
+  if (privateKey.asymmetricKeyType !== 'rsa') throw new TypeError(en('said.fs.keyNotRsa'));
   return { clientEmail: k.client_email, keyId: typeof k.private_key_id === 'string' ? k.private_key_id : undefined, privateKey };
 }
 
@@ -109,8 +110,8 @@ function readKey(text) {
 // that is gone waits for the user; a busy or locked one (a synced drive, a
 // virus scan) passes.
 function keyFileError(err) {
-  if (err?.code === 'ENOENT') return new FieldSurveyError('key', 'The key file is no longer where it was chosen; choose it again in Settings → Connections → Field feedback.');
-  return new FieldSurveyError('keyfile', `The key file could not be read just now (${err?.code || err?.message}); it tries again in half an hour.`);
+  if (err?.code === 'ENOENT') return new FieldSurveyError('key', en('said.fs.keyGone', { choose: CHOOSE_AGAIN_IN }));
+  return new FieldSurveyError('keyfile', en('said.fs.keyNotNow', { code: err?.code || err?.message }));
 }
 
 const b64 = (s) => Buffer.from(s).toString('base64url');
@@ -161,29 +162,29 @@ function checkUrl(url) {
   try {
     u = new URL(url);
   } catch {
-    throw new FieldSurveyError('blocked', 'A request to an address that could not be read was refused.');
+    throw new FieldSurveyError('blocked', en('said.fs.blockedUnreadable'));
   }
   if (u.protocol !== 'https:' || !HOSTS.has(u.host) || u.username || u.password) {
-    throw new FieldSurveyError('blocked', `A request to ${u.host || 'an unknown host'} was refused: field feedback talks only to Google's sign-in, Sheets and Apps Script services.`);
+    throw new FieldSurveyError('blocked', en('said.fs.blockedHost', { host: u.host || en('said.fs.unknownHost') }));
   }
   return url;
 }
 
 // The tab the link names, or the first tab when it names none.
 function pickTab(meta, gid) {
-  if (!meta || !Array.isArray(meta.sheets)) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs. Press Refresh now.');
+  if (!meta || !Array.isArray(meta.sheets)) throw new FieldSurveyError('answer', en('said.fs.noTabs'));
   const tabs = meta.sheets.map((s) => s?.properties).filter((p) => p && typeof p.title === 'string' && Number.isInteger(p.sheetId));
-  if (!tabs.length) throw new FieldSurveyError('answer', 'Google answered without the sheet’s tabs. Press Refresh now.');
+  if (!tabs.length) throw new FieldSurveyError('answer', en('said.fs.noTabs'));
   if (gid == null) return tabs[0];
   const tab = tabs.find((p) => p.sheetId === gid);
-  if (!tab) throw new FieldSurveyError('tab', `The tab in the link (gid ${gid}) is not in this sheet any more. Open the responses tab and copy its link again.`);
+  if (!tab) throw new FieldSurveyError('tab', en('said.fs.tabGone', { gid }));
   return tab;
 }
 
 const API_OFF = /has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i;
 const RATE = /RATE_LIMIT|quota|rateLimitExceeded|userRateLimit/i;
-const BUSY = () => new FieldSurveyError('busy', 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.');
-const DOWN = (status) => new FieldSurveyError('google', `Google's service had a problem (${status}); it tries again in half an hour.`);
+const BUSY = () => new FieldSurveyError('busy', en('said.fs.busy'));
+const DOWN = (status) => new FieldSurveyError('google', en('said.fs.down', { status }));
 
 // Google's refusal -> a sentence with what to try.
 function refusal(step, status, body, key) {
@@ -192,40 +193,40 @@ function refusal(step, status, body, key) {
   if (step === 'token') {
     const code = typeof body?.error === 'string' ? body.error : '';
     if (code === 'invalid_grant') {
-      return new FieldSurveyError('token', 'Google refused the key (invalid_grant): it may have been deleted in Google Cloud, or this computer’s clock is off. Set the clock, or create a new key and choose it.');
+      return new FieldSurveyError('token', en('said.fs.invalidGrant'));
     }
     if (code === 'invalid_client' || code === 'unauthorized_client') {
-      return new FieldSurveyError('token', 'Google refused the key: its service account may be disabled or deleted. Check it in Google Cloud.');
+      return new FieldSurveyError('token', en('said.fs.keyDisabled'));
     }
-    return new FieldSurveyError('token', `Google refused to sign in with the key (${status}). Check the key in Google Cloud, then press Refresh now.`);
+    return new FieldSurveyError('token', en('said.fs.signInRefused', { status }));
   }
   const err = body && typeof body.error === 'object' ? body.error : {};
   const said = [err.message, err.status, ...(Array.isArray(err.details) ? err.details.map((d) => d?.reason) : [])].filter((x) => typeof x === 'string').join(' ');
   if (status === 403 && API_OFF.test(said)) {
-    return new FieldSurveyError('api', 'Turn on the Google Sheets API for the key’s Cloud project (APIs & Services → Library → Google Sheets API → Enable), then press Refresh now.');
+    return new FieldSurveyError('api', en('said.fs.apiOff'));
   }
   if (status === 403 && RATE.test(said)) return BUSY();
   // The address itself is the detail: it shows only with privacy off.
   if (status === 403) {
-    return new FieldSurveyError('share', 'Share the sheet with the key’s reader address (copy it in Settings → Connections → Field feedback) as Viewer, then press Refresh now.', key.clientEmail);
+    return new FieldSurveyError('share', en('said.fs.share', { copy: COPY_ADDRESS_IN }), key.clientEmail);
   }
-  if (status === 404) return new FieldSurveyError('missing', 'No sheet was found at this link. Open it in your browser to check it, then paste it again in Settings → Connections → Field feedback.');
-  if (status === 401) return new FieldSurveyError('token', 'Google did not accept the sign-in for the sheet (401); press Refresh now.');
-  if (status === 400 && step === 'values') return new FieldSurveyError('tab', 'Google could not read the responses tab (400). Open the tab and copy its link again.');
-  return new FieldSurveyError('google', `Google answered ${status}; press Refresh now, and check the link and the key if it happens again.`);
+  if (status === 404) return new FieldSurveyError('missing', en('said.fs.noSheet', { paste: PASTE_AGAIN_IN }));
+  if (status === 401) return new FieldSurveyError('token', en('said.fs.signIn401'));
+  if (status === 400 && step === 'values') return new FieldSurveyError('tab', en('said.fs.tab400'));
+  return new FieldSurveyError('google', en('said.fs.answered', { status }));
 }
 
 function unreachable(err) {
   if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-    return new FieldSurveyError('network', 'Google did not answer in time; check the internet connection, then press Refresh now.');
+    return new FieldSurveyError('network', en('said.fs.timeout'));
   }
   // Requests never follow a redirect (it could lead off the allowed hosts).
   if (/redirect/i.test(String(err?.message))) {
-    return new FieldSurveyError('blocked', 'Google redirected the request, which the app does not follow. Press Refresh now in a few minutes.');
+    return new FieldSurveyError('blocked', en('said.fs.redirected'));
   }
   const net = /net::(ERR_[A-Z_]+)/.exec(String(err?.message));
-  if (net) return new FieldSurveyError('network', `No network: Google could not be reached (${net[1]}); check the internet connection or proxy.`);
-  return new FieldSurveyError('network', `No network: Google could not be reached (${String(err?.message ?? err).slice(0, 120)}).`);
+  if (net) return new FieldSurveyError('network', en('said.fs.offlineCode', { code: net[1] }));
+  return new FieldSurveyError('network', en('said.fs.offline', { why: String(err?.message ?? err).slice(0, 120) }));
 }
 
 // Signs in, finds the tab and reads it. `fetch(url, init)` is the caller's
@@ -256,18 +257,18 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
       body = undefined; // a refusal without JSON is still explained by its status below
     }
     if (!res.ok) throw refusal(step, res.status, body, key);
-    if (!body || typeof body !== 'object') throw new FieldSurveyError('answer', 'Google’s answer could not be read. Press Refresh now.');
+    if (!body || typeof body !== 'object') throw new FieldSurveyError('answer', en('said.fs.answerUnreadable'));
     return body;
   };
   const t = tokenRequest(key, now);
   const token = await ask('token', t.url, t.init);
-  if (typeof token.access_token !== 'string' || !token.access_token) throw new FieldSurveyError('answer', 'Google signed in without a token. Press Refresh now.');
+  if (typeof token.access_token !== 'string' || !token.access_token) throw new FieldSurveyError('answer', en('said.fs.noToken'));
   const init = { redirect: 'error', headers: { authorization: `Bearer ${token.access_token}`, accept: 'application/json' } };
   const meta = await ask('sheet', metadataUrl(link.spreadsheetId), init);
   const tab = pickTab(meta, link.gid);
   const vals = await ask('values', valuesUrl(link.spreadsheetId, tab.title), init);
   // Google leaves `values` out when the tab is empty.
-  if (vals.values !== undefined && !Array.isArray(vals.values)) throw new FieldSurveyError('answer', 'Google answered without rows. Press Refresh now.');
+  if (vals.values !== undefined && !Array.isArray(vals.values)) throw new FieldSurveyError('answer', en('said.fs.noRows'));
   const timeZone = typeof meta.properties?.timeZone === 'string' ? meta.properties.timeZone : undefined;
   return { rows: vals.values ?? [], tab: { id: tab.sheetId, title: tab.title }, timeZone };
 }
@@ -289,12 +290,27 @@ async function fetchRows({ link, key, fetch, now = Date.now() }) {
 // words its messages are told in (READER_VOICE here, the relay's in
 // linebot.js). The hosts stay here, the one place that names them.
 
-const READER_HELP = 'In the reader script, Deploy → Manage deployments and copy the Web app link; it looks like https://script.google.com/macros/s/…/exec';
-const SECRET_HELP = 'Copy READER_SECRET from the reader script’s Project Settings → Script properties';
-const SETTINGS = 'Settings → Connections → Field feedback';
-const ANYONE = 'In the reader script, Deploy → Manage deployments → Edit → Who has access → Anyone, then press Refresh now.';
-const NEW_VERSION = 'deploy it again as a new version (Deploy → Manage deployments → Edit → Version: New version)';
-const RELINK = `Copy the Web app link again (Deploy → Manage deployments) and paste it in ${SETTINGS}, then press Refresh now.`;
+const READER_HELP = en('said.fs.readerHelp', { example: `https://${READER_HOST}/macros/s/…/exec` });
+const SECRET_HELP = en('said.fs.secretHelp');
+const SETTINGS = en('said.fs.settings');
+// The parts of a sentence that name Settings' path, each one sentence of its
+// own: Settings puts the control in view in their place (inSettings), in
+// whichever language the window reads them. The secret's are LINE's too.
+const COPY_IN = en('said.fs.copyIn', { settings: SETTINGS });
+const COPY_LATER = en('said.fs.copyLater', { settings: SETTINGS });
+const COPY_AGAIN = (newVersion) => en('said.fs.copyAgain', { settings: SETTINGS, newVersion });
+const COPY_ADDRESS_IN = en('said.fs.copyAddressIn', { settings: SETTINGS });
+const CHOOSE_AGAIN_IN = en('said.fs.chooseAgainIn', { settings: SETTINGS });
+const CHOOSE_KEY_IN = en('said.fs.chooseKeyIn', { settings: SETTINGS });
+const PASTE_AGAIN_IN = en('said.fs.pasteAgainIn', { settings: SETTINGS });
+const PASTE_IN = en('said.lb.pasteIn', { settings: SETTINGS });
+const THEN_SAVE_IN = en('said.lb.thenSaveIn', { settings: SETTINGS });
+const SAVE_IT_IN = en('said.lb.saveItIn', { settings: SETTINGS });
+const SAVE_AGAIN_IN = en('said.lb.saveAgainIn', { settings: SETTINGS });
+const SAVE_THIS_IN = en('said.fs.saveThisIn', { settings: SETTINGS });
+const ANYONE = en('said.fs.anyone');
+const NEW_VERSION = en('said.lb.newVersion');
+const RELINK = en('said.lb.relink', { paste: PASTE_IN });
 // The most of an answer the app reads; a sheet's text is far below it.
 const READER_MAX_BYTES = 20 * 1024 * 1024;
 const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
@@ -309,22 +325,23 @@ const tooLarge = (bytes) => bytes > READER_MAX_BYTES;
 // keyChosen: a key file is chosen, so its button reads Choose another….
 // Every message naming that path has its phrase here (tested); the board
 // keeps the path.
-const keyButton = (v) => (v.keyChosen ? 'Choose another…' : 'Choose key file…');
-const NO_STORE_YET = 'once this computer can keep it (see How to connect)';
-const secretWords = (v, open, folded, none) => (v.noStorage ? none : v.secretOpen ? open : folded);
+const keyButton = (v) => (v.keyChosen ? en('said.fs.chooseAnother') : en('said.fs.chooseKeyFile'));
+const NO_STORE_YET = en('said.fs.noStoreYet');
+const secretWords = (v, open, folded, none) => en(v.noStorage ? none : v.secretOpen ? open : folded, { later: NO_STORE_YET });
 const IN_SETTINGS = [
-  [`In ${SETTINGS}, press Copy reader script,`, () => 'Press Copy reader script,'],
-  [`press Copy reader script in ${SETTINGS},`, () => 'press Copy reader script,'],
-  [`Copy the reader script again (${SETTINGS}) and`, () => 'Press Copy reader script, paste it over the old one and'],
-  [`(copy it in ${SETTINGS})`, () => '(copy it with Copy reader address)'],
-  [`choose it again in ${SETTINGS}.`, (v) => `choose it again with ${keyButton(v)}`],
-  [`Choose the key file in ${SETTINGS}.`, (v) => `Choose the key file with ${keyButton(v)}`],
-  [`then paste it again in ${SETTINGS}`, (v) => (v.linkOpen ? 'then paste it again under Sheet link' : 'then press Change link and paste it again')],
-  [` and paste it in ${SETTINGS}`, (v) => (v.linkOpen ? ' and paste it under Reader link' : ', press Change link and paste it')],
-  [`then save it in ${SETTINGS}`, (v) => secretWords(v, 'then save it under Secret', 'then press Replace secret and save the new one', `then save it ${NO_STORE_YET}`)],
-  [`Save it in ${SETTINGS}`, (v) => secretWords(v, 'Save it under Secret', 'Press Replace secret and save it', `Save it ${NO_STORE_YET}`)],
-  [`Save the secret again in ${SETTINGS}`, (v) => secretWords(v, 'Save the secret again under Secret', 'Press Replace secret and save it again', `Save the secret again ${NO_STORE_YET}`)],
-  [`Save this reader’s secret in ${SETTINGS}`, (v) => secretWords(v, 'Save this reader’s secret under Secret', 'Press Replace secret and save this reader’s secret', `Save this reader’s secret ${NO_STORE_YET}`)],
+  [COPY_IN, () => en('said.fs.copyHere')],
+  [COPY_LATER, () => en('said.fs.copyHereLater')],
+  // Up to the new version it asks for, which stays as it is.
+  [COPY_AGAIN(''), () => en('said.fs.copyAgainHere', { newVersion: '' })],
+  [COPY_ADDRESS_IN, () => en('said.fs.copyAddressHere')],
+  [CHOOSE_AGAIN_IN, (v) => en('said.fs.chooseAgainWith', { button: keyButton(v) })],
+  [CHOOSE_KEY_IN, (v) => en('said.fs.chooseKeyWith', { button: keyButton(v) })],
+  [PASTE_AGAIN_IN, (v) => en(v.linkOpen ? 'said.fs.pasteAgainUnder' : 'said.fs.pasteAgainChange')],
+  [PASTE_IN, (v) => en(v.linkOpen ? 'said.fs.pasteUnderLink' : 'said.lb.pasteChangeLink')],
+  [THEN_SAVE_IN, (v) => secretWords(v, 'said.lb.thenSaveUnder', 'said.lb.thenReplace', 'said.lb.thenSaveLater')],
+  [SAVE_IT_IN, (v) => secretWords(v, 'said.lb.saveItUnder', 'said.lb.saveItReplace', 'said.lb.saveItLater')],
+  [SAVE_AGAIN_IN, (v) => secretWords(v, 'said.lb.saveAgainUnder', 'said.lb.saveAgainReplace', 'said.lb.saveAgainLater')],
+  [SAVE_THIS_IN, (v) => secretWords(v, 'said.fs.saveThisUnder', 'said.fs.saveThisReplace', 'said.fs.saveThisLater')],
 ];
 function inSettings(message, { secretOpen = true, linkOpen = true, noStorage = false, keyChosen = false } = {}) {
   const shown = { secretOpen: secretOpen && !noStorage, linkOpen, noStorage, keyChosen };
@@ -357,28 +374,28 @@ const wrongShape = (code) => readerError('reader', READER_WORDS.shape, code);
 // script ('reader script'), help (where to copy the link from) }.
 function parseWebAppLink(text, { noun, script, help }) {
   const raw = String(text ?? '').trim();
-  if (!raw) throw new RangeError(`No ${noun} link yet. ${help}`);
+  if (!raw) throw new RangeError(en('said.fs.noWebAppLink', { noun, help }));
   let u;
   try {
     u = new URL(raw);
   } catch {
-    throw new RangeError(`That is not a link. ${help}`);
+    throw new RangeError(en('said.fs.notALink', { help }));
   }
-  if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(`That link is not an Apps Script web app. ${help}`);
-  if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(`That is the script editor’s link, not the web app’s. ${help}`);
+  if (u.protocol !== 'https:' || u.host !== READER_HOST || u.username || u.password) throw new RangeError(en('said.fs.notWebApp', { help }));
+  if (/^\/home\/projects\/|^\/d\/[^/]+\/edit/.test(u.pathname)) throw new RangeError(en('said.fs.editorLink', { help }));
   // A Google Workspace link names its domain (/a/macros/<domain>/s/…).
   const m = /^\/(?:a\/macros\/[^/]+|macros)\/s\/([^/]+)\/(exec|dev)\/?$/.exec(u.pathname);
   if (m?.[2] === 'dev') {
-    throw new RangeError(`That is the test link (it ends in /dev), which works only in your own signed-in browser. In the ${script}, Deploy → Manage deployments and copy the Web app link that ends in /exec.`);
+    throw new RangeError(en('said.fs.testLink', { script }));
   }
-  if (!m) throw new RangeError(`That link is not a ${noun} web app. ${help}`);
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(`The id in that link looks cut short. ${help}`);
+  if (!m) throw new RangeError(en('said.fs.notNounWebApp', { noun, help }));
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(m[1])) throw new RangeError(en('said.fs.idShort', { help }));
   return { deploymentId: m[1], url: `https://${READER_HOST}/macros/s/${m[1]}/exec` };
 }
 // A web app's link rebuilt from its deployment id alone, checked as a pasted
 // one is (LINE's bot part rebuilds its relay link this way). Throws RangeError.
-const webAppLink = (deploymentId) => parseWebAppLink(`https://${READER_HOST}/macros/s/${deploymentId}/exec`, { noun: 'web app', script: 'script', help: '' });
-const parseReaderLink = (text) => parseWebAppLink(text, { noun: 'reader', script: 'reader script', help: READER_HELP });
+const webAppLink = (deploymentId) => parseWebAppLink(`https://${READER_HOST}/macros/s/${deploymentId}/exec`, { noun: en('said.fs.noun.webApp'), script: en('said.fs.script'), help: '' });
+const parseReaderLink = (text) => parseWebAppLink(text, { noun: en('said.fs.noun.reader'), script: en('said.fs.script.reader'), help: READER_HELP });
 
 // Whether the system's own protection can encrypt a secret: available
 // (Electron's safeStorage says so) and, on Linux, a backend other than
@@ -390,7 +407,7 @@ const canProtect = ({ available = false, backend } = {}) => Boolean(available &&
 // text.
 function secretStorage({ available = false, backend } = {}) {
   if (canProtect({ available, backend })) return null;
-  return 'This computer has no protected storage for the secret (on Linux, a keyring such as GNOME Keyring or KWallet), and the app never keeps it as plain text. Use a Google key file instead, or set up a keyring, then restart Agent’s Home.';
+  return en('said.fs.noStorage');
 }
 
 // The secret as typed in Settings, checked before it is saved -> { secret,
@@ -399,16 +416,16 @@ function secretStorage({ available = false, backend } = {}) {
 // field was opened to replace it). No message repeats what was typed.
 function checkSecret(text, { available = false, backend, saved = false, readerUrl } = {}) {
   const storage = secretStorage({ available, backend });
-  if (storage) return { error: `Not saved: ${storage.charAt(0).toLowerCase()}${storage.slice(1)}` };
+  if (storage) return { error: en('said.lb.notSavedBecause', { why: storage.charAt(0).toLowerCase() + storage.slice(1) }) };
   let link;
   try {
     link = parseReaderLink(readerUrl);
   } catch {
-    return { error: 'Save the reader link first: the secret belongs to that reader.' };
+    return { error: en('said.fs.linkFirst') };
   }
   const s = typeof text === 'string' ? text.trim() : '';
-  if (!s) return { error: saved ? 'Paste the new secret, or press Cancel to keep the saved one.' : `No secret yet. ${SECRET_HELP}.` };
-  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: `That is not the reader’s secret: it is 32 characters or more, with no spaces. ${SECRET_HELP}.` };
+  if (!s) return { error: saved ? en('said.lb.pasteNew') : en('said.lb.noSecretYet', { help: SECRET_HELP }) };
+  if (!/^[\x21-\x7e]{32,512}$/.test(s)) return { error: en('said.fs.notTheSecret', { help: SECRET_HELP }) };
   return { secret: s, deploymentId: link.deploymentId };
 }
 
@@ -431,9 +448,9 @@ const secretRecord = (text) => {
 // -> the encrypted secret for this reader. Throws FieldSurveyError.
 function openSecret(text, deploymentId) {
   const r = secretRecord(text);
-  if (!r) throw readerError('secret', `The saved secret could not be read. Save the secret again in ${SETTINGS}.`, 'secret file not readable');
+  if (!r) throw readerError('secret', en('said.lb.secretUnreadable', { save: SAVE_AGAIN_IN }), 'secret file not readable');
   if (r.deploymentId !== deploymentId) {
-    throw readerError('setup', `The saved secret was for another reader link. Save this reader’s secret in ${SETTINGS}.`, 'secret for another reader');
+    throw readerError('setup', en('said.fs.otherReader', { save: SAVE_THIS_IN }), 'secret for another reader');
   }
   return Buffer.from(r.sealed, 'base64');
 }
@@ -458,7 +475,7 @@ function secretGoes({ turnedOff = false, sheetChanged = false, stale = false } =
 // old reader's secret was removed (dropped: it was meant to go; savedAfter:
 // its file is still there, which Needs attention says instead).
 function secretNote({ turnedOff = false, stale = false, dropped = false, savedAfter = true } = {}) {
-  return stale && dropped && !turnedOff && !savedAfter ? 'The saved secret was the old reader’s, so it was removed: save this reader’s secret.' : null;
+  return stale && dropped && !turnedOff && !savedAfter ? en('said.fs.oldReaderSecret') : null;
 }
 
 // The saved secret could not be read -> why, and whether waiting helps: none
@@ -466,14 +483,14 @@ function secretNote({ turnedOff = false, stale = false, dropped = false, savedAf
 // file busy just now (a virus scan) passes. One the system cannot decrypt
 // any more (secretLocked) waits for a new secret.
 function secretFileError(err) {
-  if (err?.code === 'ENOENT') return readerError('setup', `No reader secret is saved. Save it in ${SETTINGS}.`, 'secret file missing');
+  if (err?.code === 'ENOENT') return readerError('setup', en('said.fs.noSecretSaved', { save: SAVE_IT_IN }), 'secret file missing');
   if (err?.code === 'EACCES' || err?.code === 'EPERM') {
-    return readerError('secret', `This computer will not let the app open the saved secret’s file. Save the secret again in ${SETTINGS}.`, `secret file ${err.code}`);
+    return readerError('secret', en('said.lb.secretFileRefused', { save: SAVE_AGAIN_IN }), `secret file ${err.code}`);
   }
-  return readerError('secretfile', 'The saved secret could not be read just now; it tries again in half an hour.', `secret file ${err?.code || 'unreadable'}`);
+  return readerError('secretfile', en('said.fs.secretNotNow'), `secret file ${err?.code || 'unreadable'}`);
 }
 function secretLocked() {
-  return readerError('secret', `The saved secret cannot be unlocked on this computer any more (its sign-in or keyring changed). Save the secret again in ${SETTINGS}.`, 'secret not decrypted');
+  return readerError('secret', en('said.lb.secretLocked', { save: SAVE_AGAIN_IN }), 'secret not decrypted');
 }
 
 // The POST to a web app: its JSON as text in the body (Apps Script reads it
@@ -493,22 +510,22 @@ const isRedirect = (status) => [301, 302, 303, 307, 308].includes(status);
 // beside it; check(url): the gate every request passes (checkUrl here;
 // without one, checkWebAppUrl); words }.
 const READER_WORDS = {
-  shape: `The reader’s answer is not in the shape the app reads. In ${SETTINGS}, press Copy reader script, paste it over the old one in the sheet’s Apps Script and ${NEW_VERSION}.`,
-  noLocation: `Google passed the reader’s call on without saying where to. ${RELINK}`,
-  hopUnreadable: `The reader’s answer was sent to an address that could not be read, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
-  hopSignIn: `Google asked for a sign-in instead of letting the reader answer. ${ANYONE}`,
-  hopElsewhere: (where, echo) => `The reader’s answer was sent to ${where}, which the app does not follow: it takes the answer only from ${echo} over https.`,
-  timeout: 'The reader did not answer in time; check the internet connection, then press Refresh now.',
-  offline: 'No network: the reader could not be reached; check the internet connection or proxy, then press Refresh now.',
-  secondRedirect: `Google redirected the reader’s answer a second time, which the app does not follow. Press Refresh now; if it happens again, ${NEW_VERSION}.`,
-  tooLarge: `The reader’s answer is larger than 20 MB, more than the app reads. Point TAB in the reader script at the answers’ tab alone, then ${NEW_VERSION}.`,
-  busy: 'Google asked the app to slow down; it tries again in half an hour, or press Refresh now in a while.',
-  down: 'Google’s Apps Script service had a problem; it tries again in half an hour.',
-  denied: `Google did not let the reader answer. ${ANYONE}`,
-  missing: `No reader answers at this link: its deployment may have been archived or deleted. In the reader script, Deploy → Manage deployments, copy the Web app link and paste it in ${SETTINGS}.`,
-  refused: `Google refused the reader’s call. ${RELINK}`,
-  signInPage: `Google showed its sign-in page instead of the reader’s answer. ${ANYONE}`,
-  scriptFailed: `The reader script failed instead of answering. Open it (the sheet’s Extensions → Apps Script), look under Executions for what went wrong, then press Copy reader script in ${SETTINGS}, paste it over the old one and ${NEW_VERSION}.`,
+  shape: en('said.fs.shape', { copy: COPY_IN, newVersion: NEW_VERSION }),
+  noLocation: en('said.fs.noLocation', { relink: RELINK }),
+  hopUnreadable: en('said.fs.hopUnreadable', { newVersion: NEW_VERSION }),
+  hopSignIn: en('said.fs.hopSignIn', { anyone: ANYONE }),
+  hopElsewhere: (where, echo) => en('said.fs.hopElsewhere', { where, echo }),
+  timeout: en('said.fs.readerTimeout'),
+  offline: en('said.fs.readerOffline'),
+  secondRedirect: en('said.fs.secondRedirect', { newVersion: NEW_VERSION }),
+  tooLarge: en('said.fs.tooLarge', { newVersion: NEW_VERSION }),
+  busy: en('said.fs.busy'),
+  down: en('said.fs.scriptDown'),
+  denied: en('said.fs.denied', { anyone: ANYONE }),
+  missing: en('said.fs.missing', { paste: PASTE_IN }),
+  refused: en('said.fs.refused', { relink: RELINK }),
+  signInPage: en('said.fs.signInPage', { anyone: ANYONE }),
+  scriptFailed: en('said.fs.scriptFailed', { copy: COPY_LATER, newVersion: NEW_VERSION }),
 };
 const READER_VOICE = { Error: FieldSurveyError, check: checkUrl, words: READER_WORDS };
 const voiceError = (voice, kind, message, code) => Object.assign(new voice.Error(kind, message), { code });
@@ -522,10 +539,10 @@ function checkWebAppUrl(url, voice) {
   try {
     u = new URL(url);
   } catch {
-    throw voiceError(voice, 'blocked', voice.words.blocked('an address that could not be read'), 'url not readable');
+    throw voiceError(voice, 'blocked', voice.words.blocked(en('said.fs.unreadableAddress')), 'url not readable');
   }
   if (u.protocol !== 'https:' || !WEB_APP_HOSTS.has(u.host) || u.username || u.password) {
-    throw voiceError(voice, 'blocked', voice.words.blocked(u.host || 'an unknown host'), `refused ${u.protocol}//${u.host}`);
+    throw voiceError(voice, 'blocked', voice.words.blocked(u.host || en('said.fs.unknownHost')), `refused ${u.protocol}//${u.host}`);
   }
   return url;
 }
@@ -544,7 +561,7 @@ function webAppHop(location, voice) {
   }
   if (u.host === 'accounts.google.com') throw voiceError(voice, 'access', words.hopSignIn, 'redirect to sign-in');
   if (u.protocol !== 'https:' || u.host !== ECHO_HOST || u.username || u.password) {
-    throw voiceError(voice, 'blocked', words.hopElsewhere(u.protocol === 'https:' ? u.host || 'an unknown host' : 'an address without https', ECHO_HOST), `redirect to ${u.protocol}//${u.host}`);
+    throw voiceError(voice, 'blocked', words.hopElsewhere(u.protocol === 'https:' ? u.host || en('said.fs.unknownHost') : en('said.fs.noHttps'), ECHO_HOST), `redirect to ${u.protocol}//${u.host}`);
   }
   return u.toString();
 }
@@ -620,12 +637,12 @@ function webAppAnswer(status, contentType, raw, voice) {
 function readerBody(body) {
   if (body.ok === false) {
     if (body.error === 'not allowed') {
-      throw readerError('secret', `The reader refused the secret: it does not match the reader’s. ${SECRET_HELP}, then save it in ${SETTINGS}.`, 'not allowed');
+      throw readerError('secret', en('said.fs.secretRefused', { help: SECRET_HELP, save: THEN_SAVE_IN }), 'not allowed');
     }
     if (body.error === 'tab not found') {
-      throw readerError('tab', `The reader cannot find its tab: check that TAB at the top of the reader script is the tab’s name, then ${NEW_VERSION}.`, 'tab not found');
+      throw readerError('tab', en('said.fs.tabNotFound', { newVersion: NEW_VERSION }), 'tab not found');
     }
-    throw readerError('reader', `The reader said no for a reason the app does not know. Copy the reader script again (${SETTINGS}) and ${NEW_VERSION}.`, `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 60)}`);
+    throw readerError('reader', en('said.fs.unknownNo', { copy: COPY_AGAIN(NEW_VERSION) }), `error ${String(body.error).replace(/\bhttps?:\/\/\S+/gi, '<address>').slice(0, 60)}`);
   }
   if (body.ok !== true) throw wrongShape('no ok');
   // getDataRange always has a row, even on an empty tab.
@@ -1015,7 +1032,7 @@ function matchRoles(headers, roles) {
 
 // Roles from Settings, checked before they are saved.
 function checkRoles(list) {
-  const bad = () => new TypeError('The column roles could not be read; open Check the columns again.');
+  const bad = () => new TypeError(en('said.fs.rolesUnreadable'));
   if (!Array.isArray(list) || list.length > 1000) throw bad();
   return list.map((r) => {
     if (!r || typeof r.header !== 'string' || r.header.length > 5000 || !Number.isInteger(r.index) || r.index < 0 || !ROLES.includes(r.role)) throw bad();
@@ -1025,7 +1042,7 @@ function checkRoles(list) {
       const low = Number(r.low);
       const high = Number(r.high);
       if (!scaleFits(low, high)) {
-        throw new RangeError(`A score’s scale starts at 0 or 1, or below 0 down to ${MIN_LOW}, and ends above it, at 10 at most.`);
+        throw new RangeError(en('said.fs.scaleRange', { low: MIN_LOW }));
       }
       // The direction as chosen, either way; missing only in roles saved
       // before it was asked.
@@ -1312,10 +1329,10 @@ function unreadableText(summary) {
   const total = scores + numbers + timestamps;
   if (!total) return null;
   const parts = [];
-  if (scores) parts.push(`${scores} ${scores === 1 ? 'score that is' : 'scores that are'} not a whole number on its scale`);
-  if (numbers) parts.push(`${numbers} ${numbers === 1 ? 'answer that is' : 'answers that are'} not a number`);
-  if (timestamps) parts.push(`${timestamps} ${timestamps === 1 ? 'row' : 'rows'} without a readable date`);
-  return `${total} ${total === 1 ? 'answer' : 'answers'} could not be read: ${parts.join(', ')}`;
+  if (scores) parts.push(en('said.fs.unread.scores', { n: scores }));
+  if (numbers) parts.push(en('said.fs.unread.numbers', { n: numbers }));
+  if (timestamps) parts.push(en('said.fs.unread.timestamps', { n: timestamps }));
+  return en('said.fs.unread.total', { n: total, parts: parts.join(', ') });
 }
 
 // The rows with the answers of identifying columns replaced: the cache keeps
@@ -1467,7 +1484,7 @@ function afterFailure(prev, err, { now, started, link }) {
   const known = err instanceof FieldSurveyError;
   const lastError = {
     at: now, kind: known ? err.kind : 'bug',
-    message: known ? err.message : 'Something went wrong while reading the sheet; see the system log.',
+    message: known ? err.message : en('said.fs.readFailed'),
     ...(known && err.detail ? { detail: err.detail } : {}),
   };
   const base = sameSheet(prev, link) ? prev
@@ -1503,7 +1520,7 @@ function summariseCache(cache, roles, { now = null } = {}) {
 // returned in its place).
 function validCache(raw, link) {
   if (raw == null) return { cache: null, problem: null };
-  const bad = { cache: null, problem: 'The saved field feedback could not be read; the sheet is read again.' };
+  const bad = { cache: null, problem: en('said.fs.cacheUnreadable') };
   if (typeof raw !== 'object' || Array.isArray(raw)) return bad;
   if (raw.version === 4) {
     // carried: the caller writes it in the old one's place at once.
@@ -1534,8 +1551,8 @@ function validCache(raw, link) {
   if (!sameSheet(raw, link)) {
     return {
       cache: null,
-      problem: link.deploymentId || raw.deploymentId != null ? 'The saved field feedback came from another sheet or reader; it was set aside and read again.'
-        : 'The saved field feedback was for another sheet; it was set aside and this sheet is read again.',
+      problem: link.deploymentId || raw.deploymentId != null ? en('said.fs.cacheOtherSource')
+        : en('said.fs.cacheOtherSheet'),
     };
   }
   return { cache: raw, problem: null };
@@ -1580,7 +1597,7 @@ function changeSettings(current, change, { summary = null } = {}) {
   let note;
   if (change && 'enabled' in change) next.enabled = change.enabled === true;
   if (change && 'source' in change) {
-    if (!SOURCES.includes(change.source)) return { error: 'Choose how to connect: the reader script, or a Google key file.' };
+    if (!SOURCES.includes(change.source)) return { error: en('said.fs.chooseHow') };
     next.source = change.source;
   }
   if (change && 'readerUrl' in change) {
@@ -1612,7 +1629,7 @@ function changeSettings(current, change, { summary = null } = {}) {
       // the saved link, which names the tab, stays, and so do the columns.
       const same = saved && saved.spreadsheetId === link.spreadsheetId && (link.gid == null || link.gid === saved.gid);
       if (!same) next.sheetUrl = url;
-      else if (link.gid == null && saved.gid != null) note = 'Same sheet: kept the tab you had.';
+      else if (link.gid == null && saved.gid != null) note = en('said.fs.sameSheet');
     }
   }
   if (change && 'columns' in change) {
@@ -1621,9 +1638,9 @@ function changeSettings(current, change, { summary = null } = {}) {
     } catch (err) {
       return { error: err.message };
     }
-    if (!summary?.columns?.length) return { error: 'Not saved: the sheet has not been read yet, so there are no columns to check.' };
+    if (!summary?.columns?.length) return { error: en('said.fs.notReadYet') };
     const { missing } = checkSubmission(summary, next.columns);
-    if (missing) return { error: `Not saved: ${missing} ${missing === 1 ? 'column still needs' : 'columns still need'} a choice.` };
+    if (missing) return { error: en('said.fs.stillNeed', { n: missing }) };
   }
   const from = (s) => (sourceOf(s) === 'reader' ? `reader ${s?.readerUrl ?? ''}` : `key ${s?.sheetUrl ?? ''}`);
   const sheetChanged = from(next) !== from(current);
@@ -1711,9 +1728,9 @@ function fieldFlags({ summary = null, lastError = null, keyError = null } = {}) 
 // emails or phones stays hidden unless chosen Identifying or Ignore.
 function columnsReply(summary) {
   const n = summary?.doubtful?.length ?? 0;
-  if (!n) return 'Columns saved.';
-  return n === 1 ? 'Kept hidden: its answers look like emails or phone numbers; choose Identifying or Ignore.'
-    : `Kept hidden: ${n} columns’ answers look like emails or phone numbers; choose Identifying or Ignore for them.`;
+  if (!n) return en('said.fs.columnsSaved');
+  return n === 1 ? en('said.fs.keptHiddenOne')
+    : en('said.fs.keptHidden', { n });
 }
 
 // Everything that needs the user's attention, as { label, detail }: the
@@ -1725,7 +1742,7 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
   // 'settings', or 'refresh' now), as the flags do.
   // labelPrivacyOff: the same line for a board with privacy mode already off.
   const add = (label, detail = '', fix = null, labelPrivacyOff = null) => out.push({
-    label: `Field feedback: ${label}`, detail, ...(fix ? { fix } : {}), ...(labelPrivacyOff ? { labelPrivacyOff: `Field feedback: ${labelPrivacyOff}` } : {}),
+    label: en('said.fs.row', { what: label }), detail, ...(fix ? { fix } : {}), ...(labelPrivacyOff ? { labelPrivacyOff: en('said.fs.row', { what: labelPrivacyOff }) } : {}),
   });
   const err = cache?.lastError;
   if (err) add(err.message, err.detail ?? '', err.kind !== 'share' && TRANSIENT.has(err.kind) ? 'refresh' : 'settings');
@@ -1737,24 +1754,21 @@ function fieldProblems({ enabled, cache, summary, summaryError, keyError }) {
     // What is not checked, in one line counted as the board's flag counts it:
     // the columns to choose, and the new ones that need no choice besides.
     // Privacy mode keeps the step read-only, so the line says to turn it off.
-    const where = 'Settings → Connections → Field feedback → Check the columns';
+    const where = en('said.fs.checkWhere');
     const unsure = summary.needsChoice ?? 0;
     const fresh = (summary.columns ?? []).filter((c) => c.isNew && !c.needsChoice).length;
-    if (unsure) {
-      const words = `${unsure === 1 ? '1 column needs' : `${unsure} columns need`} a choice${fresh ? ` and ${fresh} more ${fresh === 1 ? 'is' : 'are'} not checked yet` : ''}`;
-      add(`${words} (${where}, with privacy mode off)`, '', 'check', `${words} (${where})`);
-    } else if (fresh) {
-      const words = `${fresh === 1 ? 'a new column' : `${fresh} new columns`} in the sheet, not checked yet`;
-      add(`${words} (${where}, with privacy mode off)`, '', 'check', `${words} (${where})`);
-    }
+    const words = !unsure ? en('said.fs.newColumns', { n: fresh })
+      : !fresh ? en('said.fs.needsChoice', { n: unsure })
+        : en(fresh === 1 ? 'said.fs.needsChoiceMore' : 'said.fs.needsChoiceMores', { n: unsure, fresh });
+    if (unsure || fresh) add(en('said.fs.whereOff', { words, where }), '', 'check', en('said.fs.whereOn', { words, where }));
     const doubt = summary.doubtful?.length ?? 0;
-    if (doubt) add(`${doubt === 1 ? '1 column you checked now looks' : `${doubt} columns you checked now look`} like emails or phone numbers; ${doubt === 1 ? 'its answers are' : 'their answers are'} hidden and not stored (Settings → Connections → Field feedback → Check the columns)`, '', 'check');
-    if (summary.timeZoneUnknown) add(`the sheet’s time zone (${summary.timeZoneUnknown}) is not known on this computer, so its times are read in this computer’s time zone`);
+    if (doubt) add(en('said.fs.doubt', { n: doubt, where }), '', 'check');
+    if (summary.timeZoneUnknown) add(en('said.fs.timeZoneUnknown', { zone: summary.timeZoneUnknown }));
     if (summary.timeZoneMissing) {
-      add('the reader did not say the sheet’s time zone (an older reader script), so its times are read in this computer’s time zone; press Copy reader script in Settings → Connections → Field feedback and deploy it again as a new version', '', 'settings');
+      add(en('said.fs.noTimeZone'), '', 'settings');
     }
     const a = summary.ambiguousDates ?? 0;
-    if (a) add(`${a} typed ${a === 1 ? 'date' : 'dates'} could be day/month or month/day; ${a === 1 ? 'it was' : 'they were'} read as month/day`);
+    if (a) add(en('said.fs.ambiguousDates', { n: a }));
   }
   return out;
 }

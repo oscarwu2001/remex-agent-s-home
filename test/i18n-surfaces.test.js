@@ -28,10 +28,12 @@ const ALLOW = new Set([
   "Agent’s", 'Apps', 'Script', 'Inbox', 'Developers', 'Webhook', 'Linux', 'GNOME', 'Keyring', 'KWallet', // names as their makers write them
   'https', 'MB', 'exec', // a link's parts: https, /exec, ?k=
   'makeSecrets', 'Found', // the relay script's function to run; Verify's "302 Found"
+  'gid', 'RSA', 'Sheets', 'API', 'dev', 'TAB', // a sheet link's gid, Google's names, the test link's /dev, the reader script's TAB
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
 ]);
-// Script properties (READER_SECRET, LINE_TOKEN), a link's ?k= and drives (C:) are typed as they are.
-const latin = (text) => (String(text).replace(/°[CF]/g, ' ').replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b|\?k=|\b[A-Z]:/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));
+// Links, script properties and key fields (READER_SECRET, client_email), a key's "type", a link's ?k=
+// and drives (C:) are typed as they are.
+const latin = (text) => (String(text).replace(/°[CF]/g, ' ').replace(/https?:\/\/\S+|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b|"[a-z_]+"|\?k=|\b[A-Z]:/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));
 const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 
 // What a page shows: its text, and the words in its title, aria-label and placeholder attributes.
