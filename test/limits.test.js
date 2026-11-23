@@ -26,7 +26,7 @@ const reply = (s, id, tokens, extra) => {
   e.message = { ...e.message, id, model: 'claude-sonnet-5', usage: { input_tokens: tokens, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
   return e;
 };
-const SESSION = (reset) => `You've hit your session limit · resets ${reset} (Atlantis/Capital)`;
+const SESSION = (reset, zone = 'Europe/London') => `You've hit your session limit · resets ${reset} (${zone})`;
 const limit = (s, text = SESSION('2pm'), extra) => ({ ...say(s, text, 'stop_sequence', extra), isApiErrorMessage: true });
 // The old shape with no reset time: only the reply rule can join its repeats.
 const BARE = 'Claude usage limit reached.';
@@ -41,10 +41,11 @@ function setup() {
 }
 
 // One pass, as the main process makes it: scan, then offer the hits found.
-async function pass(scanner, book, plan, nowS, ready = true) {
+async function pass(scanner, book, plan, nowS, { ready = true, wslReading = false } = {}) {
   await scanner.scan(at(nowS));
-  return book.offer(scanner.limitHits(), { plan, ready: ready && scanner.passClean, measure: scanner });
+  return book.offer(scanner.limitHits(), { plan, ready: ready && scanner.passClean, wslReading, measure: scanner, now: at(nowS) });
 }
+const waits = (o = {}) => ({ file: 0, pass: 0, wsl: 0, plan: 0, ...o });
 
 // Two session-limit hits: 6000 + 4000 tokens before the first, 8000 + 6000
 // before the second (the first's replies are more than 5 hours before it).
@@ -65,7 +66,8 @@ test('limit shapes: the window comes from the limit\'s own name; per-model limit
   assert.deepEqual(shape('You\'ve hit your monthly spend limit · your weekly limit resets Oct 9 at 10am'), ['spend-cap', null]);
   assert.deepEqual(shape('You\'ve hit your team\'s shared budget. Ask your admin to raise it'), ['shared-budget', null]);
   assert.deepEqual(shape('Now using usage credits · Your session limit resets 4pm'), ['credits', null]);
-  assert.deepEqual(shape('You\'ve hit your limit · resets 4pm'), ['unnamed', null]);
+  // Names no limit and gives no reset: which window cannot be told.
+  assert.deepEqual(shape('You\'ve hit your limit'), ['unnamed', null]);
   // Older versions.
   assert.deepEqual(shape('5-hour limit reached ∙ resets 2pm'), ['old-5-hour', '5h']);
   assert.deepEqual(shape('Claude usage limit reached. Your limit will reset at 5pm.'), ['old-5-hour', '5h']);
@@ -76,8 +78,9 @@ test('limit shapes: the window comes from the limit\'s own name; per-model limit
     'Context limit reached: compact to go on', 'Switched to Sonnet: Opus is busy']) assert.equal(hitWindow(t), null, t);
   assert.equal(limitMessage('Something else went wrong'), null);
   // One limit event says one reset time, in any session.
-  assert.equal(limitMessage(SESSION('4pm')).reset, limitMessage(`${SESSION('4pm')} · progress saved`).reset);
-  assert.equal(limitMessage('Claude AI usage limit reached|1760000000').reset, '@1760000000');
+  assert.equal(limitMessage(SESSION('4pm'), T0).resetAt, limitMessage(`${SESSION('4pm')} · progress saved`, T0).resetAt);
+  assert.equal(limitMessage(SESSION('4pm'), T0).resetAt, Date.parse('2026-01-01T16:00:00Z'));
+  assert.equal(limitMessage('Claude AI usage limit reached|1760000000', T0).resetAt, 1_760_000_000_000);
 });
 
 test('the scanner takes session and weekly hits and leaves spend caps and per-model limits', async () => {
@@ -185,9 +188,9 @@ test('hits wait for a whole pass: none from a pass before the WSL check, nor fro
   const scanner = new UsageScanner({ roots: [s.root] });
   const book = new LimitBook({ file: s.hitsFile });
   // The first pass runs before the WSL homes are known.
-  assert.equal(await pass(scanner, book, 'pro', 4 * HOUR, false), 0, 'nothing taken before the WSL check');
-  assert.deepEqual(book.view(), { paused: false, hits: [], waiting: 1, waitingFor: 'pass', expired: 0 });
-  assert.equal(fs.existsSync(s.hitsFile), false, 'nothing written');
+  assert.equal(await pass(scanner, book, 'pro', 4 * HOUR, { ready: false }), 0, 'nothing taken before the WSL check');
+  assert.deepEqual(book.view(), { paused: false, hits: [], waiting: waits({ pass: 1 }), expiredPlan: 0 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).hits, [], 'no hit written, only what waits');
   // The WSL home turns up, with use before the hit, and a folder that cannot be listed.
   const wslHome = path.join(s.dir, 'wsl');
   fs.mkdirSync(path.join(wslHome, 'p'), { recursive: true });
@@ -197,13 +200,13 @@ test('hits wait for a whole pass: none from a pass before the WSL check, nor fro
   scanner.setRoots([s.root, wslHome, unlisted]);
   assert.equal(await pass(scanner, book, 'pro', 4 * HOUR), 0);
   assert.equal(scanner.passClean, false);
-  assert.equal(book.view().waitingFor, 'pass');
+  assert.deepEqual(book.view().waiting, waits({ pass: 1 }));
   // Read in full: the hit counts both homes' use.
   scanner.setRoots([s.root, wslHome]);
   assert.equal(await pass(scanner, book, 'pro', 4 * HOUR), 1);
   assert.equal(scanner.passClean, true);
   assert.deepEqual(book.view().hits.map((h) => h.tokens), [6500]);
-  assert.equal(book.view().waiting, 0);
+  assert.deepEqual(book.view().waiting, waits());
 });
 
 test('hits found while no plan is picked wait, and are filed under the plan picked; those that pass 7 days waiting are said', async () => {
@@ -212,8 +215,8 @@ test('hits found while no plan is picked wait, and are filed under the plan pick
   const scanner = new UsageScanner({ roots: [s.root] });
   const book = new LimitBook({ file: s.hitsFile });
   assert.equal(await pass(scanner, book, 'none', 4 * HOUR), 0);
-  assert.deepEqual(book.view(), { paused: false, hits: [], waiting: 1, waitingFor: 'plan', expired: 0 });
-  assert.equal(book.offer(scanner.limitHits(), { plan: 'max5', ready: true, measure: scanner }), 1);
+  assert.deepEqual(book.view(), { paused: false, hits: [], waiting: waits({ plan: 1 }), expiredPlan: 0 });
+  assert.equal(await pass(scanner, book, 'max5', 4 * HOUR), 1);
   assert.deepEqual(book.view().hits.map((h) => h.plan), ['max5']);
 
   const t = setup();
@@ -222,8 +225,9 @@ test('hits found while no plan is picked wait, and are filed under the plan pick
   const waiting = new LimitBook({ file: t.hitsFile });
   await pass(sc, waiting, 'none', 4 * HOUR);
   await pass(sc, waiting, 'none', 8 * DAY);
-  assert.deepEqual(waiting.view(), { paused: false, hits: [], waiting: 0, waitingFor: null, expired: 1 });
-  assert.deepEqual(waiting.problems(), [{ label: en('said.limits.expired', { n: 1 }), detail: '' }]);
+  // Expired waiting for a plan: the card's line, not Needs attention.
+  assert.deepEqual(waiting.view(), { paused: false, hits: [], waiting: waits(), expiredPlan: 1 });
+  assert.deepEqual(waiting.problems(), []);
 });
 
 test('a plan change starts a new count; the old plan\'s hits are kept', async () => {
@@ -272,7 +276,7 @@ test('an unreadable hits file is said under Needs attention, left as it is, and 
   const scanner = new UsageScanner({ roots: [s.root] });
   const book = new LimitBook({ file: s.hitsFile });
   assert.equal(await pass(scanner, book, 'pro', 17 * HOUR), 0);
-  assert.deepEqual(book.view(), { paused: true, hits: [], waiting: 2, waitingFor: 'file', expired: 0 });
+  assert.deepEqual(book.view(), { paused: true, hits: [], waiting: waits({ file: 2 }), expiredPlan: 0 });
   assert.deepEqual(book.problems(), [{ label: en('said.limits.notShape'), detail: s.hitsFile }]);
   assert.equal(fs.readFileSync(s.hitsFile, 'utf8'), broken, 'left as it is');
 
@@ -336,4 +340,123 @@ test('a temp file an earlier save left is removed at the first read, or said whe
   stuck.load();
   assert.match(stuck.problems()[0].label, /^usage-limits\.json\.tmp, left by an earlier save, could not be removed/);
   assert.equal(stuck.problems()[0].detail, `${t.hitsFile}.tmp`);
+});
+
+// ---- round 3: reset moments, unnamed limits, WSL, waiting across restarts ----
+
+test('a reset is a moment: one weekly event retried across the day before it resets is one hit, in both of its forms', async () => {
+  const s = setup();
+  // T0 is 1 Jan 09:00 UTC (London's winter time is UTC). More than a day ahead Claude Code
+  // writes the date; within the last day, the time alone.
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 7000),
+    limit(1 * DAY, 'You\'ve hit your weekly limit · resets Jan 6, 10am (Europe/London)'),
+    limit(4 * DAY + 3 * HOUR, 'You\'ve hit your weekly limit · resets 10am (Europe/London)')));
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), book, 'max5', 4 * DAY + 4 * HOUR), 1);
+  assert.deepEqual(book.view().hits.map((h) => [h.window, h.at, h.tokens]), [['week', at(1 * DAY), 7000]]);
+  assert.equal(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).hits[0].resetAt, Date.parse('2026-01-06T10:00:00Z'));
+});
+
+test('a reset is a moment: two weekly events six days apart, both saying "9am", are two hits', async () => {
+  const s = setup();
+  // Etc/GMT-8 is 8 hours ahead of UTC: 9am there is 01:00 UTC, the next one after each message.
+  fs.writeFileSync(s.file, jsonl(limit(18 * HOUR, 'You\'ve hit your weekly limit · resets 9am (Etc/GMT-8)'),
+    limit(6 * DAY + 18 * HOUR, 'You\'ve hit your weekly limit · resets 9am (Etc/GMT-8)')));
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), book, 'max5', 7 * DAY), 2);
+  const saved = JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).hits.map((h) => h.resetAt);
+  assert.deepEqual(saved, [Date.parse('2026-01-03T01:00:00Z'), Date.parse('2026-01-09T01:00:00Z')]);
+});
+
+test('a reset in a time zone Node cannot read falls back to the reply rule', async () => {
+  const s = setup();
+  const MARS = SESSION('5pm', 'Mars/Olympus');
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(2 * HOUR, MARS), reply(2 * HOUR + 10 * MIN, 'r2', 300), limit(2 * HOUR + 20 * MIN, MARS),
+    limit(2 * HOUR + 40 * MIN, MARS)));
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), book, 'pro', 3 * HOUR), 2, 'a reply came between the first two');
+  assert.deepEqual(book.view().hits.map((h) => h.at), [at(2 * HOUR), at(2 * HOUR + 20 * MIN)]);
+  assert.equal(limitMessage(MARS, at(2 * HOUR)).resetAt, null);
+});
+
+test('reset moments: the date and time forms, the year, minutes, an hour past noon, and the old epoch form', () => {
+  const ts = Date.parse('2026-12-30T20:00:00Z');
+  const resetAt = (t) => limitMessage(`You've hit your weekly limit · resets ${t}`, ts).resetAt;
+  assert.equal(resetAt('Jan 2, 10am (Europe/London)'), Date.parse('2027-01-02T10:00:00Z'), 'a date past this year is next year\'s');
+  assert.equal(resetAt('Jan 2, 2027, 3:30pm (Asia/Taipei)'), Date.parse('2027-01-02T07:30:00Z'));
+  assert.equal(resetAt('9:15pm (America/New_York)'), Date.parse('2026-12-31T02:15:00Z'), 'the next 9:15pm there');
+  assert.equal(resetAt('12am (UTC)'), Date.parse('2026-12-31T00:00:00Z'));
+  assert.equal(resetAt('Jul 4, 10am (America/New_York)'), Date.parse('2027-07-04T14:00:00Z'), 'summer time');
+  assert.equal(resetAt('Mon 9am'), null, 'a weekday names no moment');
+  assert.equal(limitMessage('Claude AI usage limit reached|1767344400', ts).resetAt, 1767344400 * 1000);
+});
+
+test('a message naming no limit takes its window from its reset; with no reset it is not a hit, and is counted', async () => {
+  const s = setup();
+  // 10:00 UTC: 1pm is 3 hours on (the 5 hours); Jan 9 is a week on.
+  fs.writeFileSync(s.file, jsonl(limit(1 * HOUR, 'You\'ve hit your limit · resets 1pm (Europe/London)'),
+    limit(2 * HOUR, 'You\'ve hit your usage limit · resets Jan 8, 5pm (Europe/London)'),
+    limit(3 * HOUR, 'You\'ve hit your limit')));
+  const scanner = new UsageScanner({ roots: [s.root] });
+  await scanner.scan(at(4 * HOUR));
+  assert.deepEqual(scanner.limitHits().map((h) => [h.ts, h.window]), [[at(1 * HOUR), '5h'], [at(2 * HOUR), 'week']]);
+  assert.equal(scanner.unnamedMessages(), 1);
+  await scanner.scan(at(9 * DAY));
+  assert.equal(scanner.unnamedMessages(), 0, 'counted for 7 days, like the hits');
+});
+
+test('once WSL\'s transcripts were read, hits wait while they are not, and are said; a computer that never had them is not held', async () => {
+  const s = setup();
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  const scanner = new UsageScanner({ roots: [s.root] });
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(scanner, book, 'pro', 4 * HOUR, { wslReading: true }), 1);
+  assert.equal(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).wslSeen, true);
+  // After a restart WSL is not running: a new hit waits, and says so.
+  fs.appendFileSync(s.file, jsonl(reply(10 * HOUR, 'r2', 5000), limit(12 * HOUR, SESSION('3pm'))));
+  const restarted = new LimitBook({ file: s.hitsFile });
+  const sc = new UsageScanner({ roots: [s.root] });
+  assert.equal(await pass(sc, restarted, 'pro', 13 * HOUR), 0);
+  assert.deepEqual(restarted.view().waiting, waits({ wsl: 1 }));
+  assert.equal(await pass(sc, restarted, 'pro', 14 * HOUR, { wslReading: true }), 1);
+  assert.deepEqual(restarted.view().waiting, waits());
+
+  const t = setup();
+  fs.writeFileSync(t.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  assert.equal(await pass(new UsageScanner({ roots: [t.root] }), new LimitBook({ file: t.hitsFile }), 'pro', 4 * HOUR), 1, 'never had WSL: not held');
+});
+
+test('waiting hits survive a restart with the plan in force when first seen; those seen with no plan take the plan picked', async () => {
+  const s = setup();
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am')), limit(5 * HOUR, SESSION('8am'))));
+  const book = new LimitBook({ file: s.hitsFile });
+  // Seen under Pro while the pass could not be trusted; then the user picks Max 5×.
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), book, 'pro', 6 * HOUR, { ready: false }), 0);
+  const saved = JSON.parse(fs.readFileSync(s.hitsFile, 'utf8'));
+  assert.deepEqual(saved.waiting.map((w) => [w.at, w.plan, w.why]), [[at(3 * HOUR), 'pro', 'pass'], [at(5 * HOUR), 'pro', 'pass']]);
+  const restarted = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), restarted, 'max5', 7 * HOUR), 2);
+  assert.deepEqual(restarted.view().hits.map((h) => h.plan), ['pro', 'pro']);
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), new LimitBook({ file: s.hitsFile }), 'max5', 7 * HOUR), 0, 'not counted again');
+
+  const t = setup();
+  fs.writeFileSync(t.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  await pass(new UsageScanner({ roots: [t.root] }), new LimitBook({ file: t.hitsFile }), 'none', 4 * HOUR);
+  const later = new LimitBook({ file: t.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [t.root] }), later, 'team', 5 * HOUR), 1);
+  assert.deepEqual(later.view().hits.map((h) => h.plan), ['team']);
+});
+
+test('a hit that waited over 7 days for a clean pass, WSL or the file is said under Needs attention with what it waited for', async () => {
+  const s = setup();
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  const scanner = new UsageScanner({ roots: [s.root] });
+  const book = new LimitBook({ file: s.hitsFile });
+  await pass(scanner, book, 'pro', 4 * HOUR, { ready: false });
+  await pass(scanner, book, 'pro', 8 * DAY, { ready: false });
+  assert.deepEqual(book.problems(), [{ label: en('said.limits.expired.pass', { n: 1 }), detail: '' }]);
+  assert.match(book.problems()[0].label, /waited over 7 days for every transcript folder to be read/);
+  // Said for 7 days after, then let go.
+  await pass(scanner, book, 'pro', 16 * DAY);
+  assert.deepEqual(book.problems(), []);
 });

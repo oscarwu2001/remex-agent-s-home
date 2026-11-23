@@ -67,7 +67,10 @@ class UsageScanner {
     this.replies = new Map(); // message id -> { ts, usage }
     this.loose = []; // [{ ts, usage }] replies without an id
     this.limitNotice = undefined;
-    this.hits = new Map(); // `${window}@${ts}` -> { ts, window, reset }
+    this.hits = new Map(); // `${window}@${ts}` -> { ts, window, resetAt }
+    // Limit messages that named no limit and gave no reset to tell it by:
+    // not hits, but said. ts -> true.
+    this.unnamed = new Map();
     // Whether the last pass listed every folder and read every file it
     // meant to: a hit's token total is only whole after such a pass.
     this.passClean = false;
@@ -130,8 +133,9 @@ class UsageScanner {
     if (errorLine && e.isApiErrorMessage === true && m) {
       const text = (Array.isArray(m.content) ? m.content : []).filter((b) => b && b.type === 'text').map((b) => b.text).join(' ').trim();
       if (LIMIT_TEXT.test(text) && (!this.limitNotice || ts > this.limitNotice.ts)) this.limitNotice = { ts, text: text.slice(0, 200) };
-      const limit = limitMessage(text);
-      if (limit?.window) this.hits.set(`${limit.window}@${ts}`, { ts, window: limit.window, reset: limit.reset });
+      const limit = limitMessage(text, ts);
+      if (limit?.window) this.hits.set(`${limit.window}@${ts}`, { ts, window: limit.window, resetAt: limit.resetAt });
+      else if (limit?.shape === 'unnamed') this.unnamed.set(ts, true);
       return;
     }
     if (e.type !== 'assistant' || !m || !m.usage || typeof m.usage !== 'object') return;
@@ -175,12 +179,19 @@ class UsageScanner {
     for (const [id, r] of this.replies) if (r.ts < since) this.replies.delete(id);
     this.loose = this.loose.filter((r) => r.ts >= since);
     for (const [key, h] of this.hits) if (h.ts < now - WEEK_MS) this.hits.delete(key);
+    for (const ts of this.unnamed.keys()) if (ts < now - WEEK_MS) this.unnamed.delete(ts);
     this.passClean = clean;
   }
 
-  // The limit hits read in the last 7 days: [{ ts, window, reset }].
+  // The limit hits read in the last 7 days: [{ ts, window, resetAt }].
   limitHits() {
     return [...this.hits.values()];
+  }
+
+  // How many limit messages of the last 7 days named no limit and gave no
+  // readable reset (not counted).
+  unnamedMessages() {
+    return this.unnamed.size;
   }
 
   // Tokens (the `total` measure) of the replies written in [from, to).

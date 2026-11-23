@@ -1233,23 +1233,28 @@ app.whenReady().then(() => {
   // records them under the plan picked in Settings once a pass can be
   // trusted for their token totals: one that started after the first WSL
   // check and listed and read everything. Until then, and while no plan is
-  // picked, they wait in the scanner, which keeps them for 7 days.
+  // picked, they wait (src/core/limits.js keeps them, with what they wait
+  // for); so they do while WSL's transcripts, read in an earlier run, are
+  // not being read (no distro runs: the app never starts one to read them).
   const usage = new UsageScanner({ roots: [] });
   const limitBook = new LimitBook({ file: path.join(app.getPath('userData'), 'usage-limits.json') });
   limitBook.load();
   let usagePlan = 'none'; // until the window says, by home:plan
   let usageReady = false;
+  let usageWsl = false; // the last pass read a WSL home
   let usageSummary;
   const offerLimits = () => {
-    limitBook.offer(usage.limitHits(), { plan: usagePlan, ready: usageReady, measure: usage });
-    usageSummary = { ...usage.summary(), limits: limitBook.view() };
+    limitBook.offer(usage.limitHits(), { plan: usagePlan, ready: usageReady, wslReading: usageWsl, measure: usage });
+    usageSummary = { ...usage.summary(), limits: { ...limitBook.view(), unnamed: usage.unnamedMessages() } };
   };
   (async function followUsage() {
     try {
       const afterWsl = wslChecked;
+      const wslNow = wsl.roots.length > 0;
       usage.setRoots(allRoots());
       await usage.scan();
       usageReady = afterWsl && usage.passClean;
+      usageWsl = wslNow;
       offerLimits();
     } catch (err) {
       problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
@@ -1261,16 +1266,9 @@ app.whenReady().then(() => {
   // each pick (the preferences are the window's).
   ipcMain.handle('home:plan', (_event, id) => {
     if (!isPlan(id)) return { ok: false, error: en('said.main.unknownPlan') };
-    const changed = usagePlan !== id;
+    // Hits waiting for a plan are filed at the next pass, under the plan
+    // picked then: a keyboard pick steps through the plans between.
     usagePlan = id;
-    // Hits waiting for a plan are filed under this one at once.
-    if (changed && usageSummary) {
-      try {
-        offerLimits();
-      } catch (err) {
-        problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
-      }
-    }
     return { ok: true };
   });
 
