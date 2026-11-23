@@ -27,26 +27,28 @@ const median = (xs) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-// For each window: { hits } while there are fewer than HITS_NEEDED, else
-// { hits, basis, level, used, pct, over }: `basis` is how many hits the
-// level comes from, and `over` is true past the learned level, where `pct`
-// is not to be shown. Null when no plan is picked.
+// For each window: { hits, zero } while there are fewer than HITS_NEEDED,
+// else { hits, zero, basis, level, used, pct, over }: `hits` counts those
+// the level can learn from, `zero` those it cannot (said, not dropped),
+// `basis` how many hits the level comes from, and `over` is true past the
+// learned level, where `pct` is not to be shown. Null when no plan is picked.
 // usage: the summary's { last5h, week } totals.
 export function estimate(hits, plan, usage) {
   if (!isPlan(plan) || plan === 'none') return null;
   const used = { '5h': usage?.last5h?.total, week: usage?.week?.total };
   const out = {};
   for (const w of WINDOWS) {
+    const ours = (hits ?? []).filter((h) => h.plan === plan && h.window === w);
     // A hit with no Claude Code tokens before it came from use elsewhere
     // (claude.ai shares the plan's limits): it says nothing about the level.
-    const mine = (hits ?? []).filter((h) => h.plan === plan && h.window === w && Number.isFinite(h.tokens) && h.tokens > 0)
-      .sort((a, b) => a.at - b.at);
+    const mine = ours.filter((h) => Number.isFinite(h.tokens) && h.tokens > 0).sort((a, b) => a.at - b.at);
+    const zero = ours.length - mine.length;
     if (mine.length < HITS_NEEDED || !Number.isFinite(used[w])) {
-      out[w] = { hits: mine.length };
+      out[w] = { hits: mine.length, zero };
       continue;
     }
     const level = median(mine.slice(-HITS_USED).map((h) => h.tokens));
-    out[w] = { hits: mine.length, basis: Math.min(mine.length, HITS_USED), level, used: used[w], pct: Math.round((used[w] / level) * 100), over: used[w] > level };
+    out[w] = { hits: mine.length, zero, basis: Math.min(mine.length, HITS_USED), level, used: used[w], pct: Math.round((used[w] / level) * 100), over: used[w] > level };
   }
   return out;
 }

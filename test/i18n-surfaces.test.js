@@ -37,7 +37,7 @@ const ALLOW = new Set([
   'PASS', 'FAIL', 'general-purpose', 'Explore', 'researcher', 'runner', 'builder', 'Read/Grep/Glob', 'WebFetch/WebSearch', 'Bash',
   'p90', 'runs.csv', 'SKILL.md', 'KB', 'details', 'mattpocock-skills', 'tdd',
   'Pro', 'Max', 'Team', 'Enterprise', // Claude's plans, as Anthropic names them
-  'usage-limits.json', 'k', 'M', // the limit hits file; a token count's thousands and millions, as the board writes them
+  'usage-limits.json', 'usage-limits.json.tmp', 'k', 'M', // the limit hits file and its temp file; a token count's thousands and millions, as the board writes them
 ]);
 // Links, script properties and key fields (READER_SECRET, client_email), a key's "type", a link's ?k=
 // and drives (C:) are typed as they are.

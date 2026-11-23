@@ -54,6 +54,7 @@ let stopLog = () => {};
 let watcher;
 let wslWatcher;
 let wsl = { roots: [], problems: [] };
+let wslChecked = false; // the first WSL check has finished: its roots are known
 let coworkWatcher;
 let cowork = { roots: [], tasks: new Map(), problems: [] };
 let mini; // the mini window, when open
@@ -382,6 +383,7 @@ app.whenReady().then(() => {
     try {
       wsl = await wslRoots();
       wslWatcher.setRoots(wsl.roots.filter((r) => !known.has(rootKey(r))));
+      wslChecked = true;
       wslWatcher.tick();
       if (Date.now() - rosterAt >= ROSTER_MS) refreshRoster();
     } catch (err) {
@@ -1227,26 +1229,28 @@ app.whenReady().then(() => {
 
   // Claude Code use over 5 hours, today and 7 days, from every transcript
   // folder the app watches. A pass reads only lines added since the last.
-  // It also records the limit hits it read (src/core/limits.js) under the
-  // plan picked in Settings: until the window has said which, they wait in
-  // the scanner, which keeps them for 7 days.
+  // It also offers the limit hits it read to src/core/limits.js, which
+  // records them under the plan picked in Settings once a pass can be
+  // trusted for their token totals: one that started after the first WSL
+  // check and listed and read everything. Until then, and while no plan is
+  // picked, they wait in the scanner, which keeps them for 7 days.
   const usage = new UsageScanner({ roots: [] });
   const limitBook = new LimitBook({ file: path.join(app.getPath('userData'), 'usage-limits.json') });
   limitBook.load();
-  let usagePlan; // set by home:plan
-  let usageScanned = false;
+  let usagePlan = 'none'; // until the window says, by home:plan
+  let usageReady = false;
   let usageSummary;
-  const takeLimits = () => {
-    if (usagePlan === undefined) limitBook.load();
-    else limitBook.take(usage.limitHits(), usagePlan, usage);
+  const offerLimits = () => {
+    limitBook.offer(usage.limitHits(), { plan: usagePlan, ready: usageReady, measure: usage });
     usageSummary = { ...usage.summary(), limits: limitBook.view() };
   };
   (async function followUsage() {
     try {
+      const afterWsl = wslChecked;
       usage.setRoots(allRoots());
       await usage.scan();
-      usageScanned = true;
-      takeLimits();
+      usageReady = afterWsl && usage.passClean;
+      offerLimits();
     } catch (err) {
       problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
     } finally {
@@ -1257,11 +1261,12 @@ app.whenReady().then(() => {
   // each pick (the preferences are the window's).
   ipcMain.handle('home:plan', (_event, id) => {
     if (!isPlan(id)) return { ok: false, error: en('said.main.unknownPlan') };
-    const first = usagePlan === undefined;
+    const changed = usagePlan !== id;
     usagePlan = id;
-    if (first && usageScanned) {
+    // Hits waiting for a plan are filed under this one at once.
+    if (changed && usageSummary) {
       try {
-        takeLimits();
+        offerLimits();
       } catch (err) {
         problem(en('said.main.usageFailed', { code: err.code || err.name }), err.message);
       }

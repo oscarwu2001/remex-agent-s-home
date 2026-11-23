@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const { en } = require('./i18n');
-const { hitWindow } = require('./limits');
+const { limitMessage } = require('./limits');
 
 // The context window of a model when no compaction has shown where it
 // really stops. Current models read 1M tokens; Haiku 4.5 and older models
@@ -28,7 +28,7 @@ function contextOf(usage) {
   return (Number(usage.input_tokens) || 0) + (Number(usage.cache_read_input_tokens) || 0) + (Number(usage.cache_creation_input_tokens) || 0);
 }
 
-const LIMIT_TEXT = /usage limit|limit (?:reached|will reset|resets)|rate limit|out of (?:extra )?usage|approaching .*limit/i;
+const LIMIT_TEXT = /usage limit|limit (?:reached|will reset|resets)|hit your|rate limit|out of (?:extra )?usage|approaching .*limit/i;
 
 const WEEK_MS = 7 * 24 * 3_600_000;
 const FIVE_H_MS = 5 * 3_600_000;
@@ -67,7 +67,10 @@ class UsageScanner {
     this.replies = new Map(); // message id -> { ts, usage }
     this.loose = []; // [{ ts, usage }] replies without an id
     this.limitNotice = undefined;
-    this.hits = new Map(); // `${window}@${ts}` -> { ts, window }
+    this.hits = new Map(); // `${window}@${ts}` -> { ts, window, reset }
+    // Whether the last pass listed every folder and read every file it
+    // meant to: a hit's token total is only whole after such a pass.
+    this.passClean = false;
     this.unreadable = 0;
     this.problems = new Map(); // folder -> message
   }
@@ -127,8 +130,8 @@ class UsageScanner {
     if (errorLine && e.isApiErrorMessage === true && m) {
       const text = (Array.isArray(m.content) ? m.content : []).filter((b) => b && b.type === 'text').map((b) => b.text).join(' ').trim();
       if (LIMIT_TEXT.test(text) && (!this.limitNotice || ts > this.limitNotice.ts)) this.limitNotice = { ts, text: text.slice(0, 200) };
-      const window = hitWindow(text);
-      if (window) this.hits.set(`${window}@${ts}`, { ts, window });
+      const limit = limitMessage(text);
+      if (limit?.window) this.hits.set(`${limit.window}@${ts}`, { ts, window: limit.window, reset: limit.reset });
       return;
     }
     if (e.type !== 'assistant' || !m || !m.usage || typeof m.usage !== 'object') return;
@@ -143,8 +146,12 @@ class UsageScanner {
 
   async scan(now = Date.now()) {
     const since = now - KEEP_MS;
+    this.passClean = false; // until this pass ends
+    let clean = true;
     for (const root of this.roots) {
-      for (const file of await this.listFiles(root)) {
+      const files = await this.listFiles(root);
+      if (this.problems.has(root)) clean = false;
+      for (const file of files) {
         let stat;
         try {
           stat = await fs.promises.stat(file);
@@ -158,17 +165,20 @@ class UsageScanner {
         this.files.set(file, state);
         try {
           await this.readNew(file, state);
+          this.problems.delete(file);
         } catch (err) {
           this.problems.set(file, en('said.common.notRead', { code: err.code || err.message }));
+          clean = false;
         }
       }
     }
     for (const [id, r] of this.replies) if (r.ts < since) this.replies.delete(id);
     this.loose = this.loose.filter((r) => r.ts >= since);
     for (const [key, h] of this.hits) if (h.ts < now - WEEK_MS) this.hits.delete(key);
+    this.passClean = clean;
   }
 
-  // The limit hits read in the last 7 days: [{ ts, window }].
+  // The limit hits read in the last 7 days: [{ ts, window, reset }].
   limitHits() {
     return [...this.hits.values()];
   }
