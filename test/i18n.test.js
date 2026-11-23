@@ -28,7 +28,7 @@ test('a word is put together from its entry: placeholders filled, the plural for
   const { translate } = await load();
   assert.equal(translate('en', 'overview.sessions', { n: 1 }), '1 session');
   assert.equal(translate('en', 'overview.sessions', { n: 3 }), '3 sessions');
-  assert.equal(translate('zh-TW', 'overview.sessions', { n: 3 }), '3 個工作階段');
+  assert.equal(translate('zh-TW', 'overview.sessions', { n: 3 }), '3 個工作階段', 'a no-break space keeps the count with its counter word');
   assert.equal(translate('en', 'wait.tip', { project: 'p', what: 'Your turn', for: '5 min' }), 'p: Your turn, for 5 min');
   assert.equal(translate('en', 'clock.weatherIn', {}), 'Weather in {place}', 'a value not given stays marked');
 });
