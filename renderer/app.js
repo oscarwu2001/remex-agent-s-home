@@ -16,7 +16,7 @@ import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDi
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
-import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english } from './i18n.js';
+import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english, dateLocale } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
 
@@ -247,7 +247,7 @@ function showClock() {
   const real = liveReading();
   const temp = real ? ` · ${real.temperature}${real.unit}` : '';
   const off = prefs.live.on && prefs.live.place && !real ? ` · ${tr('clock.unavailable')}` : '';
-  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(weatherName(weather()))}${escapeXml(temp)}${escapeXml(off)}`;
+  $('clock').innerHTML = `${trHtml('clock.timeAndPart', { time: hm, part })} · ${escapeXml(weatherName(weather()))}${escapeXml(temp)}${escapeXml(off)}`;
   $('clock').title = real && prefs.live.place ? tr('clock.weatherIn', { place: placeName(prefs.live.place) }) : '';
 }
 
@@ -297,7 +297,7 @@ function renderLive() {
   }
   const real = liveReading();
   const status = liveError ? `<p class="form-error" role="alert">${escapeXml(tr('live.error', { error: liveError }))}</p>`
-    : real ? `<p class="hint">${escapeXml(tr('live.now', { weather: weatherName(real.weather).toLowerCase(), temp: `${real.temperature}${real.unit}`, time: new Date(real.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }))}</p>`
+    : real ? `<p class="hint">${escapeXml(tr('live.now', { weather: weatherName(real.weather).toLowerCase(), temp: `${real.temperature}${real.unit}`, time: new Date(real.fetchedAt).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }) }))}</p>`
       : `<p class="hint">${escapeXml(tr('live.checking'))}</p>`;
   body.innerHTML = `
     <p class="live-place">${escapeXml(placeName(prefs.live.place))} <button type="button" class="link-btn" id="live-change">${escapeXml(tr('live.change'))}</button></p>

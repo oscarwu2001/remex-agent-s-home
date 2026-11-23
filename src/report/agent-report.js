@@ -349,11 +349,11 @@ function kpi(label, value, delta) {
 
 // The models an agent ran on, most-used first: "sonnet-5-5 ×5, opus-5-5 ×2".
 // Only names; a run with no model on record is left out.
-function modelsText(models) {
+function modelsText(models, sep = ', ') {
   const list = Object.entries(models ?? {}).sort((a, b) => b[1] - a[1]);
   if (!list.length) return '—';
   const short = (m) => m.replace(/^claude-/, '');
-  return list.length === 1 ? short(list[0][0]) : list.map(([m, n]) => `${short(m)} ×${n}`).join(', ');
+  return list.length === 1 ? short(list[0][0]) : list.map(([m, n]) => `${short(m)} ×${n}`).join(sep);
 }
 
 function deltaText(now, before, fmt, upIsGood = true) {
@@ -361,7 +361,7 @@ function deltaText(now, before, fmt, upIsGood = true) {
   const diff = now - before;
   if (Math.abs(diff) < 1e-9) return html('report.delta.same');
   const good = diff > 0 === upIsGood;
-  return markup(good ? 'report.delta.better' : 'report.delta.worse', { arrow: diff > 0 ? '▲' : '▼', diff: fmt(Math.abs(diff)) });
+  return markup(`report.delta.${diff > 0 ? 'up' : 'down'}${good ? 'Better' : 'Worse'}`, { arrow: diff > 0 ? '▲' : '▼', diff: fmt(Math.abs(diff)) });
 }
 
 // Who called whom: You on the left, the agents and skills you (or Claude
@@ -415,9 +415,9 @@ function flowChart(team) {
 function teamSection(team, opt) {
   const chains = team.chains.slice(0, 8).map((c) => `<tr><td>${esc(c.chain)}</td><td class="num">${c.count}</td></tr>`).join('');
   const skills = team.skillRows.map((r) => `<tr><th scope="row">/${esc(r.name)}</th><td class="num">${r.uses}</td><td class="num">${r.typed || '—'}</td>
-    <td class="num">${r.byClaude || '—'}</td><td>${r.byHelpers.length ? esc(r.byHelpers.map(([a, n]) => `${a} ${n}`).join(', ')) : '—'}</td>
+    <td class="num">${r.byClaude || '—'}</td><td>${r.byHelpers.length ? esc(r.byHelpers.map(([a, n]) => `${a} ${n}`).join(words('common.listSep'))) : '—'}</td>
     <td class="num">${pct(r.errorRate)}</td></tr>`).join('');
-  const unusedOf = (kind) => team.unused.filter((r) => r.kind === kind).map((r) => `${kind === 'skill' ? '/' : ''}${esc(r.name)}`).join(', ');
+  const unusedOf = (kind) => team.unused.filter((r) => r.kind === kind).map((r) => `${kind === 'skill' ? '/' : ''}${esc(r.name)}`).join(html('common.listSep'));
   const unusedAgents = unusedOf('agent');
   const unusedSkills = unusedOf('skill');
   return `<section class="card">
@@ -425,7 +425,7 @@ function teamSection(team, opt) {
     <p class="muted">${html('report.team.intro')}</p>
     ${flowChart(team)}
     <h3>${html('report.team.chainsH')}</h3>
-    <p class="muted">${html('report.team.chainsIntro')}${team.sessionsWithSteps ? ` ${html('report.team.chainsUsed', { n: team.sessionsWithSteps })}` : ''}</p>
+    <p class="muted">${html('report.team.chainsIntro')}${team.sessionsWithSteps ? `${html('common.sentenceSep')}${html('report.team.chainsUsed', { n: team.sessionsWithSteps })}` : ''}</p>
     <table><thead><tr><th>${html('report.col.chain')}</th><th class="num">${html('report.col.sessions')}</th></tr></thead>
       <tbody>${chains || `<tr><td colspan="2" class="muted">${html('report.team.noChains')}</td></tr>`}</tbody></table>
     <h3>${html('report.team.skillsH')}</h3>
@@ -453,8 +453,8 @@ const tilde = (p) => {
 
 function machineLine(machine) {
   const dirs = machine.dirs.map((d) => {
-    const where = raw(markup('report.machine.dir', { dir: tilde(d.dir), commit: raw(`<code>${d.commit ? esc(d.commit) : html('report.machine.noGit')}</code>`) }));
-    return d.plugins.length ? markup('report.machine.plugins', { where, list: d.plugins.join(', ') }) : markup('report.machine.noPlugins', { where });
+    const where = raw(markup('report.machine.dir', { dir: tilde(d.dir), commit: raw(d.commit ? `<code>${esc(d.commit)}</code>` : markup('report.machine.noGit')) }));
+    return d.plugins.length ? markup('report.machine.plugins', { where, list: d.plugins.join(words('common.listSep')) }) : markup('report.machine.noPlugins', { where });
   }).join(' · ');
   return `<p class="sub">${markup('report.machine.line', { host: raw(`<strong>${esc(machine.host)}</strong>`), dirs: raw(dirs) })}</p>`;
 }
@@ -497,7 +497,7 @@ function costSections({ cost, opt, stats, days }) {
     : opt.byProject ? words('report.src.project', { owner: s.owner }) : words('report.src.projectAny'));
   const dupes = cost.sources.filter((r) => r.duplicate);
   const srcHead = `<tr><th>${html('report.col.skill')}</th><th>${html('report.col.sources')}</th><th>${html('report.col.duplicate')}</th><th class="num">${html('report.col.size')}</th></tr>`;
-  const srcRow = (r) => `<tr><th scope="row">${esc(r.name)}</th><td>${r.sources.map((x) => esc(srcText(x))).join(', ')}</td>
+  const srcRow = (r) => `<tr><th scope="row">${esc(r.name)}</th><td>${r.sources.map((x) => esc(srcText(x))).join(html('common.listSep'))}</td>
     <td>${r.duplicate ? `<strong>${html('report.src.twice')}</strong>` : '—'}</td><td class="num">${bytes(r.sources[0]?.bytes)}</td></tr>`;
 
   const cmp = cost.compare;
@@ -551,7 +551,7 @@ function costSections({ cost, opt, stats, days }) {
 
   <section class="card">
     <h2>${html('report.src.h')}</h2>
-    <p class="muted">${html('report.src.intro')} ${dupes.length ? html('report.src.dupes', { n: dupes.length }) : html('report.src.noDupes')}</p>
+    <p class="muted">${html('report.src.intro')}${html('common.sentenceSep')}${dupes.length ? html('report.src.dupes', { n: dupes.length }) : html('report.src.noDupes')}</p>
     ${dupes.length ? `<table><thead>${srcHead}</thead><tbody>${dupes.map(srcRow).join('')}</tbody></table>` : ''}
     <details><summary>${html('report.src.every', { n: cost.sources.length })}</summary>
       <table><thead>${srcHead}</thead><tbody>${cost.sources.map(srcRow).join('')}</tbody></table>
@@ -624,13 +624,13 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
   const rows = typeOrder.map((t) => {
     const o = roll.overall[t];
     const lastWeek = roll.weekly.filter((w) => w.type === t).sort((a, b) => a.period.localeCompare(b.period)).at(-1);
-    const verdicts = [Object.entries(o.verdicts).map(([k, n]) => `${n} ${k}`).join(', '),
+    const verdicts = [Object.entries(o.verdicts).map(([k, n]) => `${n} ${k}`).join(words('common.listSep')),
       o.noVerdict ? words('report.verdicts.none', { n: o.noVerdict }) : ''].filter(Boolean).join(' · ') || '—';
     const spark = days.slice(-14).map((d) => dailyByType.get(t)?.get(d) ?? 0);
     return `<tr>
       <th scope="row"><span class="swatch s${typeSlot(t)}"></span>${esc(t)}</th>
-      <td>${esc(placeWords(roomName[roomFor(t, roomOverrides)], lang).name)}</td>
-      <td>${esc(modelsText(o.models))}</td>
+      <td class="room">${esc(placeWords(roomName[roomFor(t, roomOverrides)], lang).name)}</td>
+      <td>${esc(modelsText(o.models, words('common.listSep')))}</td>
       <td class="num">${o.runs}</td>
       ${scoreCell(lastWeek ? lastWeek.score : o.score, lastWeek?.mixed)}
       <td class="num"${o.turnLimit ? ` title="${html('report.turnLimit.title', { n: o.turnLimit })}"` : ''}>${pct(o.successRate)}${o.turnLimit ? ` <span class="muted">${html('report.turnLimit.note', { n: o.turnLimit })}</span>` : ''}</td>
@@ -681,6 +681,9 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
 ${seriesRules}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+/* Chinese: running text at 1.6, and a room's name on one line. */
+:root:lang(zh) body { line-height: 1.6; }
+:root:lang(zh) td.room { white-space: nowrap; }
 main { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; }
 h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
 h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
@@ -741,11 +744,11 @@ dl.score dd { margin: 0; color: var(--ink-2); }
 
   <section class="kpis" aria-label="${html('report.kpis')}">
     ${kpi(html('report.kpi.runs'), num(all.runs), prevRuns.length
-    ? html('report.kpi.vsBefore', { arrow: all.runs >= before.runs ? '▲' : '▼', diff: num(Math.abs(all.runs - before.runs)) }) : html('report.kpi.noEarlier'))}
+    ? html(all.runs >= before.runs ? 'report.kpi.up' : 'report.kpi.down', { arrow: all.runs >= before.runs ? '▲' : '▼', diff: num(Math.abs(all.runs - before.runs)) }) : html('report.kpi.noEarlier'))}
     ${kpi(html('report.kpi.success'), pct(all.successRate), deltaText(all.successRate, before.successRate, (d) => words('report.kpi.pts', { d: Math.round(d * 100) })))}
     ${kpi(html('report.kpi.median'), dur(all.medianMs), deltaText(all.medianMs, before.medianMs, dur, false))}
     ${kpi(html('report.kpi.cost'), compact(all.totalWeighted), `${html('report.kpi.raw', { raw: compact(all.totalTokens) })}${prevRuns.length
-    ? ` · ${html('report.kpi.vsBefore', { arrow: all.totalWeighted >= before.totalWeighted ? '▲' : '▼', diff: compact(Math.abs(all.totalWeighted - before.totalWeighted)) })}` : ''}`)}
+    ? ` · ${html(all.totalWeighted >= before.totalWeighted ? 'report.kpi.up' : 'report.kpi.down', { arrow: all.totalWeighted >= before.totalWeighted ? '▲' : '▼', diff: compact(Math.abs(all.totalWeighted - before.totalWeighted)) })}` : ''}`)}
   </section>
 
   <section class="card">

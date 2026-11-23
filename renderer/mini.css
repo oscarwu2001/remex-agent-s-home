@@ -38,6 +38,7 @@ p { margin: 0; }
 .mascot .hit, .mascot .select-ring, .mascot .tag, .mascot .bubble { display: none; }
 @keyframes bob { to { transform: translateY(-3px); } }
 h1 { margin: 0; font: 400 19px/1.15 var(--font-display); letter-spacing: -0.015em; }
+:root:lang(zh) h1 { letter-spacing: 0; }
 .headline { margin-top: 2px; color: var(--ink-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .mini-actions { display: flex; gap: 2px; }
 /* The window has no system title bar: drag it by its header. */

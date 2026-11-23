@@ -123,6 +123,8 @@ h1 {
 }
 
 .census { margin: var(--s-2) 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-muted); }
+/* Chinese running text at its own line height (tokens.css --lh-text, 1.6). */
+:root:lang(zh) :is(.census, .empty, .field-steps, .field-comment-text, .line-text) { line-height: var(--lh-text); }
 
 .board-section { padding: var(--s-4) var(--s-5); }
 .board-section + .board-section { border-top: 1px solid var(--line); }
@@ -594,6 +596,8 @@ details > summary h2 { margin: 0; }
   font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums;
 }
 .clock .now { font: 400 17px var(--font-display); letter-spacing: var(--track-tight); color: var(--ink); margin-right: var(--s-1); }
+/* Chinese writes the part of the day first: 上午 10:58. */
+.clock .now.later { margin: 0 0 0 var(--s-1); }
 .weather { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
 .weather.rain::before, .weather.rain::after, .weather.snow::before, .weather.snow::after {
   content: ""; position: absolute; inset: -240px 0 0 -240px; background-repeat: repeat;

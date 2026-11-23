@@ -330,7 +330,7 @@ export function fieldColumnsHtml(f, { privacy = true, draft = {}, note = '', err
         <p class="field-col-what">${esc(what)}</p>${guess(r)}</li>`;
     }).join('');
     return `<section class="field-check-step" aria-labelledby="field-check-h">${head}
-    <p class="hint">${t('fv.guessed')}${left ? ` ${esc(left)}` : ''}</p>
+    <p class="hint">${t('fv.guessed')}${left ? `${esc(tr('common.sentenceSep'))}${esc(left)}` : ''}</p>
     <p class="hint">${trHtml('fv.privacyCheckHtml', { toggle: privacySwitch() })}
       <button type="button" class="link-btn" id="field-goto-switch" data-field="privacy-switch">${t('fv.gotoSwitch')}</button></p>
     <ol class="field-cols">${items}</ol>${reply}
@@ -593,7 +593,7 @@ export function flagText(flag, { privacy = true, days = 7, saved = false, more =
     return tr(flag.worse ? 'fv.flag.high' : 'fv.flag.low', { n: flag.count, name, when, mark: signed(flag.mark), scale: scaleText(flag.low, flag.high) });
   }
   if (flag.kind === 'falling') {
-    const scale = flag.low < 0 ? outOf(flag.low, flag.high) : tr('fv.ofHigh', { high: flag.high });
+    const scale = flag.low < 0 ? tr('fv.flagOnScale', { scale: scaleText(flag.low, flag.high) }) : tr('fv.flagOfHigh', { high: flag.high });
     return tr(flag.worse ? 'fv.flag.up' : 'fv.flag.down', { name, recent: mean1(flag.recentMean), scale, when, earlier: mean1(flag.earlierMean) });
   }
   if (flag.kind === 'comments') return tr('fv.flag.comments', { n: flag.count, when });

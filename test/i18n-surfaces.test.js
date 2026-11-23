@@ -31,7 +31,7 @@ const ALLOW = new Set([
   'gid', 'RSA', 'Sheets', 'API', 'dev', 'TAB', // a sheet link's gid, Google's names, the test link's /dev, the reader script's TAB
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
   'MRI', 'X', // as Taiwan's hospitals write them: MRI 掃描儀, X 光
-  'frontmatter', '.claude', 'UserPromptSubmit', // an agent definition's frontmatter, the .claude folder and a settings.json hook event by name
+  'frontmatter', '.claude', 'UserPromptSubmit', 'hooks', // an agent definition's frontmatter, the .claude folder, settings.json's hooks and a hook event by name
   // The performance report: verdicts, agent types and tool names as Claude Code writes them, a percentile,
   // its CSV, a skill's file, the report's --details option and its example of a plugin prefix
   'PASS', 'FAIL', 'general-purpose', 'Explore', 'researcher', 'runner', 'builder', 'Read/Grep/Glob', 'WebFetch/WebSearch', 'Bash',
