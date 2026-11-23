@@ -212,6 +212,18 @@ export function demoSnapshot(nowMs, epochMs) {
       last5h: { input: 41_000, output: 96_000, cacheRead: 2_310_000, cacheWrite: 180_000, total: 2_627_000, fresh: 317_000, replies: 214 },
       today: { input: 88_000, output: 210_000, cacheRead: 5_020_000, cacheWrite: 390_000, total: 5_708_000, fresh: 688_000, replies: 470 },
       week: { input: 402_000, output: 1_050_000, cacheRead: 26_400_000, cacheWrite: 1_900_000, total: 29_752_000, fresh: 3_352_000, replies: 2_380 },
+      // The demo's plan until one is picked in Settings, and its limit hits
+      // (src/core/limits.js keeps them): two 5-hour hits give an estimate
+      // (about 64%), one weekly hit says the weekly one starts after 2.
+      demoPlan: 'max5',
+      limits: {
+        paused: false,
+        hits: [
+          { at: nowMs - 6 * 86_400_000, plan: 'max5', window: '5h', tokens: 3_900_000 },
+          { at: nowMs - 2 * 86_400_000, plan: 'max5', window: '5h', tokens: 4_300_000 },
+          { at: nowMs - 9 * 86_400_000, plan: 'max5', window: 'week', tokens: 41_000_000 },
+        ],
+      },
     },
   };
 }
