@@ -55,6 +55,11 @@ const SHAPES = [
 // moment, so the two forms of one reset meet; a form or zone that cannot be
 // read gives none.
 
+// A bare reset time up to this long before the message is that day's.
+const JUST_PASSED_MS = 15 * 60_000;
+// How far behind the kept time of WSL's last read may be.
+const WSL_STEP_MS = 5 * 60_000;
+
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const RESET = /\breset(?:s| at| will be)?\s+(?:at\s+)?([^·∙|\n]+?)\s*(?:[·∙|.]\s|[·∙|]|$)/i;
 const WHEN = /^(?:([a-z]{3})[a-z]* (\d{1,2})(?:,? (\d{4}))?(?:,| at) )?(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?(?:\s*\(([^)]+)\))?$/i;
@@ -116,9 +121,11 @@ function resetMoment(text, ts, zone = localZone()) {
     // A date that has passed this year is next year's (written in late December).
     return at !== null && at < ts - 12 * 3_600_000 ? momentOf(now.y + 1, mo, Number(day), h, mi, z) : at;
   }
-  // A time alone is the next such time after the message.
+  // A time alone is the next such time after the message, or one just
+  // passed: Claude Code writes the reset it was told, which a message
+  // written a little after it still names.
   const today = momentOf(now.y, now.mo, now.d, h, mi, z);
-  return today !== null && today <= ts ? momentOf(now.y, now.mo, now.d + 1, h, mi, z) : today;
+  return today !== null && today < ts - JUST_PASSED_MS ? momentOf(now.y, now.mo, now.d + 1, h, mi, z) : today;
 }
 
 // { shape, window, resetAt }: window is '5h' or 'week' for a hit, null for
@@ -190,7 +197,10 @@ class LimitBook {
     this.hits = [];
     this.waiting = new Map(); // key -> { at, window, resetAt, plan (in force when seen), why }
     this.expired = []; // [{ at, window, why, gone }]: left the scanner's 7 days waiting, said for 7 days
-    this.wslSeen = false; // WSL transcripts were read in some run: hold hits while none are
+    // When a pass last read WSL's transcripts (kept), and whether one did in
+    // this run: until then, hits whose window reaches back to that moment wait.
+    this.wslSeenAt = null;
+    this.wslThisRun = false;
     this.kept = {}; // the file's other fields, written back as they came
     this.read = false; // nothing is written before the file was read in this run
     this.stamp = null; // the file as last read or written: re-read when it changed
@@ -213,7 +223,7 @@ class LimitBook {
       if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') return this.unread(en('said.limits.notRead', { code: err.code || err.name }));
       // The user removed the file: no hits. With no file yet, anything held
       // is waiting for its first save.
-      if (this.stamp !== null) Object.assign(this, { hits: [], waiting: new Map(), expired: [], wslSeen: false, kept: {} });
+      if (this.stamp !== null) Object.assign(this, { hits: [], waiting: new Map(), expired: [], wslSeenAt: null, kept: {} });
       return this.isRead(null);
     }
     if (this.read && stamp === this.stamp) return true;
@@ -229,10 +239,11 @@ class LimitBook {
       const hits = data.hits.map(readHit);
       const waiting = new Map((data.waiting ?? []).map(readWaiting).map((w) => [keyOf(w.window, w.at), w]));
       const expired = (data.expired ?? []).map(readExpired);
-      if (data.wslSeen !== undefined && typeof data.wslSeen !== 'boolean') throw new TypeError('wslSeen');
+      if (data.wslSeenAt !== undefined && data.wslSeenAt !== null && !finite(data.wslSeenAt)) throw new TypeError('wslSeenAt');
       const kept = { ...data };
-      for (const k of ['hits', 'waiting', 'expired', 'wslSeen', 'format']) delete kept[k];
-      Object.assign(this, { hits, waiting, expired, wslSeen: data.wslSeen === true, kept });
+      // wslSeen: an earlier copy's flag, with no time: the time takes its place.
+      for (const k of ['hits', 'waiting', 'expired', 'wslSeen', 'wslSeenAt', 'format']) delete kept[k];
+      Object.assign(this, { hits, waiting, expired, wslSeenAt: data.wslSeenAt ?? null, kept });
     } catch {
       return this.unread(en('said.limits.notShape'));
     }
@@ -271,18 +282,23 @@ class LimitBook {
   // Each pass's hits ([{ ts, window, resetAt }], the scanner's 7 days) join
   // the waiting list, with the plan in force when first seen. They are
   // recorded from a pass whose token totals are whole (`ready`: after the
-  // first WSL check, every folder listed and every file read), with WSL's
-  // transcripts read when they were read before (`wslReading`), and the
-  // file read; each under the plan it was seen with, or, seen while no plan
+  // first WSL check, every folder listed and every file read) and the file
+  // read; a hit whose window reaches back to when WSL's transcripts were
+  // last read waits until a pass of this run reads them (`wslReading`: this
+  // pass did). Each is filed under the plan it was seen with, or, seen while no plan
   // was picked, the plan picked now. A waiting hit older than 7 days can no
   // longer be measured: it is dropped and said with what it waited for.
   // Returns how many new hits were recorded.
   offer(found, { plan, ready, wslReading, measure, now = Date.now() }) {
     const readable = this.load();
     let changed = false;
-    if (readable && ready && wslReading && !this.wslSeen) {
-      this.wslSeen = true;
-      changed = true;
+    if (ready && wslReading) {
+      this.wslThisRun = true;
+      // Kept to the nearest few minutes, so a pass with nothing new writes nothing.
+      if (readable && (this.wslSeenAt === null || now - this.wslSeenAt >= WSL_STEP_MS)) {
+        this.wslSeenAt = now;
+        changed = true;
+      }
     }
     const counted = this.countedKeys();
     for (const [key, w] of this.waiting) {
@@ -300,10 +316,12 @@ class LimitBook {
       changed = true;
     }
     const planOf = (w) => (w.plan !== 'none' ? w.plan : isPlan(plan) ? plan : 'none');
-    const reason = !readable ? 'file' : !ready ? 'pass' : this.wslSeen && !wslReading ? 'wsl' : null;
+    const reason = !readable ? 'file' : !ready ? 'pass' : null;
+    // WSL use that may fall in the hit's window is not read in this run yet.
+    const wslHeld = (w) => !this.wslThisRun && this.wslSeenAt !== null && w.at - WINDOW_MS[w.window] < this.wslSeenAt;
     let added = 0;
     if (!reason) {
-      const due = [...this.waiting].filter(([, w]) => planOf(w) !== 'none');
+      const due = [...this.waiting].filter(([, w]) => planOf(w) !== 'none' && !wslHeld(w));
       if (due.length) {
         added = this.take(due.map(([, w]) => ({ ts: w.at, window: w.window, resetAt: w.resetAt, plan: planOf(w) })), measure);
         for (const [key] of due) this.waiting.delete(key);
@@ -311,7 +329,7 @@ class LimitBook {
       }
     }
     for (const w of this.waiting.values()) {
-      const why = planOf(w) === 'none' ? 'plan' : reason;
+      const why = planOf(w) === 'none' ? 'plan' : reason ?? 'wsl';
       if (w.why !== why) {
         w.why = why;
         changed = true;
@@ -365,7 +383,7 @@ class LimitBook {
 
   save() {
     const data = {
-      ...this.kept, format: FORMAT, wslSeen: this.wslSeen, hits: this.hits, waiting: [...this.waiting.values()], expired: this.expired,
+      ...this.kept, format: FORMAT, wslSeenAt: this.wslSeenAt, hits: this.hits, waiting: [...this.waiting.values()], expired: this.expired,
     };
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

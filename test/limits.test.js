@@ -411,14 +411,14 @@ test('once WSL\'s transcripts were read, hits wait while they are not, and are s
   const scanner = new UsageScanner({ roots: [s.root] });
   const book = new LimitBook({ file: s.hitsFile });
   assert.equal(await pass(scanner, book, 'pro', 4 * HOUR, { wslReading: true }), 1);
-  assert.equal(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).wslSeen, true);
-  // After a restart WSL is not running: a new hit waits, and says so.
-  fs.appendFileSync(s.file, jsonl(reply(10 * HOUR, 'r2', 5000), limit(12 * HOUR, SESSION('3pm'))));
+  assert.equal(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).wslSeenAt, at(4 * HOUR));
+  // After a restart WSL is not running: a new hit whose 5 hours reach back to that read waits, and says so.
+  fs.appendFileSync(s.file, jsonl(reply(6 * HOUR, 'r2', 5000), limit(8 * HOUR, SESSION('3pm'))));
   const restarted = new LimitBook({ file: s.hitsFile });
   const sc = new UsageScanner({ roots: [s.root] });
-  assert.equal(await pass(sc, restarted, 'pro', 13 * HOUR), 0);
+  assert.equal(await pass(sc, restarted, 'pro', 9 * HOUR), 0);
   assert.deepEqual(restarted.view().waiting, waits({ wsl: 1 }));
-  assert.equal(await pass(sc, restarted, 'pro', 14 * HOUR, { wslReading: true }), 1);
+  assert.equal(await pass(sc, restarted, 'pro', 10 * HOUR, { wslReading: true }), 1);
   assert.deepEqual(restarted.view().waiting, waits());
 
   const t = setup();
@@ -459,4 +459,51 @@ test('a hit that waited over 7 days for a clean pass, WSL or the file is said un
   // Said for 7 days after, then let go.
   await pass(scanner, book, 'pro', 16 * DAY);
   assert.deepEqual(book.problems(), []);
+});
+
+// ---- round 4 ----
+
+test('a bare reset time just passed is that day\'s: a message written a little after 9pm saying "9pm" is the same hit, and a 5-hour one', async () => {
+  const s = setup();
+  // T0 + 12 h is 21:00 UTC, London's time in winter.
+  const NINE = SESSION('9pm');
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 3000), limit(12 * HOUR - 2 * MIN, NINE), reply(12 * HOUR + 10, 'r2', 200),
+    limit(12 * HOUR + 20, NINE)));
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), book, 'pro', 13 * HOUR), 1);
+  assert.equal(JSON.parse(fs.readFileSync(s.hitsFile, 'utf8')).hits[0].resetAt, Date.parse('2026-01-01T21:00:00Z'));
+  const unnamed = limitMessage('You\'ve hit your limit · resets 9pm (Europe/London)', at(12 * HOUR + 20));
+  assert.deepEqual([unnamed.window, unnamed.resetAt], ['5h', Date.parse('2026-01-01T21:00:00Z')]);
+  // More than 15 minutes on, the same words are the next day's.
+  assert.equal(limitMessage(NINE, at(12 * HOUR + 20 * MIN)).resetAt, Date.parse('2026-01-02T21:00:00Z'));
+});
+
+test('once WSL is read in this run, new hits are not held when it stops', async () => {
+  const s = setup();
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  const scanner = new UsageScanner({ roots: [s.root] });
+  const book = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(scanner, book, 'pro', 4 * HOUR, { wslReading: true }), 1);
+  // WSL stops; its use up to now was read in this run.
+  fs.appendFileSync(s.file, jsonl(reply(6 * HOUR, 'r2', 5000), limit(8 * HOUR, SESSION('3pm'))));
+  assert.equal(await pass(scanner, book, 'pro', 9 * HOUR), 1);
+  assert.deepEqual(book.view().waiting, waits());
+});
+
+test('after a restart, only hits whose window reaches back to WSL\'s last read wait: past 5 hours the 5-hour ones go on, past 7 days the weekly ones', async () => {
+  const s = setup();
+  fs.writeFileSync(s.file, jsonl(reply(1 * HOUR, 'r1', 4000), limit(3 * HOUR, SESSION('6am'))));
+  await pass(new UsageScanner({ roots: [s.root] }), new LimitBook({ file: s.hitsFile }), 'pro', 4 * HOUR, { wslReading: true });
+  // 6 hours after WSL's last read, with WSL stopped: a 5-hour hit goes on, a weekly one waits.
+  fs.appendFileSync(s.file, jsonl(reply(9 * HOUR, 'r2', 5000), limit(10 * HOUR, SESSION('11pm')),
+    limit(10 * HOUR + MIN, 'You\'ve hit your weekly limit · resets Jan 6, 10am (Europe/London)')));
+  const restarted = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), restarted, 'pro', 11 * HOUR), 1);
+  assert.deepEqual(restarted.view().hits.map((h) => [h.window, h.at]), [['5h', at(3 * HOUR)], ['5h', at(10 * HOUR)]]);
+  assert.deepEqual(restarted.view().waiting, waits({ wsl: 1 }));
+  // A weekly hit more than 7 days after WSL's last read goes on too.
+  fs.appendFileSync(s.file, jsonl(reply(7 * DAY + 4 * HOUR, 'r3', 5000), limit(7 * DAY + 5 * HOUR, 'You\'ve hit your weekly limit · resets Jan 14, 10am (Europe/London)')));
+  const later = new LimitBook({ file: s.hitsFile });
+  assert.equal(await pass(new UsageScanner({ roots: [s.root] }), later, 'pro', 7 * DAY + 6 * HOUR), 1);
+  assert.deepEqual(later.view().hits.filter((h) => h.window === 'week').map((h) => h.at), [at(7 * DAY + 5 * HOUR)]);
 });
