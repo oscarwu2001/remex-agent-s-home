@@ -23,7 +23,7 @@ function todoBlock(s, key, { privacy, open }) {
   const nowText = now ? `<p class="todo-now">${esc(now.status === 'in_progress' && now.active ? now.active : now.text)}</p>` : '';
   const isOpen = open.has(key);
   const toggle = `<button type="button" class="todo-toggle" data-key="${esc(key)}" aria-expanded="${isOpen}" title="${esc(tr(isOpen ? 'mini.hideList' : 'mini.wholeList'))}"><span class="visually-hidden">${esc(tr('mini.wholeListFor', { project: s.project }))}</span></button>`;
-  const list = isOpen ? `<ol class="todo-all">${t.items.map((i) => `<li class="${i.status}"><span class="pip ${i.status}" aria-hidden="true"></span><span>${esc(i.text || tr('mini.untitled'))}</span></li>`).join('')}</ol>` : '';
+  const list = isOpen ? `<ol class="todo-all">${t.items.map((i) => `<li class="${i.status}"><span class="pip ${i.status}" aria-hidden="true"></span><span>${esc(i.text || tr('todo.untitled'))}</span></li>`).join('')}</ol>` : '';
   return `<div class="todo-row">${pips}${toggle}</div>${isOpen ? '' : nowText}${list}`;
 }
 

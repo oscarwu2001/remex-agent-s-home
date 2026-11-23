@@ -102,3 +102,50 @@ test('main and src/core read the same tables as the renderer', async () => {
   assert.equal(core.translate('zh-TW', 'settings.title'), TABLES['zh-TW']['settings.title']);
   assert.deepEqual(core.LANGUAGES.map((l) => [l.id, l.name]), [['en', 'English'], ['zh-TW', '繁體中文']]);
 });
+
+test('rooms, departments and gardens are named by id; names the user wrote stay as written', async () => {
+  const { setLanguage } = await load();
+  const { placeWords, gardenWords } = await import('../renderer/places.js');
+  const { roomsWith, gardensWith, validateLayout } = require('../src/core/rooms');
+  const layout = validateLayout({
+    departments: [{ kind: 'spine', cell: [3, 1] }, { kind: 'custom', name: 'Hand Surgery', cell: [-1, 1] }, { kind: 'neuro', name: 'Brain team', cell: [1, 3] }],
+    gardens: [{ cell: [3, 2] }, { cell: [-1, 2], name: 'Rose court' }],
+  });
+  const rooms = Object.fromEntries(roomsWith(layout).map((r) => [r.name, r]));
+  const gardens = gardensWith(layout);
+  setLanguage('zh-TW');
+  try {
+    assert.deepEqual(placeWords(rooms["Nurses' Station"]), { name: '護理站', purpose: '你的 Claude Code 主要工作階段' });
+    assert.deepEqual(placeWords(rooms['Spine Surgery']), { name: '脊椎外科', purpose: '導航脊椎固定' });
+    assert.deepEqual(placeWords(rooms['Hand Surgery']), { name: 'Hand Surgery', purpose: '你的科別' });
+    assert.deepEqual(placeWords(rooms['Brain team']), { name: 'Brain team', purpose: '顱內導航' });
+    assert.deepEqual(gardens.map(gardenWords), ['花園', '樹林', '花園 1', 'Rose court']);
+  } finally {
+    setLanguage('en');
+  }
+  assert.deepEqual(placeWords(rooms['Spine Surgery']), { name: 'Spine Surgery', purpose: 'Navigated spinal fixation' });
+  assert.deepEqual(gardens.map(gardenWords), ['Garden', 'Grove', 'Garden 1', 'Rose court']);
+});
+
+test('a tool call is said in the window\'s language; one from an older copy, with no key, as it came', async () => {
+  const { setLanguage } = await load();
+  const { statusText } = await import('../renderer/status.js');
+  const { describeTool } = require('../src/core/activity');
+  setLanguage('zh-TW');
+  try {
+    assert.equal(statusText({ status: 'working', activity: describeTool('Read', { file_path: 'a/b.txt' }) }), '正在讀取檔案');
+    assert.equal(statusText({ status: 'delegating', activity: describeTool('Agent', { subagent_type: 'reviewer' }) }), '交給 reviewer');
+    assert.equal(statusText({ status: 'working', activity: { label: 'Reading a file' } }), 'Reading a file');
+  } finally {
+    setLanguage('en');
+  }
+  assert.equal(statusText({ status: 'delegating', activity: describeTool('Agent', { subagent_type: 'reviewer' }) }), 'With reviewer');
+  assert.equal(describeTool('mcp__', {}).label, 'Using a connector');
+});
+
+test('a sign is sized for its words: Chinese characters take a whole em', async () => {
+  const { textWidth } = await load();
+  assert.equal(textWidth('Radiology', 11.5, 20), 9 * 11.5);
+  assert.equal(textWidth('放射科', 11.5, 20), 60);
+  assert.equal(textWidth('CMF 科', 10, 20), 4 * 10 + 20);
+});

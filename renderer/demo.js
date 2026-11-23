@@ -2,6 +2,8 @@
 // the live snapshots, so the hospital can be seen without a running session.
 // Everything here is made up.
 
+import { translate } from './i18n.js';
+
 const LOOP_S = 60;
 
 // [start s, end s, session, type, room, description, tools...]
@@ -16,13 +18,16 @@ const SCRIPT = [
   [36, 52, 'b', 'reviewer', 'operating-room', 'Second opinion on registration', 'Read', 'Read', 'Grep'],
 ];
 
+// What each tool is doing, as src/core/activity.js words it: the label's key
+// (the window says it in its own language), the kind and a made-up detail.
 const DETAILS = {
-  Read: ['Reading a file', 'read', 'resample.py'],
-  Grep: ['Searching the code', 'search', 'except Exception'],
-  Glob: ['Searching the code', 'search', '**/*.py'],
-  Bash: ['Running a command', 'run', 'uv run pytest -m "not slow"'],
-  Edit: ['Editing a file', 'write', 'settings.json'],
+  Read: ['tool.read', 'read', 'resample.py'],
+  Grep: ['tool.search', 'search', 'except Exception'],
+  Glob: ['tool.search', 'search', '**/*.py'],
+  Bash: ['tool.run', 'run', 'uv run pytest -m "not slow"'],
+  Edit: ['tool.edit', 'write', 'settings.json'],
 };
+const said = (key, params) => ({ label: translate('en', key, params), labelKey: key, ...(params ? { labelParams: params } : {}) });
 
 const HERE = 'STUDIO-PC';
 const SESSIONS = {
@@ -49,7 +54,7 @@ function coworkSession(nowMs, epochMs, t) {
   return {
     id: 'demo-c', project: 'weekly-report', projectId: 'weekly-report', source: 'cowork', computer: HERE, title: 'Summarise this week',
     room: 'nurses-station', startedAt: epochMs - 3 * 60_000, lastActivityAt: nowMs, errors: 0,
-    status: busy ? 'working' : 'your-turn', activity: busy ? { label: 'Reading a file', kind: 'read', detail: 'notes.md' } : null,
+    status: busy ? 'working' : 'your-turn', activity: busy ? { ...said('tool.read'), kind: 'read', detail: 'notes.md' } : null,
     tokens: demoTokens(40_000 + t * 300, 2), tokensWithHelpers: 0,
     context: { tokens: 52_000, model: 'claude-sonnet-5-5', window: 200_000, source: 'model', pct: 0.26 },
     history: [], agents: [], map: { steps: [], more: 0 },
@@ -79,8 +84,8 @@ const SKILLS = [
 ];
 
 function activity(tool) {
-  const [label, kind, detail] = DETAILS[tool];
-  return { label, kind, detail };
+  const [key, kind, detail] = DETAILS[tool];
+  return { ...said(key), kind, detail };
 }
 
 export function demoSnapshot(nowMs, epochMs) {
@@ -140,7 +145,7 @@ export function demoSnapshot(nowMs, epochMs) {
     let act = null;
     if (live.length) {
       status = 'delegating';
-      act = { label: `Consulting ${live[0].type}`, kind: 'delegate', detail: live[0].description };
+      act = { ...said('tool.delegate', { type: live[0].type }), kind: 'delegate', detail: live[0].description };
     } else if (t % 20 < 6) {
       status = 'your-turn';
     } else {
@@ -165,7 +170,7 @@ export function demoSnapshot(nowMs, epochMs) {
       errors: 0,
       status,
       activity: act,
-      history: [{ ts: nowMs - 4000, label: 'Editing a file', kind: 'write', detail: 'pipeline.py' }],
+      history: [{ ts: nowMs - 4000, ...said('tool.edit'), kind: 'write', detail: 'pipeline.py' }],
       agents,
       map: { steps, more: 0 },
     };

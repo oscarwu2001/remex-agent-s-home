@@ -2,6 +2,7 @@
 // Valley manner, dressed for the room they work in.
 
 import { P, viewDepth } from './iso.js';
+import { tr, textWidth } from './i18n.js';
 
 const SKIN = ['#fbf3ea', '#eadbca'];
 
@@ -204,14 +205,14 @@ export class Person {
     const shown = name.length > TAG_CHARS ? `${name.slice(0, TAG_CHARS - 1)}…` : name;
     if (this.tagText.textContent !== shown) {
       this.tagText.textContent = shown;
-      const w = Math.max(28, shown.length * 6.3 + 12);
+      const w = Math.max(28, textWidth(shown, 6.3, 10.5) + 12);
       this.tagRect.setAttribute('x', String(-w / 2));
       this.tagRect.setAttribute('y', '-7');
       this.tagRect.setAttribute('width', String(w));
       this.tagRect.setAttribute('height', '14');
       this.tagRect.setAttribute('rx', '7');
     }
-    this.el.setAttribute('aria-label', `${name}: ${statusText}`);
+    this.el.setAttribute('aria-label', tr('helper.status', { type: name, status: statusText }));
   }
 
   setStatus(status) {

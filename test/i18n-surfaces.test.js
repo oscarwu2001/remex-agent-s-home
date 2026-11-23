@@ -18,6 +18,8 @@ const ALLOW = new Set([
   'Claude', 'Code', 'LINE', "Agent's", 'Home', 'Cowork', 'WSL', 'GPU', 'CPU', 'GB', 'token', 'App', 'Windows',
   'Google', 'Cloud', 'OneDrive', 'Dropbox', 'GitHub', 'Open-Meteo', 'open-meteo.com', 'claude.ai', 'Esc', 'ID', 'CMF',
   'git', 'Git', 'clone', 'worktree', 'Worktree', 'hook', 'settings.json', 'scan.log', '.claude/agents', 'agents-status',
+  'Token', 'rooms.json', 'claude', // the command
+  'helper-end-corrected', // a system log event's name
   'spine-planner', // an example agent name: those are lower-case identifiers in every language
 ]);
 const latin = (text) => (String(text).replace(/°[CF]/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));

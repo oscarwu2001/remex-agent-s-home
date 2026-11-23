@@ -9,14 +9,14 @@ import { setView } from './iso.js';
 import { Person, bubbleMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { overview as runningOverview, headline, headlineBadges, badge, runningBadge, helperBadge, todoPips, SOURCE_NAMES } from './overview.js';
-import { statusText, glyphKey, elapsed } from './status.js';
+import { statusText, activityText, glyphKey, elapsed } from './status.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 import { installTips } from './tip.js';
 import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDismissed, dismissWait, clashHtml } from './waiting.js';
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
-import { tr, trHtml, raw, hasWords, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing } from './i18n.js';
+import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
 
@@ -470,7 +470,7 @@ function drawLabels() {
       const [cx, cy] = pts.reduce(([a, b], [x, y]) => [a + x / 4, b + y / 4], [0, 0]);
       const chosen = draft && draft.cell[0] === cell[0] && draft.cell[1] === cell[1];
       return `<g class="build-cell${chosen ? ' chosen' : ''}" data-cell="${cell.join(',')}" role="button" tabindex="0"
-          aria-label="Build here: ${escapeXml(spotName(cell))}">
+          aria-label="${escapeXml(tr('spot.build', { spot: spotName(cell) }))}">
         <title>${escapeXml(spotName(cell))}</title>
         <polygon points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')}"/>
         <path d="M${cx - 12},${cy} H${cx + 12} M${cx},${cy - 12} V${cy + 12}"/></g>`;
@@ -486,13 +486,15 @@ function drawLabels() {
     .filter((r) => LAYOUT[r.id])
     .map((r) => {
       const [x, y] = labelPoint(r.id);
-      // Sentence-case signs: about 11px a letter for the name, 9px for the purpose.
-      const w = Math.max(r.name.length * 11.5, r.purpose.length * 9.2) + 40;
+      const { name, purpose } = placeWords(r);
+      // Sentence-case signs: about 11px a letter for the name, 9px for the
+      // purpose, and a whole em for each Chinese character.
+      const w = Math.max(textWidth(name, 11.5, 20), textWidth(purpose, 9.2, 15.5)) + 40;
       return `<g class="room-label" data-room="${r.id}" role="button" tabindex="0"
-          aria-label="Visit the ${escapeXml(r.name)}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
+          aria-label="${escapeXml(tr('scene.visit', { place: name }))}" data-x="${x.toFixed(1)}" data-y="${(y + 28).toFixed(1)}">
         <rect x="${-w / 2}" y="-24" width="${w}" height="56" rx="28"/>
-        <text class="name" text-anchor="middle" y="1">${escapeXml(r.name)}</text>
-        <text class="purpose" text-anchor="middle" y="22">${escapeXml(r.purpose)}</text></g>`;
+        <text class="name" text-anchor="middle" y="1">${escapeXml(name)}</text>
+        <text class="purpose" text-anchor="middle" y="22">${escapeXml(purpose)}</text></g>`;
     })
     .join('') + decorMarkers();
 }
@@ -510,12 +512,12 @@ function gardenTargets() {
       for (let j = 0; j < n; j++) {
         for (let i = 0; i < n; i++) {
           tiles += `<polygon class="plot-tile" data-garden="${g.id}" data-tile="${i},${j}" role="button" tabindex="0"
-            aria-label="Tile ${i + 1}, ${j + 1}" points="${pointsOf(gardenTile(g.id, i, j))}"><title>Tile ${i + 1}, ${j + 1}</title></polygon>`;
+            aria-label="${tr('scene.tile', { i: i + 1, j: j + 1 })}" points="${pointsOf(gardenTile(g.id, i, j))}"><title>${tr('scene.tile', { i: i + 1, j: j + 1 })}</title></polygon>`;
         }
       }
       return tiles;
     }
-    return `<polygon class="garden-hit" data-garden="${g.id}" points="${pointsOf(gardenOutline(g.id))}"><title>Visit the ${escapeXml(gardenName(g.id))}</title></polygon>`;
+    return `<polygon class="garden-hit" data-garden="${g.id}" points="${pointsOf(gardenOutline(g.id))}"><title>${escapeXml(tr('scene.visit', { place: gardenName(g.id) }))}</title></polygon>`;
   }).join('');
 }
 
@@ -530,7 +532,7 @@ function decorMarkers() {
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
       out += `<polygon class="plot-tile${lifted.has(`${i},${j}`) ? ' lifted' : ''}" data-room-tile="${i},${j}" role="button" tabindex="0"
-        aria-label="Tile ${i + 1}, ${j + 1}" points="${pointsOf(roomTile(focusedRoom, i, j))}"><title>Tile ${i + 1}, ${j + 1}</title></polygon>`;
+        aria-label="${tr('scene.tile', { i: i + 1, j: j + 1 })}" points="${pointsOf(roomTile(focusedRoom, i, j))}"><title>${tr('scene.tile', { i: i + 1, j: j + 1 })}</title></polygon>`;
     }
   }
   return out;
@@ -714,13 +716,13 @@ function frameCamera() {
 function updateCameraUi() {
   const zoomed = focusedRoom || focusedGarden || cam.w < overview.w * 0.95;
   $('cam-overview').disabled = !zoomed;
-  $('cam-where').textContent = focusedRoom ? `In the ${ROOM_NAMES[focusedRoom]?.name ?? ''}`
-    : focusedGarden ? `In the ${gardenName(focusedGarden)}` : zoomed ? 'Zoomed in' : '';
+  $('cam-where').textContent = focusedRoom ? tr('cam.in', { place: roomName(focusedRoom) })
+    : focusedGarden ? tr('cam.in', { place: gardenName(focusedGarden) }) : zoomed ? tr('cam.zoomed') : '';
   $('cam-where').hidden = !zoomed;
   const place = focusedRoom || focusedGarden;
   $('cam-decorate').hidden = !place || !bridge.saveDecor;
   $('cam-decorate').setAttribute('aria-expanded', String(decorating));
-  $('cam-decorate').textContent = focusedGarden ? 'Plant' : 'Decorate';
+  $('cam-decorate').textContent = tr(focusedGarden ? 'decor.plant' : 'decor.decorate');
 }
 
 // Wheel zooms about the pointer; drag pans. A drag never counts as a click.
@@ -1153,7 +1155,7 @@ function glyph(x) {
 }
 
 function roomName(id) {
-  return ROOM_NAMES[id]?.name ?? id;
+  return ROOM_NAMES[id] ? placeWords(ROOM_NAMES[id]).name : id;
 }
 
 // ---- board -----------------------------------------------------------------
@@ -1185,37 +1187,35 @@ function rowHtml(key, x, name, sub) {
   const what = statusText(x);
   const tokens = rowTokens(x, sub);
   const ctx = !sub && x.context?.pct ? Math.round(x.context.pct * 100) : undefined;
-  const tokenText = [tokens ? `${compact(tokens)} tokens` : '', ctx !== undefined ? `context ${ctx}%` : ''].filter(Boolean).join(' · ');
+  const tokenText = [tokens ? tr('row.tokens', { n: compact(tokens) }) : '', ctx !== undefined ? tr('row.context', { pct: ctx }) : ''].filter(Boolean).join(' · ');
   const nearlyFull = ctx !== undefined && ctx >= CONTEXT_WARN * 100;
   const detail = !prefs.private && x.activity?.detail ? ` · ${x.activity.detail}` : '';
   const warn = x.status === 'blocked' || glyphKey(x) === 'failed';
   const turn = x.status === 'your-turn';
-  const where = sub ? ` in the ${roomName(x.room)}` : '';
+  const who = sub ? tr('row.inRoom', { name, room: roomName(x.room) }) : name;
   // Where a session runs, when it is not plain Claude Code on this computer.
   const tag = !sub && x.source && x.source !== 'code' ? `<span class="tag tag-${escapeXml(x.source)}">${escapeXml(SOURCE_NAMES[x.source] ?? x.source)}</span>` : '';
   const todo = !sub && x.todos?.total ? `<span class="todo-count">${todoPips(x.todos)}</span>` : '';
   return `<button class="row${sub ? ' sub' : ''}" data-key="${escapeXml(key)}" aria-pressed="${key === selected}"
-      title="${escapeXml(`${name}${where}: ${what}${detail}${tokens ? ` · ${tokens.toLocaleString()} tokens${sub ? '' : ' with helpers'}` : ''}`)}">
+      title="${escapeXml(`${tr('helper.status', { type: who, status: what + detail })}${tokens ? ` · ${tr(sub ? 'row.tokens' : 'row.tokensWithHelpers', { n: tokens.toLocaleString() })}` : ''}`)}">
       ${glyph(x)}
       <span class="who"><span class="name"><span class="n">${escapeXml(name)}</span></span>
         <span class="what${warn ? ' warn' : turn ? ' turn' : ''}">${tag}${escapeXml(what + detail)}</span>${todo}</span>
       <span class="when"><span class="time" data-since="${x.startedAt}">${elapsed(x.startedAt, Date.now())}</span>
         ${tokenText ? `<span class="tokens">${tokenText}</span>` : ''}</span>
-      ${nearlyFull ? `<span class="ctx-warn">⚠ Context ${ctx}% full: save your work</span>` : ''}
+      ${nearlyFull ? `<span class="ctx-warn">${escapeXml(tr('row.ctxFull', { pct: ctx }))}</span>` : ''}
     </button>`;
 }
 
 // "Running now": this computer's sessions as cards (each with its helpers),
 // grouped by where they run, then the other computers' projects as rows.
 function renderSessions(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
+  const o = runningOverview(s.sessions, s.here ?? tr('common.thisComputer'), s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
   const others = o.computers.filter((c) => !c.local);
   if (!s.sessions.length && !others.length && !(s.jobs ?? []).length && !(s.work ?? []).length) {
     const watching = s.watcher.roots.find((r) => r.state === 'ok');
-    return `<p class="empty">Nobody is on shift. Agents appear here within a second of a Claude Code
-      session writing to its transcript${watching ? '' : ' (no transcript folder found yet)'}.
-      Start <code>claude</code> in a terminal, or look around with the demo.</p>
-      <button class="button" id="start-demo" type="button">Show demo patients</button>`;
+    return `<p class="empty">${trHtml('board.emptyHtml', { noFolder: watching ? '' : tr('board.noFolder') })}</p>
+      <button class="button" id="start-demo" type="button">${escapeXml(tr('board.showDemo'))}</button>`;
   }
   const card = (sess) => {
     const helpers = sess.agents.map((a) => rowHtml(`a:${a.id}`, a, a.type, true)).join('');
@@ -1226,29 +1226,29 @@ function renderSessions(s) {
     const cards = c.projects.flatMap((p) => p.sessions).map(card).join('') + jobsHtml(c.jobs) + workHtml(c.work);
     const load = machineHtml(c.machine);
     if (!cards && !load) return '';
-    return many || load ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">This computer</span></p>${load}${cards}` : cards;
+    return many || load ? `<p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${escapeXml(tr('common.thisComputer'))}</span></p>${load}${cards}` : cards;
   }).join('');
   const hm = (t) => new Date(t).toTimeString().slice(0, 5);
-  const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? tr('time.minAgo', { n: m }) : m < 2880 ? tr('time.hAgo', { n: Math.round(m / 60) }) : tr('time.dAgo', { n: Math.round(m / 1440) }); };
   const remote = others.map((c) => {
-    const state = !c.online ? `Offline since ${hm(c.at)}` : c.every ? `Posted ${hm(c.at)}` : 'Online';
+    const state = !c.online ? tr('fleet.offlineSince', { time: hm(c.at) }) : c.every ? tr('fleet.posted', { time: hm(c.at) }) : tr('fleet.online');
     // Projects with sessions in the last post, then those with only git news.
     const names = [...new Set([...c.projects.map((p) => p.project), ...(c.repos ?? []).map((r) => r.project)])];
     const projects = names.map((name) => {
       const p = c.projects.find((x) => x.project === name);
       const r = (c.repos ?? []).find((x) => x.project === name);
-      const live = p?.running ? runningBadge(p.running) : p ? badge('session', p.sessions.length, `${p.sessions.length} session${p.sessions.length === 1 ? '' : 's'} in the hour before the post`, { quiet: true }) : '';
-      const git = r ? [r.branch, r.lastCommit ? `committed ${ago(r.lastCommit)}` : '', r.changed ? `${r.changed} uncommitted` : ''].filter(Boolean).join(' · ') : '';
+      const live = p?.running ? runningBadge(p.running) : p ? badge('session', p.sessions.length, tr('fleet.sessionsHour', { n: p.sessions.length }), { quiet: true }) : '';
+      const git = r ? [r.branch, r.lastCommit ? tr('proj.committed', { ago: ago(r.lastCommit) }) : '', r.changed ? tr('proj.uncommitted', { n: r.changed }) : ''].filter(Boolean).join(' · ') : '';
       return `<li class="proj"><span class="proj-name">${escapeXml(name)}${git ? `<span class="proj-git" title="${escapeXml(git)}">${escapeXml(git)}</span>` : ''}</span>
-        <span class="badges">${live || '<span class="idle" title="No session in the last hour"><span aria-hidden="true">–</span><span class="visually-hidden">No session in the last hour</span></span>'}${p?.helpers ? helperBadge(p.helpers) : ''}</span></li>`;
+        <span class="badges">${live || `<span class="idle" title="${escapeXml(tr('fleet.noSession'))}"><span aria-hidden="true">–</span><span class="visually-hidden">${escapeXml(tr('fleet.noSession'))}</span></span>`}${p?.helpers ? helperBadge(p.helpers) : ''}</span></li>`;
     }).join('');
     return `<div class="computer${c.online ? '' : ' offline'}">
-        <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${state}</span></p>
+        <p class="computer-head"><span class="computer-name">${escapeXml(c.computer)}</span><span class="computer-state">${escapeXml(state)}</span></p>
         ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}
-        ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="hint">No sessions.</p>'}</div>`;
+        ${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : `<p class="hint">${escapeXml(tr('fleet.noSessions'))}</p>`}</div>`;
   }).join('');
-  const share = s.fleet?.on || s.demo ? '' : '<p class="hint">Your other computers can show here too: <button type="button" class="link-btn inline" data-settings="fleet-h">Settings → Connections → Other computers</button>.</p>';
-  return `${local || '<p class="hint">Nothing on this computer right now.</p>'}${remote}${share}`;
+  const share = s.fleet?.on || s.demo ? '' : `<p class="hint">${trHtml('fleet.shareHtml', { link: raw(`<button type="button" class="link-btn inline" data-settings="fleet-h">${escapeXml(tr('fleet.shareLink'))}</button>`) })}</p>`;
+  return `${local || `<p class="hint">${escapeXml(tr('board.nothingHere'))}</p>`}${remote}${share}`;
 }
 
 function findSelected(s) {
@@ -1269,47 +1269,46 @@ function renderChart(s) {
   if (!found) return null;
   const { x, name, room, parent } = found;
   const rows = [
-    ['Name', name],
-    ['Room', roomName(room)],
-    ['Status', statusText(x)],
-    parent ? ['Called by', parent] : null,
-    !parent && x.source ? ['Runs in', `${SOURCE_NAMES[x.source] ?? x.source}${x.computer ? ` on ${x.computer}` : ''}`] : null,
-    !parent && x.title && !prefs.private ? ['Task', x.title] : null,
-    !prefs.private && x.description ? ['Task', x.description] : null,
-    x.background ? ['Mode', 'Background'] : null,
-    x.startedAt ? ['On shift since', clock(x.startedAt)] : null,
-    x.errors ? ['Tool errors', String(x.errors)] : null,
-    x.tokens?.total ? ['Tokens', `${x.tokens.total.toLocaleString()} (in ${x.tokens.input.toLocaleString()} · out ${x.tokens.output.toLocaleString()} · cache read ${x.tokens.cacheRead.toLocaleString()} · cache write ${x.tokens.cacheWrite.toLocaleString()})`] : null,
-    !parent && x.tokensWithHelpers > (x.tokens?.total ?? 0) ? ['With helpers', `${x.tokensWithHelpers.toLocaleString()} tokens`] : null,
+    [tr('chart.name'), name],
+    [tr('chart.room'), roomName(room)],
+    [tr('chart.status'), statusText(x)],
+    parent ? [tr('chart.calledBy'), parent] : null,
+    !parent && x.source ? [tr('chart.runsIn'), x.computer ? tr('common.on', { what: SOURCE_NAMES[x.source] ?? x.source, computer: x.computer }) : SOURCE_NAMES[x.source] ?? x.source] : null,
+    !parent && x.title && !prefs.private ? [tr('chart.task'), x.title] : null,
+    !prefs.private && x.description ? [tr('chart.task'), x.description] : null,
+    x.background ? [tr('chart.mode'), tr('chart.background')] : null,
+    x.startedAt ? [tr('chart.since'), clock(x.startedAt)] : null,
+    x.errors ? [tr('chart.errors'), String(x.errors)] : null,
+    x.tokens?.total ? [tr('chart.tokens'), tr('chart.tokenParts', { total: x.tokens.total.toLocaleString(), input: x.tokens.input.toLocaleString(), output: x.tokens.output.toLocaleString(), read: x.tokens.cacheRead.toLocaleString(), write: x.tokens.cacheWrite.toLocaleString() })] : null,
+    !parent && x.tokensWithHelpers > (x.tokens?.total ?? 0) ? [tr('chart.withHelpers'), tr('row.tokens', { n: x.tokensWithHelpers.toLocaleString() })] : null,
   ].filter(Boolean);
   const history = [...x.history].reverse()
     .map((h) => `<li><span class="t">${clock(h.ts)}</span>
-        <span>${escapeXml(h.label)}${!prefs.private && h.detail ? `<span class="d"> · ${escapeXml(h.detail)}</span>` : ''}</span></li>`)
+        <span>${escapeXml(activityText(h))}${!prefs.private && h.detail ? `<span class="d"> · ${escapeXml(h.detail)}</span>` : ''}</span></li>`)
     .join('');
   // Idle staff can be sent to another room: from here, or by dragging.
   const moveTo = found.resident && !people.get(`r:${name}`)?.busyWith
-    ? `<label class="field move-to" for="move-to">Work in another room
-        <select id="move-to" data-agent="${escapeXml(name)}">${config.rooms.filter((r) => LAYOUT[r.id]).map((r) => `<option value="${r.id}" ${r.id === room ? 'selected' : ''}>${escapeXml(r.name)}</option>`).join('')}</select></label>`
+    ? `<label class="field move-to" for="move-to">${escapeXml(tr('chart.moveTo'))}
+        <select id="move-to" data-agent="${escapeXml(name)}">${config.rooms.filter((r) => LAYOUT[r.id]).map((r) => `<option value="${r.id}" ${r.id === room ? 'selected' : ''}>${escapeXml(placeWords(r).name)}</option>`).join('')}</select></label>`
     : '';
-  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>${moveTo}${!parent ? todoListHtml(x.todos) : ''}
-    <ol aria-label="Recent activity">${history || `<li><span class="t">—</span><span>${found.resident ? 'Standing by in their room' : 'No tool calls yet'}</span></li>`}</ol>`;
+  return `<dl>${rows.map(([k, v]) => `<dt>${escapeXml(k)}</dt><dd>${escapeXml(v)}</dd>`).join('')}</dl>${moveTo}${!parent ? todoListHtml(x.todos) : ''}
+    <ol aria-label="${escapeXml(tr('chart.recent'))}">${history || `<li><span class="t">—</span><span>${escapeXml(tr(found.resident ? 'chart.standingBy' : 'chart.noTools'))}</span></li>`}</ol>`;
 }
 
 // A session's to-do list. The wording is the user's own, so with privacy
 // mode on only the counts show.
-const TODO_WORDS = { completed: 'Done', in_progress: 'Doing now', pending: 'To do' };
 function todoListHtml(todos) {
   if (!todos?.total) return '';
-  const head = `<p class="todo-head">To-do list · ${todos.done} of ${todos.total} done${todos.doing ? ` · ${todos.doing} in progress` : ''}</p>`;
-  if (prefs.private) return `${head}<p class="hint">Turn off “Hide file names, commands, survey answers and LINE chats” to see what each item says.</p>`;
+  const head = `<p class="todo-head">${escapeXml(tr(todos.doing ? 'todo.headDoing' : 'todo.head', { done: todos.done, total: todos.total, doing: todos.doing }))}</p>`;
+  if (prefs.private) return `${head}<p class="hint">${escapeXml(tr('todo.private'))}</p>`;
   const items = todos.items.map((t) => `<li class="todo ${t.status}"><span class="todo-mark" aria-hidden="true"></span>
-      <span>${escapeXml(t.status === 'in_progress' && t.active ? t.active : t.text || 'Untitled')}</span><span class="visually-hidden"> (${TODO_WORDS[t.status]})</span></li>`).join('');
+      <span>${escapeXml(t.status === 'in_progress' && t.active ? t.active : t.text || tr('todo.untitled'))}</span><span class="visually-hidden"> (${escapeXml(tr(`todo.${t.status}`))})</span></li>`).join('');
   return `${head}<ol class="todos">${items}</ol>`;
 }
 
 // The headline badges of "Running now", and what makes them change.
 function renderRunning(s) {
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
+  const o = runningOverview(s.sessions, s.here ?? tr('common.thisComputer'), s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
   const key = JSON.stringify([headline(o), o.computers.map((c) => [c.computer, c.online, c.projects.map((p) => [p.project, p.running, p.sessions.length, p.helpers]),
     (c.jobs ?? []).map((j) => [j.name, j.state, j.step, j.epoch, j.updatedAt]), c.machine, (c.work ?? []).map((w) => [w.name, Math.floor((Date.now() - w.startedAt) / 60_000)])])]);
   return { head: headline(o), badges: headlineBadges(o), key };
@@ -1320,35 +1319,39 @@ function renderCensus(s) {
   const helpers = s.sessions.reduce((k, x) => k + x.agents.filter((a) => a.status !== 'done').length, 0);
   const waiting = s.sessions.filter((x) => x.status === 'your-turn').length;
   const blocked = s.sessions.reduce((k, x) => k + (x.status === 'blocked') + x.agents.filter((a) => a.status === 'blocked').length, 0);
-  const parts = [`${n} session${n === 1 ? '' : 's'}`, `${helpers} helper${helpers === 1 ? '' : 's'} at work`];
-  if (waiting) parts.push(`${waiting} waiting for you`);
+  const parts = [tr('overview.sessions', { n }), tr('census.helpers', { n: helpers })];
+  if (waiting) parts.push(tr('census.waiting', { n: waiting }));
   const full = s.sessions.filter((x) => x.context?.pct >= CONTEXT_WARN).length;
-  if (full) parts.push(`${full} nearly out of context`);
-  if (blocked) parts.push(`${blocked} may need approval`);
+  if (full) parts.push(tr('census.full', { n: full }));
+  if (blocked) parts.push(tr('census.blocked', { n: blocked }));
   const tokens = s.sessions.reduce((k, x) => k + (x.tokensWithHelpers ?? x.tokens?.total ?? 0), 0);
-  if (tokens) parts.push(`${compact(tokens)} tokens`);
-  return (s.demo ? 'Demo · ' : '') + parts.join(' · ');
+  if (tokens) parts.push(tr('row.tokens', { n: compact(tokens) }));
+  return s.demo ? tr('census.demo', { rest: parts.join(' · ') }) : parts.join(' · ');
 }
 
 // Folder paths carry the user name, so they only show with privacy off.
 function renderSource(s) {
-  if (s.demo) return 'Showing demo patients. Turn off “Demo patients” to see your own sessions.';
+  if (s.demo) return tr('source.demo');
   const roots = s.watcher.roots;
-  if (!roots.length) return 'Connecting…';
-  const where = (list) => (prefs.private ? 'your Claude Code transcripts folder' : list.map((r) => r.path).join(', '));
+  if (!roots.length) return tr('source.connecting');
+  const where = (list) => (prefs.private ? tr('source.private') : list.map((r) => r.path).join(tr('common.listSep')));
   const ok = roots.filter((r) => r.state === 'ok');
   const n = s.watcher.filesTailed;
-  if (ok.length) return `Watching ${where(ok)} · ${n} transcript${n === 1 ? '' : 's'} open`;
-  if (roots.every((r) => r.state === 'missing')) {
-    return `No transcripts yet in ${where(roots)}. They appear after your first Claude Code session.`;
-  }
-  return `Cannot read ${where(roots)}. See “Needs attention”.`;
+  if (ok.length) return tr('source.watching', { where: where(ok), n });
+  if (roots.every((r) => r.state === 'missing')) return tr('source.none', { where: where(roots) });
+  return tr('source.cannot', { where: where(roots) });
+}
+
+// A transcripts folder's state in words ("unreadable: EACCES", "not a folder").
+function folderState(state) {
+  const m = /^unreadable: (.*)$/.exec(state);
+  if (m) return tr('folderState.unreadable', { code: m[1] });
+  return state === 'not a folder' ? tr('folderState.notFolder') : state;
 }
 
 // Each problem: a label that is safe on a shared screen, and a detail
 // (paths, file names) that shows only with privacy off.
 function renderProblems(s) {
-  const plural = (n, one, many) => (n === 1 ? one : many);
   const list = (s.problems || []).map((p) => ({
     label: problemLabel(p, { privacy: prefs.private }),
     detail: p.detail,
@@ -1356,34 +1359,35 @@ function renderProblems(s) {
   }));
   for (const r of s.watcher.roots || []) {
     if (r.state !== 'ok' && r.state !== 'missing' && r.state !== 'pending') {
-      list.push({ label: `A transcripts folder is ${r.state}`, detail: r.path });
+      list.push({ label: tr('problem.folder', { state: folderState(r.state) }), detail: r.path });
     }
   }
   const st = s.stats;
   if (st.malformedLines) {
     list.push({
-      label: `${st.malformedLines} transcript ${plural(st.malformedLines, 'line', 'lines')} could not be read`,
-      detail: st.lastProblem ? `last: ${st.lastProblem}` : '',
+      label: tr('problem.malformed', { n: st.malformedLines }),
+      detail: st.lastProblem ? tr('problem.last', { what: st.lastProblem }) : '',
     });
   }
   if (st.unlinkedSidechains) {
     const n = st.unlinkedSidechains;
-    list.push({ label: `${n} helper ${plural(n, 'transcript', 'transcripts')} could not be matched to the call that started ${plural(n, 'it', 'them')}, so ${plural(n, 'it is', 'they are')} not shown` });
+    list.push({ label: tr('problem.unlinked', { n }) });
   }
   if (st.unmatchedRelays) {
     const n = st.unmatchedRelays;
-    list.push({ label: `${n} relayed helper ${plural(n, 'update', 'updates')} named a call that is not in view, so ${plural(n, 'it is', 'they are')} not shown` });
+    list.push({ label: tr('problem.unmatchedRelays', { n }) });
   }
   if (homeless) {
-    list.push({ label: `${homeless} helper${homeless === 1 ? ' is' : 's are'} working in a department that has been removed, so ${homeless === 1 ? 'it is' : 'they are'} shown in the General Ward` });
+    list.push({ label: tr('problem.homeless', { n: homeless, ward: tr('room.general-ward.name') }) });
   }
   if (st.untimedEntries) {
-    list.push({ label: `${st.untimedEntries} transcript ${plural(st.untimedEntries, 'entry has', 'entries have')} no timestamp and did not count as activity` });
+    list.push({ label: tr('problem.untimed', { n: st.untimedEntries }) });
   }
   if (st.strayNotifications) {
     const n = st.strayNotifications;
-    list.push({ label: `${n} helper ${plural(n, 'notification', 'notifications')} came for ${plural(n, 'a helper', 'helpers')} the app had already ended another way: the app misread ${plural(n, 'its launch', 'their launches')}, and the system log corrects ${plural(n, 'its end', 'their ends')} (helper-end-corrected)` });
+    list.push({ label: tr('problem.stray', { n }) });
   }
+  if (startLanguage.unreadable) list.push({ label: tr('language.unreadable') });
   return list;
 }
 
@@ -1393,7 +1397,7 @@ function renderDirectory(s) {
   $('directory-list').innerHTML = roster.length
     ? roster.map((a) => `<li><span class="agent">${escapeXml(a.name)}</span> · <span class="room">${escapeXml(roomName(a.room))}</span>
         <span class="summary">${escapeXml(a.summary || '')}</span></li>`).join('')
-    : `<li>No agent definitions found. Agents you add to <code>.claude/agents</code> are listed here with the room they work in.</li>`;
+    : `<li>${trHtml('board.noAgentsHtml')}</li>`;
 }
 
 function render(force = false) {
@@ -1435,7 +1439,7 @@ function render(force = false) {
   $('problem-list').innerHTML = problems
     // A fix button keeps its focus across redraws by its data-key.
     // LINE chats' fix opens its Settings (data-settings); the others are field feedback's.
-    .map((p, i) => `<li>${keepFileNames(escapeXml(p.label))}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix === 'line' ? ` <button type="button" class="link-btn" data-settings="line-settings-h" data-key="problem-fix-${i}">Open Settings</button>` : p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
+    .map((p, i) => `<li>${keepFileNames(escapeXml(p.label))}${!prefs.private && p.detail ? `<span class="d"> · ${escapeXml(p.detail)}</span>` : ''}${p.fix === 'line' ? ` <button type="button" class="link-btn" data-settings="line-settings-h" data-key="problem-fix-${i}">${escapeXml(tr('fix.settings'))}</button>` : p.fix ? ` <button type="button" class="link-btn" data-field="${p.fix}" data-key="problem-fix-${i}">${FIXES[p.fix]}</button>` : ''}</li>`)
     .join('');
   renderDirectory(snapshot);
   if (focusKey) document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus();
@@ -1534,7 +1538,7 @@ window.addEventListener('pointerup', (e) => {
 // other room records a move. Saved like the rest of the layout.
 async function moveAgent(name, roomId) {
   if ((config.pinned ?? []).includes(name)) {
-    moveNote = `${name} is placed by rooms.json, which always wins; change it there.`;
+    moveNote = tr('move.pinned', { name });
     render(true);
     return;
   }
@@ -1547,7 +1551,7 @@ async function moveAgent(name, roomId) {
   else moves[name] = roomId;
   const plain = depts.map(({ id, kind, name: n, purpose, cell, agents }) => ({ id, kind, name: n, purpose, cell, agents: [...agents] }));
   const result = await bridge.saveLayout({ departments: plain, gardens: config.layout.gardens ?? [], moves });
-  moveNote = result.ok ? `${name} now works in the ${roomName(roomId)}.` : `${name} could not be moved: ${result.error}`;
+  moveNote = result.ok ? tr('move.done', { name, room: roomName(roomId) }) : tr('move.failed', { name, error: result.error });
   if (result.ok) useConfig(result.config);
   $('move-status').textContent = moveNote;
   render(true);
@@ -1576,7 +1580,7 @@ function mapStep(st) {
   if (st.kind === 'skill') {
     return `<li class="map-step skill${st.active ? ' live' : ''}">
       <span class="skill-mark" aria-hidden="true"></span><span class="name">/${escapeXml(st.name)}</span>
-      <span class="what">${st.active ? 'Running now' : 'Used'}</span></li>`;
+      <span class="what">${escapeXml(tr(st.active ? 'board.running' : 'map.used'))}</span></li>`;
   }
   const live = st.status !== 'done';
   const detail = live && !prefs.private && st.activity?.detail ? ` · ${st.activity.detail}` : '';
@@ -1584,9 +1588,9 @@ function mapStep(st) {
     : st.endedAt ? `<span class="time">${elapsed(st.startedAt, st.endedAt)}</span>` : '';
   const skills = st.skills?.length ? `<ol>${st.skills.map((k) => mapStep({ kind: 'skill', ...k })).join('')}</ol>` : '';
   return `<li class="map-step agent${live ? ' live' : ''}">
-    ${glyph(st)}<span class="name">${escapeXml(st.type)}${st.background ? ' <small>(background)</small>' : ''}</span>
-    <span class="what${glyphKey(st) === 'failed' || st.status === 'blocked' ? ' warn' : ''}">${live ? '<strong>Running now:</strong> ' : ''}${escapeXml(statusText(st) + detail)}</span>
-    <span class="meta">${time}${st.tokens ? `<span>${compact(st.tokens)} tokens</span>` : ''}</span>${skills}</li>`;
+    ${glyph(st)}<span class="name">${escapeXml(st.type)}${st.background ? ` <small>${escapeXml(tr('map.background'))}</small>` : ''}</span>
+    <span class="what${glyphKey(st) === 'failed' || st.status === 'blocked' ? ' warn' : ''}">${live ? `<strong>${escapeXml(tr('map.runningNow'))}</strong> ` : ''}${escapeXml(statusText(st) + detail)}</span>
+    <span class="meta">${time}${st.tokens ? `<span>${escapeXml(tr('row.tokens', { n: compact(st.tokens) }))}</span>` : ''}</span>${skills}</li>`;
 }
 
 function renderLiveMap() {
@@ -1599,7 +1603,7 @@ function renderLiveMap() {
   liveMapSig = sig;
   const body = $('live-map-body');
   if (!sess) {
-    body.innerHTML = '<p class="hint">This session has gone quiet and left the board.</p>';
+    body.innerHTML = `<p class="hint">${escapeXml(tr('map.gone'))}</p>`;
     return;
   }
   const agents = steps.filter((st) => st.kind === 'agent');
@@ -1608,14 +1612,14 @@ function renderLiveMap() {
   const failed = agents.filter((a) => glyphKey(a) === 'failed').length;
   const finished = agents.filter((a) => a.status === 'done').length - failed;
   const skills = steps.filter((st) => st.kind === 'skill').length + agents.reduce((n, a) => n + (a.skills?.length ?? 0), 0);
-  const summary = [`${running} running now`, `${finished} helper${finished === 1 ? '' : 's'} finished`, failed ? `${failed} failed` : '', `${skills} skill${skills === 1 ? '' : 's'} used`].filter(Boolean).join(' · ');
+  const summary = [tr('map.sumRunning', { n: running }), tr('map.sumFinished', { n: finished }), failed ? tr('map.sumFailed', { n: failed }) : '', tr('map.sumSkills', { n: skills })].filter(Boolean).join(' · ');
   const detail = !prefs.private && sess.activity?.detail ? ` · ${sess.activity.detail}` : '';
   body.innerHTML = `<p class="map-summary">${escapeXml(summary)}</p>
     <ol class="map-tree">
       <li class="map-step root${sess.status === 'your-turn' ? '' : ' live'}">${glyph(sess)}<span class="name">${escapeXml(sess.project)}</span>
         <span class="what">${escapeXml(statusText(sess) + detail)}</span>
-        ${steps.length ? `<ol>${sess.map?.more ? `<li class="map-step more"><span class="what">${sess.map.more} earlier step${sess.map.more === 1 ? '' : 's'} not shown</span></li>` : ''}${steps.map(mapStep).join('')}</ol>`
-    : '<p class="hint">Nothing called yet: no helpers or skills in this session so far.</p>'}
+        ${steps.length ? `<ol>${sess.map?.more ? `<li class="map-step more"><span class="what">${escapeXml(tr('map.more', { n: sess.map.more }))}</span></li>` : ''}${steps.map(mapStep).join('')}</ol>`
+    : `<p class="hint">${escapeXml(tr('map.nothing'))}</p>`}
       </li>
     </ol>`;
 }
@@ -1633,17 +1637,17 @@ function renderUsage(s) {
   const box = $('usage');
   box.hidden = !u || s.assistantMode;
   if (box.hidden) return;
-  const row = (label, t) => `<div class="usage-row"><span>${label}</span><strong>${compact(t.total)}</strong>
-    <span class="muted">${compact(t.fresh)} without cache reads</span></div>`;
+  const row = (label, t) => `<div class="usage-row"><span>${escapeXml(label)}</span><strong>${compact(t.total)}</strong>
+    <span class="muted">${escapeXml(tr('usage.fresh', { n: compact(t.fresh) }))}</span></div>`;
   const budget = prefs.budget5h > 0
     ? (() => {
       const pct = Math.min(100, Math.round((u.last5h.total / prefs.budget5h) * 100));
-      return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Your 5-hour warning level used">
-        <span style="width:${pct}%"></span></div><p class="hint">${pct}% of your warning level (${compact(prefs.budget5h)} in 5 hours).</p>`;
+      return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${escapeXml(tr('usage.meter'))}">
+        <span style="width:${pct}%"></span></div><p class="hint">${escapeXml(tr('usage.pct', { pct, budget: compact(prefs.budget5h) }))}</p>`;
     })()
     : '';
   const limit = u.limitNotice ? `<p class="form-error">⚠ Claude Code: ${escapeXml(u.limitNotice.text)}</p>` : '';
-  $('usage-body').innerHTML = `${limit}${row('Last 5 hours', u.last5h)}${row('Today', u.today)}${row('Last 7 days', u.week)}${budget}`;
+  $('usage-body').innerHTML = `${limit}${row(tr('usage.last5h'), u.last5h)}${row(tr('date.today'), u.today)}${row(tr('settings.report.days', { n: 7 }), u.week)}${budget}`;
 }
 
 // Warnings are raised once each: per session when its context passes the
@@ -1660,19 +1664,19 @@ function checkWarnings(s) {
   };
   for (const sess of s.sessions) {
     if (sess.context?.pct >= CONTEXT_WARN) {
-      raise(`ctx:${sess.id}`, `${sess.project} has used ${Math.round(sess.context.pct * 100)}% of its context. Save what you are working on: Claude Code will compact it soon.`);
+      raise(`ctx:${sess.id}`, tr('warn.context', { project: sess.project, pct: Math.round(sess.context.pct * 100) }));
     }
-    if (sess.limitNotice) raise(`limit:${sess.id}:${sess.limitNotice.ts}`, `Claude Code (${sess.project}): ${sess.limitNotice.text} Save what you are working on.`);
+    if (sess.limitNotice) raise(`limit:${sess.id}:${sess.limitNotice.ts}`, tr('warn.limitSession', { project: sess.project, text: sess.limitNotice.text }));
   }
   const u = s.usage;
-  if (u?.limitNotice && !s.sessions.some((x) => x.limitNotice)) raise(`limit:all:${u.limitNotice.ts}`, `Claude Code: ${u.limitNotice.text} Save what you are working on.`);
+  if (u?.limitNotice && !s.sessions.some((x) => x.limitNotice)) raise(`limit:all:${u.limitNotice.ts}`, tr('warn.limit', { text: u.limitNotice.text }));
   if (u && prefs.budget5h > 0) {
     const window = Math.floor(Date.now() / (5 * 3_600_000));
     for (const level of [0.8, 1]) {
       if (u.last5h.total >= prefs.budget5h * level) {
         raise(`budget:${window}:${level}`, level === 1
-          ? `Claude Code has used ${compact(u.last5h.total)} tokens in 5 hours, past your warning level. Save what you are working on.`
-          : `Claude Code has used ${Math.round((u.last5h.total / prefs.budget5h) * 100)}% of your 5-hour warning level. Consider saving your work soon.`);
+          ? tr('warn.budgetPast', { n: compact(u.last5h.total) })
+          : tr('warn.budgetNear', { pct: Math.round((u.last5h.total / prefs.budget5h) * 100) }));
       }
     }
   }
@@ -1691,11 +1695,11 @@ function notifyWaits(s) {
   };
   if (prefs.waitMin > 0) {
     for (const w of waitingList(s.sessions, loadDismissed())) {
-      if (Date.now() - w.since >= prefs.waitMin * 60_000) tell(`wait:${waitKey(w)}`, `${w.project}: ${waitText(w).toLowerCase()}, waiting for ${waitFor(Date.now() - w.since)}.`);
+      if (Date.now() - w.since >= prefs.waitMin * 60_000) tell(`wait:${waitKey(w)}`, tr('warn.waiting', { project: w.project, what: waitText(w).toLowerCase(), for: waitFor(Date.now() - w.since) }));
     }
   }
-  for (const c of s.clashes ?? []) tell(`clash:${c.key}`, `${c.count} sessions are working in the same folder of ${c.project}. They can overwrite each other's changes.`);
-  const o = runningOverview(s.sessions, s.here ?? 'This computer', s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
+  for (const c of s.clashes ?? []) tell(`clash:${c.key}`, tr('warn.clash', { n: c.count, project: c.project }));
+  const o = runningOverview(s.sessions, s.here ?? tr('common.thisComputer'), s.fleet?.computers ?? [], { jobs: s.jobs ?? [], machine: s.machine, work: s.work ?? [] });
   const { ended, running } = endedWork(o, endWatch);
   // The first look only learns what is running: nothing has ended yet.
   if (endWatch && prefs.notifyEnds) for (const e of ended) tell(`end:${e.key}`, e.text);
@@ -1973,7 +1977,8 @@ renderLayoutEditor();
 
 // "the garden", "the grove", but "Rose court" as the user wrote it.
 function gardenName(id) {
-  const name = config.gardens?.find((g) => g.id === id)?.name ?? 'Garden';
+  const g = config.gardens?.find((x) => x.id === id);
+  const name = g ? gardenWords(g) : tr('garden.garden');
   return id === 'garden' || id === 'grove' ? name.toLowerCase() : name;
 }
 

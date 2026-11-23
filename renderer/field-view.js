@@ -546,7 +546,12 @@ const FLAG_GLYPHS = {
 };
 const flagGlyph = (kind) => `<svg class="ico flag-glyph flag-${kind}" viewBox="0 0 24 24" aria-hidden="true">${FLAG_GLYPHS[kind] ?? FLAG_GLYPHS.setup}</svg>`;
 // What a flag or a Needs attention line links to (app.js fieldAction).
-export const FIXES = { check: 'Check the columns', settings: 'Open Settings', refresh: 'Refresh now' };
+// A fix link's words, in the window's language.
+export const FIXES = {
+  get check() { return tr('fix.check'); },
+  get settings() { return tr('fix.settings'); },
+  get refresh() { return tr('fix.refresh'); },
+};
 const SETUP_WORDS = {
   // saved: the columns were saved before (the column is new, or asked again);
   // more: new columns besides, that need no choice but are not checked yet.
