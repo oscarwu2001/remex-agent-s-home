@@ -195,30 +195,60 @@ function sourceOf(file) {
 // empty labels and nothing else: its load failures and script errors go
 // to the system log, once each, as the file's name, the line and the
 // message's first words without paths.
+// The message itself is never logged: it can quote what it failed on. Past
+// 50 lines the log says once that it stopped.
 const windowErrors = new Set();
+const MOST_WINDOW_ERRORS = 50;
+let windowErrorsFull = false;
 function watchWindow(w, name) {
   const note = (fields) => {
-    const k = JSON.stringify(fields);
-    if (windowErrors.has(k) || windowErrors.size >= 50) return;
+    const k = JSON.stringify({ window: name, ...fields });
+    if (windowErrors.has(k)) return;
+    if (windowErrors.size >= MOST_WINDOW_ERRORS) {
+      if (!windowErrorsFull) syslog?.write('errors', 'window-error-cap', { limit: MOST_WINDOW_ERRORS });
+      windowErrorsFull = true;
+      return;
+    }
     windowErrors.add(k);
     syslog?.write('errors', 'window-error', { window: name, ...fields });
   };
-  const noPaths = (s) => String(s ?? '').split('\n')[0].replace(/(?:file:\/\/\/?)?(?:[A-Za-z]:)?(?:[\\/][^\\/\s'"`]+)+[\\/]?/g, '…').slice(0, 120);
-  w.webContents.on('did-fail-load', (_e, code, desc, url) => note({ load: code, what: desc, file: path.basename(String(url).split('?')[0]) }));
+  const fileOf = (url) => path.basename(String(url ?? '').split(/[?#]/)[0]);
+  // ERR_ABORTED (-3) is a load another one replaced, as a reload does.
+  w.webContents.on('did-fail-load', (_e, code, desc, url) => { if (code !== -3) note({ load: code, what: desc, file: fileOf(url) }); });
   w.webContents.on('console-message', (e) => {
     if (e.level !== 'error') return;
-    note({ file: path.basename(String(e.sourceId ?? '').split('?')[0]), line: e.lineNumber, message: noPaths(e.message) });
+    const kind = /^(?:Uncaught (?:\(in promise\) )?)?((?:[A-Z]\w*)?(?:Error|Exception))\b/.exec(String(e.message ?? ''))?.[1] ?? 'error';
+    note({ kind, file: fileOf(e.sourceId), line: e.lineNumber });
   });
   // A module that is not there fails without a console line: the window's
-  // words are checked a little after each load (localise marks them).
-  w.webContents.on('did-finish-load', () => setTimeout(() => {
-    if (w.isDestroyed()) return;
-    w.webContents.executeJavaScript("document.documentElement.dataset.words || ''", true)
-      .then((words) => { if (!words) note({ words: 'not loaded' }); })
-      .catch(() => {
-        // The window closed or reloaded before the check; the next load checks again.
-      });
-  }, 8000));
+  // words are checked a little after each load (localise marks them). A new
+  // load cancels the check of the one before.
+  let check = null;
+  w.webContents.on('did-start-loading', () => clearTimeout(check));
+  w.webContents.on('did-finish-load', () => {
+    clearTimeout(check);
+    check = setTimeout(() => {
+      if (w.isDestroyed()) return;
+      w.webContents.executeJavaScript("document.documentElement.dataset.words || ''", true)
+        .then((words) => { if (!words) note({ words: 'not loaded' }); })
+        .catch(() => {
+          // The window closed or reloaded before the check; the next load checks again.
+        });
+    }, 8000);
+  });
+}
+
+// A message with its paths and quoted text taken out, for the system log and
+// the window: quoted text first (a path with spaces, or what a parser
+// quoted), then a file:// address, then a path after a drive letter or a UNC
+// root, to the end of the line (a path may hold spaces), then a Unix path.
+function scrubPaths(text) {
+  return String(text ?? '').split(/\r?\n/)[0]
+    .replace(/(['"`])[^'"`]*\1/g, '$1…$1')
+    .replace(/file:\/\/\S*/gi, '…')
+    .replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^'"`<>|]*/g, '…')
+    .replace(/(^|[\s(=])\/(?:[^\s'"`/]+\/)*[^\s'"`/]+/g, '$1…')
+    .slice(0, 160);
 }
 
 function createWindow() {
@@ -401,24 +431,27 @@ app.whenReady().then(() => {
   let lastReport;
   let reportWin;
   // Why the report's process stopped, from what Node printed before it
-  // exited: the error's name and code and its message's first line (its
-  // last line is only Node's version).
+  // exited: V8's own FATAL ERROR (out of memory), or the error's name and
+  // code and its message's first line (its last line is only Node's version).
   const failureIn = (stderr) => {
+    const fatal = /^FATAL ERROR: ([^\r\n]*)$/m.exec(stderr);
+    if (fatal) return { name: 'FatalError', message: fatal[1] };
     const m = /^((?:[A-Z]\w*)?(?:Error|Exception))(?: \[([A-Z][A-Z0-9_]*)\])?: ([^\r\n]*)$/m.exec(stderr);
     return m ? { name: m[1], code: m[2] ?? /\bcode: '([A-Z][A-Z0-9_]*)'/.exec(stderr)?.[1], message: m[3] } : null;
   };
-  // Logged without paths (a module's path names the user's folders); the
-  // window hears the name and code.
+  // A failure, logged with its paths and quoted text taken out (a module's
+  // path names the user's folders); { name, code, message } as logged, for
+  // the window, or null when there was nothing to read.
   const reportFailure = (f, exit) => {
     if (!f) {
       syslog.write('errors', 'report-failed', { exit });
-      return '';
+      return null;
     }
-    const name = String(f?.name ?? 'Error').replace(/[^\w]/g, '').slice(0, 40);
-    const code = f?.code ? String(f.code).replace(/[^\w]/g, '').slice(0, 40) : undefined;
-    const message = f?.message ? String(f.message).replace(/(?:[A-Za-z]:)?(?:[\\/][^\\/\s'"`]+)+[\\/]?/g, '…').slice(0, 160) : undefined;
+    const name = String(f.name ?? 'Error').replace(/[^\w]/g, '').slice(0, 40);
+    const code = f.code ? String(f.code).replace(/[^\w]/g, '').slice(0, 40) : undefined;
+    const message = f.message ? scrubPaths(f.message) : undefined;
     syslog.write('errors', 'report-failed', { exit, name, code, message });
-    return `: ${name}${code ? ` (${code})` : ''}`;
+    return { name, code, message };
   };
   // `details`: privacy mode is off, so Agent-call descriptions may show.
   ipcMain.handle('home:build-report', (_event, days, details) => new Promise((resolve) => {
@@ -441,15 +474,17 @@ app.whenReady().then(() => {
         lastReport = result;
         openReport(result.html);
         resolve({ ok: true, summary: result.summary, builtAt: Date.now() });
-      } else if (result?.failure) {
-        resolve({ ok: false, error: en('said.main.reportExit', { code: 1, why: reportFailure(result.failure, 1) }) });
       } else {
-        resolve({ ok: false, error: (result && result.error) || en('said.main.reportFailed') });
+        // The report said why (it caught the error, or one it could not load):
+        // logged, and the window hears the same reason without paths.
+        const f = reportFailure(result?.failure ?? (result?.error ? { message: result.error } : null), undefined);
+        resolve({ ok: false, error: f?.message || en('said.main.reportFailed') });
       }
     });
     child.on('exit', (code) => {
       if (answered) return;
-      resolve({ ok: false, error: en('said.main.reportExit', { code, why: reportFailure(failureIn(err), code) }) });
+      const f = reportFailure(failureIn(err), code);
+      resolve({ ok: false, error: en('said.main.reportExit', { code, why: f ? `: ${f.name}${f.code ? ` (${f.code})` : ''}` : '' }) });
     });
   }));
 

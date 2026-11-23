@@ -19,12 +19,18 @@
 // and the first line of a helper's prompt appear only with --details, the
 // way privacy mode works in the app.
 
+// Words this run missed (a key, or a sentence's mark): sent back with the
+// answer, so the app logs them like its own.
+const missedWords = [];
+// The error's name, code and first line, for the app, which takes the paths
+// out before it logs it or shows it.
+const failureOf = (err) => ({ name: err?.name, code: err?.code, message: String(err?.message ?? err).split('\n')[0] });
+
 // Started by the app: a failure before the answer (a module that will not
-// load) is answered too, as the error's name, code and first line; the app
-// takes the paths out before it logs it.
+// load) is answered too.
 if (process.parentPort) {
   process.on('uncaughtException', (err) => {
-    process.parentPort.postMessage({ ok: false, failure: { name: err?.name, code: err?.code, message: String(err?.message ?? err).split('\n')[0] } });
+    process.parentPort.postMessage({ ok: false, failure: failureOf(err), missingWords: missedWords });
     setTimeout(() => process.exit(1), 50);
   });
 }
@@ -42,9 +48,6 @@ const { translate, trHtmlIn, raw, sayIn, en, languageInfo, onMissing, LANGUAGES,
 const { placeWords } = require('../../renderer/places.js');
 const os = require('os');
 
-// Words this run missed (a key, or a sentence's mark): sent back with the
-// answer, so the app logs them like its own.
-const missedWords = [];
 onMissing((l, key) => { missedWords.push({ lang: l, key }); });
 
 // ---- arguments ---------------------------------------------------------------
@@ -987,7 +990,7 @@ if (process.parentPort) {
   try {
     reply = run(process.argv.slice(2).filter((a) => a !== '--json'));
   } catch (err) {
-    reply = { ok: false, error: err.message, missingWords: missedWords };
+    reply = { ok: false, error: err.message, failure: failureOf(err), missingWords: missedWords };
   }
   process.parentPort.postMessage(reply);
   setTimeout(() => process.exit(0), 50);
