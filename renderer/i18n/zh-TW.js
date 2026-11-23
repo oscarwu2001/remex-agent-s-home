@@ -536,7 +536,7 @@ export default {
   // ---- Running now: the counts ----------------------------------------------
   'overview.running': '{n} 個執行中',
   'overview.nothing': '沒有執行中的工作',
-  'overview.sessions': '{n} 個工作階段',
+  'overview.sessions': '{n} 個工作階段',
   'overview.projects': '{n} 個專案',
   'overview.computers': '{n} 台電腦',
   'overview.helpers': '{n} 位助手',
