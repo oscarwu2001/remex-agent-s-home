@@ -16,7 +16,7 @@ import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDi
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
-import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said } from './i18n.js';
+import { tr, trHtml, raw, hasWords, textWidth, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing, said, english } from './i18n.js';
 import { placeWords, gardenWords } from './places.js';
 import { clockTime } from './dates.js';
 
@@ -3026,7 +3026,7 @@ function lineLog(err) {
 }
 function lineNoAnswer(err) {
   lineLog(err);
-  return { ok: false, error: 'The app did not answer. Try again.' };
+  return { ok: false, error: english('said.ui.noAnswer') };
 }
 const lineProjects = () => (prefs.demo ? demoProj.snapshot() : snapshot.projects)?.list ?? [];
 function setLineStatus(status) {
@@ -3110,10 +3110,10 @@ function forgetLineBotDrafts({ closing = false } = {}) {
 // failed) comes with the snapshot; only a refusal before collecting is
 // said here.
 async function lineBotAction(act) {
-  const cannot = snapshot.demo ? 'The demo saves and collects nothing; with your own bot this works.' : 'The preview cannot do this; it works in the app.';
+  const cannot = snapshot.demo ? english('said.ui.demoBot') : english('said.ui.previewCannot');
   if (act === 'bot-copy-script') {
-    const res = bridge.lineBotCopyScript ? await bridge.lineBotCopyScript().catch(lineNoAnswer) : { ok: false, error: 'The preview cannot copy the script; this works in the app.' };
-    lineBotUi.scriptNote = res.ok ? 'Relay script copied: paste it into the sheet’s Extensions → Apps Script.' : '';
+    const res = bridge.lineBotCopyScript ? await bridge.lineBotCopyScript().catch(lineNoAnswer) : { ok: false, error: english('said.ui.previewCopy') };
+    lineBotUi.scriptNote = res.ok ? english('said.ui.scriptCopied') : '';
     lineBotUi.scriptError = res.ok ? '' : res.error;
     renderLineSettings();
   } else if (act === 'bot-change-link') {
@@ -3220,7 +3220,7 @@ async function openLineSend(key) {
   const targets = snapshot.demo || !bridge.lineTargets ? { sessions: ['work', 'notes'], why: null }
     : await bridge.lineTargets().catch((err) => {
       lineLog(err);
-      return { sessions: [], why: 'WSL could not be asked for its tmux sessions. Choose New Windows Terminal tab, or open this sheet again.' };
+      return { sessions: [], why: english('said.ui.noSessionsAsked') };
     });
   if (!lineSend || lineSend.key !== key) return; // closed, or another item's sheet, meanwhile
   lineTargets = targets;
@@ -3232,7 +3232,7 @@ async function lineMark(key, what) {
     lineDemoMarks.add(key);
     return { ok: true };
   }
-  if (!bridge.lineSet) return { ok: false, error: 'The browser preview cannot save this; it works in the app.' };
+  if (!bridge.lineSet) return { ok: false, error: english('said.ui.previewSave') };
   return bridge.lineSet({ mark: { key, what } }).catch(lineNoAnswer);
 }
 async function lineAction(act, key) {
@@ -3243,7 +3243,7 @@ async function lineAction(act, key) {
   }
   if (act === 'settings') showInSettings('line-settings-h');
   else if (act === 'choose-folder' && (snapshot.demo || !bridge.lineChooseFolder)) {
-    lineSettingsUi.note = snapshot.demo ? 'The demo chooses no folder.' : 'The preview cannot choose a folder; this works in the app.';
+    lineSettingsUi.note = snapshot.demo ? english('said.ui.demoNoFolder') : english('said.ui.previewFolder');
     renderLineSettings();
     return;
   } else if (act === 'privacy') {
@@ -3268,19 +3268,19 @@ async function lineAction(act, key) {
     const order = lineKeys();
     const res = await lineMark(key, 'dismissed');
     if (res.ok) {
-      setLineStatus({ text: 'Dismissed.', undo: key });
+      setLineStatus({ text: english('said.ui.dismissed'), undo: key });
       hideLineItem('dismiss', key, order);
     } else {
-      Object.assign(lineUi, { error: `Not dismissed. ${res.error}`, errorKey: key });
+      Object.assign(lineUi, { error: english('said.ui.notDismissed', { why: res.error }), errorKey: key });
       renderLine();
     }
     return;
   } else if (act === 'undo') {
     let res = { ok: true };
     if (snapshot.demo) lineDemoMarks.delete(key);
-    else if (!bridge.lineSet) res = { ok: false, error: 'The browser preview cannot save this; it works in the app.' };
+    else if (!bridge.lineSet) res = { ok: false, error: english('said.ui.previewSave') };
     else res = await bridge.lineSet({ unmark: { key } }).catch(lineNoAnswer);
-    setLineStatus({ text: res.ok ? 'Listed again.' : `Not undone. ${res.error}` });
+    setLineStatus({ text: res.ok ? english('said.ui.listedAgain') : english('said.ui.notUndone', { why: res.error }) });
     if (res.ok) linePending.delete(key);
     renderLine();
     setTimeout(renderLine, 600);
@@ -3320,7 +3320,7 @@ $('line-body').addEventListener('submit', async (e) => {
   const text = $(`line-todo-${key}`).value.trim();
   const project = $(`line-project-${key}`).value;
   if (!text) {
-    Object.assign(lineUi, { error: 'Type the to-do first.', errorKey: key });
+    Object.assign(lineUi, { error: english('said.ui.typeTodo'), errorKey: key });
     renderLine();
     $(`line-todo-${key}`)?.focus();
     return;
@@ -3330,12 +3330,12 @@ $('line-body').addEventListener('submit', async (e) => {
   if (snapshot.demo) {
     res = await demoProj.change({ op: 'add-todo', project, text });
     if (res.ok) lineDemoMarks.add(key);
-  } else if (!bridge.lineAdd) res = { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
+  } else if (!bridge.lineAdd) res = { ok: false, error: english('said.ui.previewProjects') };
   else res = await bridge.lineAdd({ key, project, text }).catch(lineNoAnswer);
   if (res.ok) {
-    const name = lineProjects().find((p) => p.id === project)?.name ?? 'the project';
+    const name = lineProjects().find((p) => p.id === project)?.name ?? english('said.ui.theProject');
     Object.assign(lineUi, { adding: null, todo: null, project: null });
-    setLineStatus({ text: res.note ?? `Added to ${name}.` });
+    setLineStatus({ text: res.note ?? english('said.ui.addedTo', { name }) });
     renderProjects();
     // Added but not noted (stays): the item stays listed, as the note says.
     if (res.stays) {
@@ -3371,7 +3371,7 @@ $('line-settings').addEventListener('change', async (e) => {
   if (group) {
     if (snapshot.demo || !bridge.lineBotSet) {
       group.checked = !group.checked;
-      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this ticks the group.' : 'The preview cannot save; this works in the app.';
+      lineBotUi.note = snapshot.demo ? english('said.ui.demoTickGroup') : english('said.ui.previewNoSave');
       renderLineSettings();
       return;
     }
@@ -3386,7 +3386,7 @@ $('line-settings').addEventListener('change', async (e) => {
   if (!tick) return;
   if (snapshot.demo || !bridge.lineSet) {
     tick.checked = !tick.checked;
-    lineSettingsUi.note = snapshot.demo ? 'The demo saves nothing; with your own folder this ticks the chat.' : 'The preview cannot save; this works in the app.';
+    lineSettingsUi.note = snapshot.demo ? english('said.ui.demoTickChat') : english('said.ui.previewNoSave');
     renderLineSettings();
     return;
   }
@@ -3402,7 +3402,7 @@ $('line-settings').addEventListener('submit', async (e) => {
   if (e.target.id === 'line-bot-link-form') {
     const typed = $('line-bot-link').value;
     if (snapshot.demo || !bridge.lineBotSet) {
-      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this saves the relay link.' : 'The preview cannot save; this works in the app.';
+      lineBotUi.note = snapshot.demo ? english('said.ui.demoLink') : english('said.ui.previewNoSave');
       renderLineSettings();
       return;
     }
@@ -3422,7 +3422,7 @@ $('line-settings').addEventListener('submit', async (e) => {
     const secret = input.value;
     input.value = '';
     if (snapshot.demo || !bridge.lineBotSaveSecret) {
-      lineBotUi.note = snapshot.demo ? 'The demo saves nothing; with your own bot this saves the secret.' : 'The preview cannot save; this works in the app.';
+      lineBotUi.note = snapshot.demo ? english('said.ui.demoSecret') : english('said.ui.previewNoSave');
       renderLineSettings();
       return;
     }
@@ -3437,7 +3437,7 @@ $('line-settings').addEventListener('submit', async (e) => {
   }
   if (e.target.id !== 'line-words-form') return;
   if (snapshot.demo || !bridge.lineSet) {
-    lineSettingsUi.note = snapshot.demo ? 'The demo saves nothing; with your own folder this saves your names and keywords.' : 'The preview cannot save; this works in the app.';
+    lineSettingsUi.note = snapshot.demo ? english('said.ui.demoWords') : english('said.ui.previewNoSave');
     renderLineSettings();
     return;
   }
@@ -3445,7 +3445,7 @@ $('line-settings').addEventListener('submit', async (e) => {
   // Said under the form's Save, in the main process's own words (they say it was not saved).
   lineSettingsUi.wordsError = res.ok ? '' : res.error;
   // "Saved 10 names; the rest were left out." when there were more.
-  if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: res.note ?? 'Names and keywords saved.' });
+  if (res.ok) Object.assign(lineSettingsUi, { names: null, keywords: null, note: res.note ?? english('said.ui.wordsSaved') });
   renderLineSettings();
   setTimeout(() => { renderLine(); renderLineSettings(); }, 600);
 });
@@ -3473,7 +3473,7 @@ $('line-sheet-body').addEventListener('change', (e) => {
 $('line-sheet-body').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-line="browse"]');
   if (!b || !lineSend) return;
-  const res = snapshot.demo || !bridge.lineBrowse ? { ok: false, error: snapshot.demo ? 'The demo browses no folders. Choose one of the listed folders.' : 'The browser preview cannot browse; this works in the app.' }
+  const res = snapshot.demo || !bridge.lineBrowse ? { ok: false, error: snapshot.demo ? english('said.ui.demoBrowse') : english('said.ui.previewBrowse') }
     : await bridge.lineBrowse().catch(lineNoAnswer);
   if (res.canceled || !lineSend) return;
   lineSend = takeEdits(lineSend, lineForm()); // take what is typed first
@@ -3492,8 +3492,8 @@ $('line-sheet-body').addEventListener('submit', async (e) => {
   const req = { key: lineSend.key, prompt: lineSend.prompt, cwd: lineSend.cwd, target, session: lineSend.session };
   // Each missing piece is said at its own field, and focus goes there.
   const errors = {
-    ...(req.prompt.trim() ? {} : { prompt: 'Write a prompt for Claude first.' }),
-    ...(req.cwd ? {} : { cwd: 'Choose a folder first.' }),
+    ...(req.prompt.trim() ? {} : { prompt: english('said.ui.writePrompt') }),
+    ...(req.cwd ? {} : { cwd: english('said.lc.folderFirst') }),
   };
   lineSend.errors = Object.keys(errors).length ? errors : null;
   lineSend.status = null;
@@ -3503,7 +3503,7 @@ $('line-sheet-body').addEventListener('submit', async (e) => {
     return;
   }
   if (snapshot.demo || !bridge.lineStart) {
-    lineSend.status = { ok: true, text: snapshot.demo ? `The demo starts nothing. In the app this opens ${target === 'tmux' ? `a new tmux window in “${req.session}”` : 'a new Windows Terminal tab'} and starts Claude there.` : 'The browser preview cannot start Claude; this works in the app.' };
+    lineSend.status = { ok: true, text: snapshot.demo ? english('said.ui.demoStart', { where: target === 'tmux' ? english('said.ui.tmuxIn', { session: req.session }) : english('said.lc.newTab') }) : english('said.ui.previewStart') };
     paintLineSheet();
     return;
   }
@@ -3512,7 +3512,7 @@ $('line-sheet-body').addEventListener('submit', async (e) => {
   const res = await bridge.lineStart(req).catch(lineNoAnswer);
   if (!lineSend || lineSend.key !== req.key) return;
   lineSend.busy = false;
-  lineSend.status = res.ok ? { ok: true, text: `Started in ${res.label}.` } : { ok: false, text: res.error };
+  lineSend.status = res.ok ? { ok: true, text: english('said.ui.startedIn', { where: res.label }) } : { ok: false, text: res.error };
   paintLineSheet();
   $('line-start')?.focus();
 });

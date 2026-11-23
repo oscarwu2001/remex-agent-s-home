@@ -27,6 +27,7 @@ const ALLOW = new Set([
   'Actions', 'Terminal', // GitHub's Actions tab, Windows Terminal
   "Agent’s", 'Apps', 'Script', 'Inbox', 'Developers', 'Webhook', 'Linux', 'GNOME', 'Keyring', 'KWallet', // names as their makers write them
   'https', 'MB', 'exec', // a link's parts: https, /exec, ?k=
+  'makeSecrets', 'Found', // the relay script's function to run; Verify's "302 Found"
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
 ]);
 // Script properties (READER_SECRET, LINE_TOKEN), a link's ?k= and drives (C:) are typed as they are.
