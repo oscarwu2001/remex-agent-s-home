@@ -74,16 +74,22 @@ export const tr = (key, params) => translate(current, key, params);
 // The main process and src/core say their sentences in English (the log and
 // their tests read them so), each built from a `said.*` entry of the English
 // table with english() (en() in src/core/i18n.js). The window puts one in
-// its own language by finding the entry that built it and filling that
-// entry in the window's language with what filled it, each of those put in
-// the language the same way when it is a sentence of its own (a host, a
-// code or a name stays as it is). So core's answers keep their shape and
-// every sentence keeps one source per language.
-// A sentence no entry built stays English and is told once, like a missing word.
+// its own language by finding the entries that built it and filling them in
+// the window's language with what filled them, each part put in the language
+// the same way when it is a sentence of its own (a host, a code or a name
+// stays as it is). So core's answers keep their shape and every sentence
+// keeps one source per language.
+// A sentence can often be split more than one way ("Project list: {what}"
+// around "{name} could not be read ({why})", a comma inside a part): every
+// split is tried, and the one whose entries explain the most of the
+// sentence wins. A sentence no entry built stays English and is told once,
+// like a missing word, by a short hash: the log never holds its text.
 const SAID = 'said.';
 const MOST_SAID = 500;
 let patterns = null;
+let countRe = null;
 const heard = new Map(); // language and sentence -> the sentence in that language
+const readings = new Map(); // sentence -> how it was built, or null
 
 export const english = (key, params) => translate(DEFAULT_LANGUAGE, key, params);
 
@@ -95,61 +101,140 @@ function saidPatterns() {
     if (!key.startsWith(SAID)) continue;
     const forms = typeof value === 'object' && value !== null ? Object.entries(value) : [['', value]];
     for (const [form, text] of forms) {
-      const names = [];
-      const source = String(text).split(/(\{\w+\})/).map((part) => {
-        const name = /^\{(\w+)\}$/.exec(part)?.[1];
-        if (!name) return escapeRe(part);
-        if (names.includes(name)) return `\\k<${name}>`;
-        names.push(name);
-        // {n} is a count, so a sentence that starts with one cannot swallow a list before it.
-        return name === 'n' ? '(?<n>\\d+)' : `(?<${name}>[\\s\\S]*?)`;
-      }).join('');
-      const own = String(text).replace(/\{\w+\}/g, '');
-      patterns.push({ key, one: form === 'one', re: new RegExp(`^${source}$`), literal: own.length, letters: own.replace(/[^A-Za-z]/g, '').length });
+      const parts = String(text).split(/\{(\w+)\}/);
+      const lits = parts.filter((_, i) => i % 2 === 0);
+      const own = lits.join('');
+      patterns.push({ key, one: form === 'one', lits, names: parts.filter((_, i) => i % 2 === 1), literal: own.length, letters: own.replace(/[^A-Za-z]/g, '').length });
     }
   }
-  // The longest wording first, so a sentence is read as the entry that says
-  // most of it (test/i18n.test.js checks every entry reads back as itself).
+  // The longest wording first, so of two readings that explain as much the
+  // one that says most in its own words wins (test/i18n.test.js checks every
+  // entry reads back as itself).
   patterns.sort((a, b) => b.literal - a.literal);
+  // {n} is a count: digits only. {count} is how a count reads: digits, or
+  // "at least 3" / "up to 3" when the relay's tally was capped.
+  countRe = new RegExp(`^(?:\\d+|${['said.lb.atLeast', 'said.lb.upTo'].map((k) => escapeRe(en[k]).replace('\\{n\\}', '\\d+')).join('|')})$`);
   return patterns;
 }
 
-// The entry an English sentence was built from: { key, params } or null.
-// A sentence a caller began lower-case ("Not saved: this computer...") is
-// read as its entry too. A whole sentence is never read as an entry with
-// fewer than four letters of its own ("{words} ({where})"): those are only
-// the parts inside another (inside: true).
-const OWN_LETTERS = 4;
-export function unsay(text, { inside = false } = {}) {
-  const s = String(text);
-  for (const t of s && /^[a-z]/.test(s) ? [s, s[0].toUpperCase() + s.slice(1)] : [s]) {
-    for (const p of saidPatterns()) {
-      if (!inside && p.letters < OWN_LETTERS) continue;
-      const m = p.re.exec(t);
-      if (!m) continue;
-      const params = { ...m.groups };
-      if (p.one && params.n === undefined) params.n = '1';
-      return { key: p.key, params };
+const fits = (name, value, got) => (Object.hasOwn(got, name) ? got[name] === value
+  : name === 'n' ? /^\d+$/.test(value) : name === 'count' ? countRe.test(value) : true);
+
+// Every way `text` fills pattern `p`: its literals in order, a part between each two.
+function* splits(p, text) {
+  const { lits, names } = p;
+  const last = lits[lits.length - 1];
+  if (!names.length) {
+    if (text === lits[0]) yield {};
+    return;
+  }
+  if (!text.startsWith(lits[0]) || !text.endsWith(last) || text.length < lits[0].length + last.length) return;
+  const end = text.length - last.length;
+  function* from(i, pos, got) {
+    const next = lits[i + 1];
+    const ats = [];
+    if (i === names.length - 1) ats.push(end);
+    else for (let at = text.indexOf(next, pos); at !== -1 && at + next.length <= end; at = text.indexOf(next, at + 1)) ats.push(at);
+    for (const at of ats) {
+      const value = text.slice(pos, at);
+      if (at < pos || !fits(names[i], value, got)) continue;
+      const now = { ...got, [names[i]]: value };
+      if (i === names.length - 1) yield now;
+      else yield* from(i + 1, at + next.length, now);
     }
   }
-  return null;
+  yield* from(0, lits[0].length, {});
 }
 
-// A list of sentences (", " between them) is put in the language item by
-// item when every item is one; anything else inside a sentence stays as it is.
-function sayList(lang, text, depth) {
-  const items = text.split(', ');
-  if (items.length < 2 || !items.every((item) => unsay(item, { inside: true }))) return text;
-  return items.map((item) => sayInner(lang, item, depth + 1)).join(translate(lang, 'common.listSep'));
+// How `text` was built: { score, node } where score counts the letters the
+// entries explain, or null. A whole sentence is never read as an entry with
+// fewer than four letters of its own ("{words} ({where})"); inside one, such
+// an entry is read only when each of its parts is itself a sentence the
+// tables built, so text a person or a program wrote keeps its brackets.
+// A sentence a caller began lower-case ("not saved: …") is read too.
+const OWN_LETTERS = 4;
+function read(text, inside, depth) {
+  const memo = `${inside ? 1 : 0}${depth}\u0000${text}`;
+  if (readings.has(memo)) return readings.get(memo);
+  let best = null;
+  if (depth < 6) {
+    for (const t of text && /^[a-z]/.test(text) ? [text, text[0].toUpperCase() + text.slice(1)] : [text]) {
+      for (const p of saidPatterns()) {
+        if (!inside && p.letters < OWN_LETTERS) continue;
+        for (const got of splits(p, t)) {
+          let score = p.letters;
+          const params = {};
+          let whole = true;
+          for (const [name, value] of Object.entries(got)) {
+            const r = part(value, depth + 1);
+            if (!r.read && p.letters < OWN_LETTERS) whole = false;
+            score += r.score;
+            params[name] = { ...r.node, raw: value };
+          }
+          if (!whole) continue;
+          if (p.one && !params.n) params.n = { num: 1, raw: '1' };
+          if (!best || score > best.score) best = { score, node: { key: p.key, params } };
+        }
+      }
+    }
+  }
+  if (readings.size >= 4 * MOST_SAID) readings.clear();
+  readings.set(memo, best);
+  return best;
 }
 
-function sayInner(lang, text, depth) {
-  if (/^\d+$/.test(text)) return Number(text);
-  const found = depth < 6 && text ? unsay(text, { inside: depth > 0 }) : null;
-  if (!found) return depth < 6 && text ? sayList(lang, text, depth) : text;
+// A part inside a sentence: a count, a sentence or a list of sentences the
+// tables built (", " between them), or kept as it is.
+function part(value, depth) {
+  if (value === '') return { read: true, score: 0, node: { text: '' } };
+  if (/^\d+$/.test(value)) return { read: true, score: 0, node: { num: Number(value) } };
+  let best = read(value, true, depth);
+  const items = value.split(', ');
+  if (items.length > 1) {
+    const each = items.map((item) => read(item, true, depth + 1));
+    const score = each.reduce((a, r) => (r && a !== null ? a + r.score : null), 0);
+    if (score !== null && (!best || score > best.score)) best = { score, node: { list: each.map((r) => r.node) } };
+  }
+  return best ? { read: true, ...best } : { read: false, score: 0, node: { text: value } };
+}
+
+function render(lang, node) {
+  if ('num' in node) return node.num;
+  if ('text' in node) return node.text;
+  if (node.list) return node.list.map((n) => render(lang, n)).join(translate(lang, 'common.listSep'));
   const params = {};
-  for (const [name, value] of Object.entries(found.params)) params[name] = sayInner(lang, value, depth + 1);
-  return translate(lang, found.key, params);
+  for (const [name, child] of Object.entries(node.params)) params[name] = render(lang, child);
+  return translate(lang, node.key, params);
+}
+
+// A short, fixed-length name for a sentence the tables did not build, so the
+// log can count it without holding its words (a git or file error can name
+// a path or a command).
+export function sentenceMark(text) {
+  let h = 0x811c9dc5;
+  for (const c of String(text)) {
+    h ^= c.codePointAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `said#${h.toString(16).padStart(8, '0')}`;
+}
+
+// Parts left as they came that read like a sentence (three words or more):
+// an English sentence no entry built, told like a missing word.
+function tellUnread(lang, node) {
+  if (node.text !== undefined) {
+    if ((node.text.match(/[A-Za-z]{2,}/g) ?? []).length >= 3) missing(lang, sentenceMark(node.text));
+    return;
+  }
+  for (const child of node.list ?? Object.values(node.params ?? {})) tellUnread(lang, child);
+}
+
+// The entry an English sentence was built from: { key, params } (each part
+// as it came) or null.
+export function unsay(text, { inside = false } = {}) {
+  const r = read(String(text), inside, 0);
+  if (!r || !r.node.key) return null;
+  return { key: r.node.key, params: Object.fromEntries(Object.entries(r.node.params).map(([name, child]) => [name, child.raw])) };
 }
 
 // A sentence from core or the main process in `lang`.
@@ -158,9 +243,12 @@ export function sayIn(lang, text) {
   const s = String(text);
   const k = `${lang}|${s}`;
   if (heard.has(k)) return heard.get(k);
+  const r = read(s, false, 0);
   let out = s;
-  if (unsay(s)) out = sayInner(lang, s, 0);
-  else missing(lang, `said: ${s.slice(0, 60)}`);
+  if (r) {
+    out = render(lang, r.node);
+    tellUnread(lang, r.node);
+  } else missing(lang, sentenceMark(s));
   if (heard.size >= MOST_SAID) heard.clear();
   heard.set(k, out);
   return out;

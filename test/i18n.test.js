@@ -154,11 +154,15 @@ test('every sentence core says reads back as the entry that built it, filled as 
   const { TABLES, unsay, placeholders } = await load();
   const said = Object.entries(TABLES.en).filter(([key]) => key.startsWith('said.'));
   assert.ok(said.length > 100, 'core\'s sentences are in the table');
+  const fillers = ['said.main.upToDate', 'said.fs.columnsSaved', 'said.projects.notDate', 'said.projects.giveName'].map((k) => TABLES.en[k]);
   for (const [key, value] of said) {
     for (const [form, text] of typeof value === 'object' ? Object.entries(value) : [['', value]]) {
       assert.doesNotMatch(text, /\}\{/, `${key}: two placeholders side by side cannot be told apart`);
       const names = [...placeholders(text)];
-      const params = Object.fromEntries(names.map((name, i) => [name, name === 'n' ? (form === 'one' ? 1 : 7) : `‹${i} with words›`]));
+      // An entry with fewer than four letters of its own holds sentences the tables built; any other, any words.
+      const own = text.replace(/\{\w+\}/g, '').replace(/[^A-Za-z]/g, '').length;
+      const params = Object.fromEntries(names.map((name, i) => [name, name === 'n' ? (form === 'one' ? 1 : 7) : name === 'count' ? 'at least 7'
+        : own < 4 ? fillers[i] : `‹${i} with words›`]));
       const filled = text.replace(/\{(\w+)\}/g, (_, name) => String(params[name]));
       const found = unsay(filled, { inside: true });
       assert.equal(found?.key, key, `${key}${form ? ` (${form})` : ''} reads back as itself`);
@@ -198,7 +202,8 @@ test('a core sentence Chinese lacks, and one no entry built, stay English and ar
     assert.deepEqual(told.filter((t) => t.endsWith('said.main.upToDate')), ['zh-TW:said.main.upToDate'], 'told once');
     assert.equal(i18n.sayIn('zh-TW', 'Words from somewhere else'), 'Words from somewhere else');
     assert.equal(i18n.sayIn('zh-TW', 'Words from somewhere else'), 'Words from somewhere else');
-    assert.deepEqual(told.filter((t) => t.includes('somewhere')), ['zh-TW:said: Words from somewhere else'], 'told once');
+    assert.deepEqual(told.filter((t) => t.includes(i18n.sentenceMark('Words from somewhere else'))), [`zh-TW:${i18n.sentenceMark('Words from somewhere else')}`], 'told once, by a mark');
+    assert.ok(told.every((t) => !t.includes('somewhere')), 'the log never holds the sentence');
   } finally {
     zh['said.main.upToDate'] = kept;
     i18n.onMissing(null);
@@ -222,9 +227,9 @@ test('a whole sentence is never read as a part with fewer than four letters of i
   i18n.onMissing((lang, key) => told.push(key));
   try {
     assert.equal(i18n.unsay('Words from elsewhere (and a reason)'), null, 'not "{words} ({where})"');
-    assert.ok(i18n.unsay('Words from elsewhere (and a reason)', { inside: true }), 'which a sentence may hold inside it');
+    assert.equal(i18n.unsay('Words from elsewhere (and a reason)', { inside: true }), null, 'nor inside one, when its parts are not sentences the tables built');
     assert.equal(i18n.sayIn('zh-TW', 'Words from elsewhere (and a reason)'), 'Words from elsewhere (and a reason)');
-    assert.deepEqual(told, ['said: Words from elsewhere (and a reason)']);
+    assert.deepEqual(told, [i18n.sentenceMark('Words from elsewhere (and a reason)')]);
   } finally {
     i18n.onMissing(null);
   }
