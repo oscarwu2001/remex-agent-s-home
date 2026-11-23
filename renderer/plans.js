@@ -37,6 +37,8 @@ export function estimate(hits, plan, usage) {
   const used = { '5h': usage?.last5h?.total, week: usage?.week?.total };
   const out = {};
   for (const w of WINDOWS) {
+    // A hit with no Claude Code tokens before it came from use elsewhere
+    // (claude.ai shares the plan's limits): it says nothing about the level.
     const mine = (hits ?? []).filter((h) => h.plan === plan && h.window === w && Number.isFinite(h.tokens) && h.tokens > 0)
       .sort((a, b) => a.at - b.at);
     if (mine.length < HITS_NEEDED || !Number.isFinite(used[w])) {

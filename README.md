@@ -169,7 +169,12 @@ app itself never removes anything, and only looks when you press the button.
 **Mini window** (top of the map) opens a small window that stays on top of
 your other windows, like a music player's mini mode. It has two tabs:
 
-- **Now**: every live session by computer and project, each with its status
+- **Now**: at the top, your **plan and use**: the plan you picked in
+  Settings (or a pointer to pick one), the learned estimate (below), the
+  running session whose context is fullest, with its percent written out,
+  and the tokens of the last 5 hours and 7 days. "Exact limits: Claude →
+  Settings → Usage" says where Claude shows the real numbers. Below it,
+  every live session by computer and project, each with its status
   glyph, its helpers and its to-do list as pips (a ring for to do, a
   half-filled ring for in progress, a ticked square for done). With privacy
   mode off it also shows the task being worked on, and the whole list a
@@ -782,7 +787,9 @@ figure is doing:
 - Claude Code itself says a usage limit is near or reached.
 - your own warning level is reached. Set how many tokens in 5 hours in Settings; you get a warning at 80% and again at 100%.
 
-Plan limits (Pro, Max) are not written anywhere on your computer, so the app doesn't guess them.
+Plan limits (Pro, Max) are not written anywhere on your computer, so the app doesn't guess them. Instead:
+
+**Your plan and the learned estimate.** Pick your Claude plan in **Settings → Privacy & alerts → Usage warnings** (Not set, Pro, Max 5×, Max 20×, Team, Enterprise, API). The board's Claude Code use and the mini window show it. Each time Claude Code writes that a limit was reached, the app records the hit once, in `usage-limits.json` in its own data folder: when, the plan picked then, the window (weekly when the message says weekly, else the 5 hours) and the tokens (input, output and both caches) used in that window just before. A message repeated while the limit holds, with nothing answered in between, is the same hit. Once a plan has 2 hits for a window, the app shows *Estimate: about N% of your 5-hour (or weekly) limit used*, from the middle of the latest 5 hits; past that level it says so in words. A new plan starts a new count, and the old plan's hits are kept. It is rough: claude.ai and the desktop app's chat share the same limits but write no transcripts here. A `usage-limits.json` the app cannot read is said under Needs attention, left as it is, and the estimate pauses until it reads again.
 
 Each row also shows **tokens used**, counted the same way as the performance report (input, output and cache, each reply once). A session's row includes every helper it has called. The header shows the total for everyone on shift.
 
