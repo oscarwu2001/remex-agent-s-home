@@ -170,11 +170,13 @@ test('the context meter: the fullest running session, else the fullest waiting f
   assert.equal(ctx.side, '!');
   assert.equal(ctx.title, 'Fullest context: beta, 88% used');
   assert.match(html, /aria-valuenow="88"/);
-  assert.equal(note(html), '! beta\'s context is nearly full: save your work');
-  assert.match(html, /class="meters-note warn" title="beta&#39;s context is nearly full: save your work"/);
+  // What to do first, the project last, so a long name is what gets cut.
+  assert.equal(note(html), '! Context nearly full: save your work · beta');
+  assert.match(html, /class="meters-note warn" title="Context nearly full: save your work · beta"/);
   const calm = metersHtml(snap([], { sessions: [sessions[0]] }), 'pro');
   assert.equal(meters(calm)[0].value, '41%');
   assert.equal(note(calm), 'Fullest context: alpha');
+  assert.match(calm, /<p class="meters-note" title="Fullest context: alpha"><span>Fullest context: alpha<\/span><\/p>/, 'the plain line has its span and hover too');
   assert.doesNotMatch(calm, /save your work|use-mark/);
   // Nothing running: the one waiting for your turn, not the idle one.
   assert.equal(meters(metersHtml(snap([], { sessions: sessions.slice(2) }), 'pro'))[0].title, 'Fullest context: delta, 60% used');
@@ -184,7 +186,7 @@ test('the context meter: the fullest running session, else the fullest waiting f
   const full = metersHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 1.02 } }] }), 'pro');
   assert.equal(meters(full)[0].value, '102%');
   assert.match(full, /aria-valuenow="100"/);
-  assert.equal(note(full), '! alpha\'s context is full: save your work');
+  assert.equal(note(full), '! Context full: save your work · alpha');
 });
 
 test('the 5-hour and 7-day meters: tokens with their unit always, the estimate\'s share and bar once there is one, a mark and a word past the learned level', async () => {
@@ -242,7 +244,7 @@ test('the head in Chinese', async () => {
     assert.equal(m[1].side, '約 25%');
     assert.equal(m[1].title, '過去 5 小時用了 3.0k token。估計：5 小時上限已用約 25%');
     assert.equal(m[2].title, '過去 7 天用了 30M token。碰到 2 次上限後開始估計');
-    assert.equal(note(html), '! alpha 的上下文快滿了，請先儲存');
+    assert.equal(note(html), '! 上下文快滿了，請先儲存：alpha');
     assert.match(html, /aria-label="上下文與用量"/);
     assert.equal(meters(metersHtml(snap(twoHits, { last5h: 30_000 }), 'pro'))[1].side, '! 已超過');
     assert.equal(note(metersHtml(snap([], { sessions: [{ ...sessions[0], context: { pct: 0.3 } }] }), 'pro')), '最滿的上下文：alpha');

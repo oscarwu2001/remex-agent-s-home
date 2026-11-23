@@ -149,7 +149,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 .meter-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .meter.warn .meter-bar > span, .meter.over .meter-bar > span { background: var(--warn); }
 /* Always one line, so the head never changes height; the whole sentence is on hover. */
-.meters-note { display: flex; align-items: center; min-width: 0; padding: 0 var(--s-1); font-size: 11.5px; line-height: 16px; color: var(--ink-muted); }
+.meters-note { display: flex; align-items: center; min-width: 0; padding: 0 calc(var(--s-3) + 1px); font-size: 11.5px; line-height: 16px; color: var(--ink-muted); }
 .meters-note, .meters-note > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meters-note.warn { color: var(--warn); }
 .meters-note .use-mark { flex: none; }
@@ -178,6 +178,11 @@ body { min-height: 100vh; overflow-x: hidden; }
 .headline .badges { margin-top: 0; gap: var(--s-1); }
 /* Tighter pills here, so the counts fit one line at 280 px. */
 .headline .badge { gap: 3px; padding: 0 5px 0 4px; }
+/* At the narrowest, a little tighter still, so two-digit counts stay on one line and the head keeps its height. */
+@media (max-width: 300px) {
+  .headline .badges { gap: 3px; }
+  .headline .badge { gap: 2px; padding: 0 4px 0 3px; font-size: 12px; }
+}
 .proj-head { align-items: center; }
 .proj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

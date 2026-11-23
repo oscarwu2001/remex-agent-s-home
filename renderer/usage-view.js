@@ -164,11 +164,10 @@ function windowMeter(w, usage, p, plan) {
 // The line under the rows, always there so the head never changes height:
 // whose context the first row is, or that it is nearly full, in words.
 function contextCaption(s) {
-  if (!s) return `<p class="meters-note">${esc(tr('use.meter.noContextShort'))}</p>`;
+  const line = (words, warn = false) => `<p class="meters-note${warn ? ' warn' : ''}" title="${esc(words)}">${warn ? mark : ''}<span>${esc(words)}</span></p>`;
+  if (!s) return line(tr('use.meter.noContextShort'));
   const state = s.context.pct >= 1 ? 'use.meter.full' : s.context.pct >= CONTEXT_WARN ? 'use.meter.nearlyFull' : null;
-  if (!state) return `<p class="meters-note">${esc(tr('use.meter.whose', { project: s.project }))}</p>`;
-  const words = tr(state, { project: s.project });
-  return `<p class="meters-note warn" title="${esc(words)}">${mark}<span>${esc(words)}</span></p>`;
+  return state ? line(tr(state, { project: s.project }), true) : line(tr('use.meter.whose', { project: s.project }));
 }
 
 // The mini window's head: context, 5 hours and 7 days, always the same
