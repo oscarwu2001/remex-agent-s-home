@@ -2526,7 +2526,8 @@ async function showLogStatus() {
   }
   const { summary: s, team } = res;
   if (team.reminders !== 'on') {
-    line.textContent = tr('log.remindersOff', { team: team.team });
+    // The team's count ("15/22"), or why it could not be counted, in main's words.
+    line.textContent = tr('log.remindersOff', { team: /^\d+\/\d+$/.test(team.team) ? team.team : said(team.team) });
   } else if (!s.runs) {
     line.textContent = tr('log.remindersIdle');
   } else {

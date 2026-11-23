@@ -1249,7 +1249,7 @@ app.whenReady().then(() => {
         team: `${st.items.filter((i) => i.kind !== 'hook' && i.installed).length}/${st.items.filter((i) => i.kind !== 'hook').length}`,
       };
     } catch (err) {
-      return { team: `unreadable (${err.code || err.message})` };
+      return { team: en('said.cowork.unreadable', { code: err.code || err.message }) };
     }
   };
   syslog.write('activity', 'app-start', { version: app.getVersion(), ...teamState() });
@@ -2280,7 +2280,7 @@ app.whenReady().then(() => {
   // Picked in Settings and saved with the window's preferences. A new pick
   // reloads both windows from here: they never navigate themselves.
   ipcMain.handle('home:language', (_event, id, { reload = false } = {}) => {
-    if (!Object.hasOwn(i18n.TABLES, id)) return { ok: false, error: 'unknown language' };
+    if (!Object.hasOwn(i18n.TABLES, id)) return { ok: false, error: en('said.main.unknownLanguage') };
     uiLanguage = id;
     if (reload) for (const w of [win, mini]) if (w && !w.isDestroyed()) w.webContents.reload();
     return { ok: true };

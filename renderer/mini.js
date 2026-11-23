@@ -10,7 +10,7 @@ import { personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
 import { miniHtml } from './mini-view.js';
-import { tr, localise, setLanguage, resolveLanguage, onMissing } from './i18n.js';
+import { tr, localise, setLanguage, resolveLanguage, onMissing, said } from './i18n.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
@@ -92,12 +92,12 @@ wireProjects($('projects'), {
   change: async (c) => {
     if (prefs.demo) return demoProj.change(c);
     if (!bridge.projectChange) return { ok: false, error: tr('proj.previewSave') };
-    return bridge.projectChange(c).catch((err) => ({ ok: false, error: err.message }));
+    return bridge.projectChange(c).then((res) => (res.ok ? res : { ...res, error: said(res.error) }), (err) => ({ ok: false, error: err.message }));
   },
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
   worktrees: projTrees,
-  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: tr('proj.previewTrees') }),
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id).then((res) => (res.ok ? res : { ...res, error: said(res.error) })) : { ok: false, error: tr('proj.previewTrees') }),
 });
 function showTab(which) {
   const projects = which === 'projects';

@@ -1816,4 +1816,5 @@ export default {
   'said.ledger.unreadable': '無法讀取判定記錄簿（{code}）',
   'said.ledger.noColumns': '判定記錄簿沒有時間戳記、代理或判定欄，所以沒有計入',
   'said.ledger.oddRows': '判定記錄簿有 {n} 列無法讀取，已略過',
+  'said.main.unknownLanguage': '不明的語言',
 };

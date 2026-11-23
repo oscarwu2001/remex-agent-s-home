@@ -1816,4 +1816,5 @@ export default {
   'said.ledger.unreadable': 'The verdict ledger could not be read ({code})',
   'said.ledger.noColumns': 'The verdict ledger has no timestamp, agent or verdict column, so it was not counted',
   'said.ledger.oddRows': { one: '{n} row of the verdict ledger could not be read and was skipped', other: '{n} rows of the verdict ledger could not be read and were skipped' },
+  'said.main.unknownLanguage': 'unknown language',
 };
