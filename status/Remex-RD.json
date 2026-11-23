@@ -3,35 +3,14 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1795399202172,
+ "at": 1795402802174,
  "every": 3600000,
  "sessions": [
   {
-   "project": "spine-demo",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1795398082035,
-   "agents": []
-  },
-  {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795397712286.966,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1795398101227,
-   "agents": []
-  },
-  {
-   "project": "spine-sim",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1795398435183.3171,
+   "lastAt": 1795401832556.5745,
    "agents": []
   }
  ],
@@ -86,13 +65,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 621,
+    "memUsed": 609,
     "memTotal": 16380,
-    "temp": 36
+    "temp": 37
    }
   ],
-  "cpu": 7,
-  "memUsed": 14321,
+  "cpu": 6,
+  "memUsed": 14466,
   "memTotal": 48916
  }
 }
