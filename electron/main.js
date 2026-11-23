@@ -374,7 +374,7 @@ app.whenReady().then(() => {
     }
     const roots = allRoots();
     const child = utilityProcess.fork(path.join(__dirname, '..', 'src', 'report', 'agent-report.js'),
-      ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots), ...(details === true ? ['--details'] : [])], { stdio: 'pipe' });
+      ['--days', String(n), '--out', reportsDir, '--roots', JSON.stringify(roots), '--lang', uiLanguage, ...(details === true ? ['--details'] : [])], { stdio: 'pipe' });
     let err = '';
     let answered = false;
     child.stderr.on('data', (d) => { err += d; });

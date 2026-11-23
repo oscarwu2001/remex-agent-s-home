@@ -11,6 +11,7 @@
 //   npm run report -- --compare 2026-09-24        before / after a change
 //   npm run report -- --details                   show Agent-call descriptions
 //   npm run report -- --out dir                   somewhere other than out/reports
+//   npm run report -- --lang zh-TW                the page in Traditional Chinese (en, zh-TW)
 //
 // The report holds counts, durations, token numbers, names and one-word
 // verdicts. It never holds results, file names, commands or project names
@@ -27,12 +28,14 @@ const { readLedger } = require('../core/ledger');
 const { execFileSync } = require('child_process');
 const { defaultRoots } = require('../core/watcher');
 const { roomFor, validateLayout, roomsWith, overridesFrom, validateOverrides } = require('../core/rooms');
+const { translate, trHtmlIn, raw, sayIn, en, languageInfo, LANGUAGES, DEFAULT_LANGUAGE } = require('../core/i18n');
+const { placeWords } = require('../../renderer/places.js');
 const os = require('os');
 
 // ---- arguments ---------------------------------------------------------------
 
 function args(argv) {
-  const opt = { days: 28, out: path.join(process.cwd(), 'out', 'reports'), byProject: false, roots: undefined, json: false };
+  const opt = { days: 28, out: path.join(process.cwd(), 'out', 'reports'), byProject: false, roots: undefined, json: false, lang: DEFAULT_LANGUAGE };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--days') {
@@ -48,12 +51,14 @@ function args(argv) {
     else if (a === '--until') opt.until = endOfDay(dateArg('--until', argv[++i]));
     else if (a === '--compare') opt.compare = dateArg('--compare', argv[++i]);
     else if (a === '--details') opt.details = true;
+    else if (a === '--lang') opt.lang = argv[++i]; // the page's language; the app passes its own
     else if (a === '--help' || a === '-h') opt.help = true;
     else throw new Error(`Unknown option ${a}. Try --help.`);
   }
   if (!Number.isInteger(opt.days) || opt.days < 1 || opt.days > 365) {
     throw new Error('--days must be a whole number from 1 to 365');
   }
+  if (!LANGUAGES.some((l) => l.id === opt.lang)) throw new Error(`--lang must be one of ${LANGUAGES.map((l) => l.id).join(', ')}`);
   if (opt.until !== undefined && opt.since === undefined) throw new Error('--until needs --since');
   if (opt.since !== undefined && opt.daysGiven) throw new Error('use either --days or --since, not both');
   if (opt.since !== undefined) {
@@ -111,13 +116,20 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const pct = (x) => (x === undefined ? '—' : `${Math.round(x * 100)}%`);
 const num = (x, d = 0) => (x === undefined ? '—' : x.toLocaleString('en-US', { maximumFractionDigits: d }));
 
+// The page's language: run() sets it from --lang before anything is drawn.
+// The CSV columns and the command line's own lines stay English.
+let lang = DEFAULT_LANGUAGE;
+const words = (key, params) => translate(lang, key, params);
+const html = (key, params) => esc(words(key, params));
+const markup = (key, params) => trHtmlIn(lang, key, params);
+
 function dur(ms) {
   if (ms === undefined) return '—';
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return words('report.dur.s', { s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+  if (m < 60) return words('report.dur.ms', { m, s: String(s % 60).padStart(2, '0') });
+  return words('report.dur.hm', { h: Math.floor(m / 60), m: String(m % 60).padStart(2, '0') });
 }
 
 function compact(n) {
@@ -140,7 +152,7 @@ function readJson(file, problems) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
-    if (err.code !== 'ENOENT') problems.push(`${path.basename(file)} could not be read, so the default rooms are used`);
+    if (err.code !== 'ENOENT') problems.push(en('said.report.fileUnreadable', { file: path.basename(file) }));
     return undefined;
   }
 }
@@ -151,16 +163,16 @@ function roomSetup(problems) {
   try {
     layout = validateLayout(readJson(path.join(dir, 'layout.json'), problems));
   } catch (err) {
-    problems.push(`layout.json ignored: ${err.message}`);
+    problems.push(en('said.report.layoutIgnored', { why: err.message }));
   }
   const rooms = roomsWith(layout);
   let fromFile = {};
   try {
     fromFile = validateOverrides(readJson(path.join(dir, 'rooms.json'), problems), new Set(rooms.map((r) => r.id)));
   } catch (err) {
-    problems.push(`rooms.json ignored: ${err.message}`);
+    problems.push(en('said.report.roomsIgnored', { why: err.message }));
   }
-  return { names: Object.fromEntries(rooms.map((r) => [r.id, r.name])), overrides: { ...overridesFrom(layout), ...fromFile } };
+  return { names: Object.fromEntries(rooms.map((r) => [r.id, r])), overrides: { ...overridesFrom(layout), ...fromFile } };
 }
 let roomName = {};
 let roomOverrides = {};
@@ -202,7 +214,7 @@ function dailyColumns(days, daily, typeSlot) {
       const isTop = k === rows.length - 1;
       const h = Math.max(0, y0 - y1 - (k ? 2 : 0)); // 2px surface gap between segments
       const yTop = y1;
-      s += `<path class="mark s${typeSlot(r.type)}" d="${barPath(x, yTop, barW, h, isTop)}"><title>${esc(r.type)} · ${d}: ${r.runs} run${r.runs === 1 ? '' : 's'}</title></path>`;
+      s += `<path class="mark s${typeSlot(r.type)}" d="${barPath(x, yTop, barW, h, isTop)}"><title>${html('report.daily.title', { agent: r.type, day: d, n: r.runs })}</title></path>`;
       base += r.runs;
     });
     if (days.length <= 14 || i % Math.ceil(days.length / 14) === 0) {
@@ -210,7 +222,7 @@ function dailyColumns(days, daily, typeSlot) {
     }
   });
   s += `<line class="axis" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Helper runs per day, stacked by agent">${s}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${html('report.daily.aria')}">${s}</svg>`;
 }
 
 // Column with a 4px rounded top when it is the top segment, square base.
@@ -228,7 +240,7 @@ function niceStep(max) {
 // Median to p90 duration per agent: one hue, a dot at the median.
 function durationRanges(types, overall) {
   const rows = types.filter((t) => overall[t].medianMs !== undefined);
-  if (!rows.length) return '<p class="muted">No finished runs yet.</p>';
+  if (!rows.length) return `<p class="muted">${html('report.durations.none')}</p>`;
   const W = 760;
   const rowH = 30;
   const pad = { l: 170, r: 170, t: 8, b: 26 };
@@ -249,10 +261,10 @@ function durationRanges(types, overall) {
     const cy = pad.t + rowH * i + rowH / 2;
     s += `<text class="label" x="${pad.l - 10}" y="${cy + 4}" text-anchor="end">${esc(t)}</text>`;
     if (o.p90Ms !== undefined) s += `<line class="range" x1="${x(o.medianMs)}" x2="${x(o.p90Ms)}" y1="${cy}" y2="${cy}"/>`;
-    s += `<circle class="dot" cx="${x(o.medianMs)}" cy="${cy}" r="5"><title>${esc(t)}: median ${dur(o.medianMs)}, p90 ${dur(o.p90Ms)}</title></circle>`;
-    s += `<text class="value" x="${x(o.p90Ms ?? o.medianMs) + 10}" y="${cy + 4}">${dur(o.medianMs)} median · ${dur(o.p90Ms)} p90</text>`;
+    s += `<circle class="dot" cx="${x(o.medianMs)}" cy="${cy}" r="5"><title>${html('report.durations.title', { agent: t, median: dur(o.medianMs), p90: dur(o.p90Ms) })}</title></circle>`;
+    s += `<text class="value" x="${x(o.p90Ms ?? o.medianMs) + 10}" y="${cy + 4}">${html('report.durations.value', { median: dur(o.medianMs), p90: dur(o.p90Ms) })}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Median and 90th percentile run time per agent">${s}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${html('report.durations.aria')}">${s}</svg>`;
 }
 
 // Weekly score per agent: lines, one colour per agent, labelled at the end.
@@ -264,7 +276,7 @@ function weeklyScores(weekly, typeSlot) {
     if (!series.has(r.type)) series.set(r.type, []);
     series.get(r.type).push(r);
   }
-  if (!series.size) return `<p class="muted">Scores appear once an agent has ${3} runs in a week.</p>`;
+  if (!series.size) return `<p class="muted">${html('report.weekly.none', { n: 3 })}</p>`;
   const W = 760;
   const H = 260;
   const pad = { l: 36, r: 190, t: 12, b: 28 };
@@ -286,7 +298,7 @@ function weeklyScores(weekly, typeSlot) {
     const pts = rows.sort((a, b) => a.period.localeCompare(b.period)).map((r) => [x(r.period), y(r.score.value), r]);
     if (pts.length > 1) s += `<polyline class="line s${slot}" points="${pts.map((p) => `${p[0]},${p[1]}`).join(' ')}"/>`;
     for (const [px, py, r] of pts) {
-      s += `<circle class="pt s${slot}" cx="${px}" cy="${py}" r="4"><title>${esc(type)} · ${r.period}: ${r.score.value} (${r.runs} runs)</title></circle>`;
+      s += `<circle class="pt s${slot}" cx="${px}" cy="${py}" r="4"><title>${html('report.weekly.title', { agent: type, week: r.period, score: r.score.value, n: r.runs })}</title></circle>`;
     }
     const last = pts[pts.length - 1];
     ends.push({ type, y: last[1], x: last[0], slot, value: last[2].score.value });
@@ -301,7 +313,7 @@ function weeklyScores(weekly, typeSlot) {
     s += `<rect class="mark s${e.slot}" x="${W - pad.r + 12}" y="${ly - 5}" width="10" height="10" rx="3"/>`;
     s += `<text class="label" x="${W - pad.r + 28}" y="${ly + 4}">${esc(e.type)} ${e.value}</text>`;
   }
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly score per agent">${s}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${html('report.weekly.aria')}">${s}</svg>`;
 }
 
 function sparkline(values) {
@@ -328,11 +340,11 @@ function modelsText(models) {
 }
 
 function deltaText(now, before, fmt, upIsGood = true) {
-  if (now === undefined || before === undefined) return 'no earlier period to compare';
+  if (now === undefined || before === undefined) return html('report.kpi.noEarlier');
   const diff = now - before;
-  if (Math.abs(diff) < 1e-9) return 'same as the period before';
+  if (Math.abs(diff) < 1e-9) return html('report.delta.same');
   const good = diff > 0 === upIsGood;
-  return `<span class="${good ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${fmt(Math.abs(diff))}, ${good ? 'better' : 'worse'}</span> than the period before`;
+  return markup(good ? 'report.delta.better' : 'report.delta.worse', { arrow: diff > 0 ? '▲' : '▼', diff: fmt(Math.abs(diff)) });
 }
 
 // Who called whom: You on the left, the agents and skills you (or Claude
@@ -342,11 +354,11 @@ function deltaText(now, before, fmt, upIsGood = true) {
 function flowChart(team) {
   const FIRST = 12;
   const fromYou = team.edges.filter((e) => e.from === YOU);
-  if (!fromYou.length) return '<p class="muted">No agents or skills were called in this period.</p>';
+  if (!fromYou.length) return `<p class="muted">${html('report.flow.none')}</p>`;
   const shown = fromYou.slice(0, FIRST);
   const rest = fromYou.slice(FIRST);
   const middle = [...shown.map((e) => ({ name: e.to, kind: e.kind, count: e.count }))];
-  if (rest.length) middle.push({ name: `${rest.length} more`, kind: 'more', count: rest.reduce((a, e) => a + e.count, 0) });
+  if (rest.length) middle.push({ name: words('report.flow.more', { n: rest.length }), kind: 'more', count: rest.reduce((a, e) => a + e.count, 0) });
   const agentsShown = new Set(shown.filter((e) => e.kind === 'agent').map((e) => e.to));
   const inner = team.edges.filter((e) => e.from !== YOU && agentsShown.has(e.from)).slice(0, FIRST);
   const right = [...new Set(inner.map((e) => e.to))];
@@ -372,15 +384,15 @@ function flowChart(team) {
     <rect x="${x}" y="${(y - NODE_H / 2).toFixed(1)}" width="${w}" height="${NODE_H}" rx="${kind === 'skill' ? 4 : 13}"/>
     <text class="label" x="${x + 10}" y="${(y + 4).toFixed(1)}">${esc(text)}</text></g>`;
   let links = '';
-  for (const m of middle) links += link(col[0] + NODE_W[0], youY, col[1], midY.get(m.name), m.count, `You → ${m.name}: ${m.count}`);
+  for (const m of middle) links += link(col[0] + NODE_W[0], youY, col[1], midY.get(m.name), m.count, words('report.flow.youTo', { to: m.name, n: m.count }));
   for (const e of inner) links += link(col[1] + NODE_W[1], midY.get(e.from), col[2], rightY.get(e.to), e.count, `${e.from} → /${e.to}: ${e.count}`);
   const nodes = [
-    node(col[0], youY, NODE_W[0], 'You', 'you', 'Your sessions (you, or Claude working for you)'),
+    node(col[0], youY, NODE_W[0], words('report.flow.you'), 'you', words('report.flow.youTitle')),
     ...middle.map((m) => node(col[1], midY.get(m.name), NODE_W[1],
-      `${m.kind === 'skill' ? '/' : ''}${m.name} · ${m.count}`, m.kind, `${m.kind === 'agent' ? 'Agent' : m.kind === 'skill' ? 'Skill' : 'Others'}: ${m.count} call${m.count === 1 ? '' : 's'}`)),
-    ...right.map((r) => node(col[2], rightY.get(r), NODE_W[2], `/${r} · ${inner.filter((e) => e.to === r).reduce((a, e) => a + e.count, 0)}`, 'skill', 'Skill run inside an agent')),
+      `${m.kind === 'skill' ? '/' : ''}${m.name} · ${m.count}`, m.kind, words(m.kind === 'agent' ? 'report.flow.agentCalls' : m.kind === 'skill' ? 'report.flow.skillCalls' : 'report.flow.otherCalls', { n: m.count }))),
+    ...right.map((r) => node(col[2], rightY.get(r), NODE_W[2], `/${r} · ${inner.filter((e) => e.to === r).reduce((a, e) => a + e.count, 0)}`, 'skill', words('report.flow.innerSkill'))),
   ].join('');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Who called whom: you, the agents and skills you called, and the skills those agents used">${links}${nodes}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${html('report.flow.aria')}">${links}${nodes}</svg>`;
 }
 
 function teamSection(team, opt) {
@@ -392,22 +404,22 @@ function teamSection(team, opt) {
   const unusedAgents = unusedOf('agent');
   const unusedSkills = unusedOf('skill');
   return `<section class="card">
-    <h2>How your team works together</h2>
-    <p class="muted">From what the transcripts show happened, not from anyone's routing rules, so it fits any set-up. Rounded boxes are agents, square ones skills; line width is the number of calls. Hover for the numbers.</p>
+    <h2>${html('report.team.h')}</h2>
+    <p class="muted">${html('report.team.intro')}</p>
     ${flowChart(team)}
-    <h3>Usual hand-off chains</h3>
-    <p class="muted">The agents and skills each session used, in order. Repeats are folded (×2); a verdict or a failure is shown in brackets.${team.sessionsWithSteps ? ` ${team.sessionsWithSteps} session${team.sessionsWithSteps === 1 ? '' : 's'} used at least one.` : ''}</p>
-    <table><thead><tr><th>Chain</th><th class="num">Sessions</th></tr></thead>
-      <tbody>${chains || '<tr><td colspan="2" class="muted">No session used two or more steps.</td></tr>'}</tbody></table>
-    <h3>Skills</h3>
-    <table><thead><tr><th>Skill</th><th class="num">Uses</th><th class="num">Typed by you</th><th class="num">Picked by Claude</th>
-      <th>Inside agents</th><th class="num">Errors</th></tr></thead>
-      <tbody>${skills || '<tr><td colspan="6" class="muted">No skills were used in this period.</td></tr>'}</tbody></table>
-    <h3>Installed, not used in these ${opt.days} days</h3>
+    <h3>${html('report.team.chainsH')}</h3>
+    <p class="muted">${html('report.team.chainsIntro')}${team.sessionsWithSteps ? ` ${html('report.team.chainsUsed', { n: team.sessionsWithSteps })}` : ''}</p>
+    <table><thead><tr><th>${html('report.col.chain')}</th><th class="num">${html('report.col.sessions')}</th></tr></thead>
+      <tbody>${chains || `<tr><td colspan="2" class="muted">${html('report.team.noChains')}</td></tr>`}</tbody></table>
+    <h3>${html('report.team.skillsH')}</h3>
+    <table><thead><tr><th>${html('report.col.skill')}</th><th class="num">${html('report.col.uses')}</th><th class="num">${html('report.col.typed')}</th><th class="num">${html('report.col.byClaude')}</th>
+      <th>${html('report.col.insideAgents')}</th><th class="num">${html('report.col.errors')}</th></tr></thead>
+      <tbody>${skills || `<tr><td colspan="6" class="muted">${html('report.team.noSkills')}</td></tr>`}</tbody></table>
+    <h3>${html('report.team.unusedH', { days: opt.days })}</h3>
     ${unusedAgents || unusedSkills
-    ? `<dl class="score">${unusedAgents ? `<dt>Agents</dt><dd>${unusedAgents}</dd>` : ''}${unusedSkills ? `<dt>Skills</dt><dd>${unusedSkills}</dd>` : ''}</dl>
-       <p class="muted">Worth a look: an agent or skill nobody calls may have a description that never matches, or may no longer be needed.</p>`
-    : '<p class="muted">Everything installed was used.</p>'}
+    ? `<dl class="score">${unusedAgents ? `<dt>${html('report.team.agents')}</dt><dd>${unusedAgents}</dd>` : ''}${unusedSkills ? `<dt>${html('report.team.skills')}</dt><dd>${unusedSkills}</dd>` : ''}</dl>
+       <p class="muted">${html('report.team.worthALook')}</p>`
+    : `<p class="muted">${html('report.team.allUsed')}</p>`}
   </section>`;
 }
 
@@ -423,9 +435,11 @@ const tilde = (p) => {
 };
 
 function machineLine(machine) {
-  const dirs = machine.dirs.map((d) => `${esc(tilde(d.dir))} at <code>${d.commit ? esc(d.commit) : 'not a git folder'}</code>${d.plugins.length
-    ? `, plugins: ${d.plugins.map(esc).join(', ')}` : ', no plugins enabled'}`).join(' · ');
-  return `<p class="sub">Machine <strong>${esc(machine.host)}</strong> · ${dirs}</p>`;
+  const dirs = machine.dirs.map((d) => {
+    const where = raw(markup('report.machine.dir', { dir: tilde(d.dir), commit: raw(`<code>${d.commit ? esc(d.commit) : html('report.machine.noGit')}</code>`) }));
+    return d.plugins.length ? markup('report.machine.plugins', { where, list: d.plugins.join(', ') }) : markup('report.machine.noPlugins', { where });
+  }).join(' · ');
+  return `<p class="sub">${markup('report.machine.line', { host: raw(`<strong>${esc(machine.host)}</strong>`), dirs: raw(dirs) })}</p>`;
 }
 
 function costSections({ cost, opt, stats, days }) {
@@ -433,12 +447,12 @@ function costSections({ cost, opt, stats, days }) {
   const callerRows = gp.byCaller.map((c) => `<tr><th scope="row">${esc(c.caller)}</th><td class="num">${c.runs}</td>
     <td class="num">${k(c.tokens)}</td><td class="num">${pct(c.share)}</td><td class="num">${k(c.weighted)}</td>
     <td class="num">${dur(c.medianMs)}</td><td class="num">${dur(c.p90Ms)}</td><td class="num">${c.background || '—'}</td></tr>`).join('');
-  const flagName = { Explore: 'Explore (mostly Read/Grep/Glob, no edits)', researcher: 'researcher (mostly WebFetch/WebSearch)', runner: 'runner (mostly Bash, no edits)', none: 'needs general-purpose (mixed, or edits)' };
-  const flagRows = gp.flags.map((f) => `<tr><th scope="row">${esc(flagName[f.flag] ?? f.flag)}</th><td class="num">${f.runs}</td>
+  const flagName = (flag) => (['Explore', 'researcher', 'runner', 'none'].includes(flag) ? words(`report.flag.${flag}`) : flag);
+  const flagRows = gp.flags.map((f) => `<tr><th scope="row">${esc(flagName(f.flag))}</th><td class="num">${f.runs}</td>
     <td class="num">${k(f.tokens)}</td><td class="num">${pct(f.share)}</td></tr>`).join('');
   const what = (r) => (opt.details
     ? `${esc(r.description || '—')}${r.promptLine ? `<div class="muted small">${esc(r.promptLine)}</div>` : ''}`
-    : '<span class="muted">hidden (add --details, or turn privacy mode off in the app)</span>');
+    : `<span class="muted">${html('report.gp.hidden')}</span>`);
   const topRows = gp.expensive.map((r) => `<tr><td>${what(r)}</td><td>${esc(r.caller)}</td><td>${esc(r.mode)}</td><td>${esc(r.model ?? '—')}</td>
     <td class="num">${k(totalTokens(r.tokens))}</td><td class="num">${k(costs.weighted(r.tokens))}</td><td class="num">${dur(r.durationMs)}</td>
     <td>${r.flag ? esc(r.flag) : '—'}</td></tr>`).join('');
@@ -447,8 +461,8 @@ function costSections({ cost, opt, stats, days }) {
     <td class="num">${k(t.input)}</td><td class="num">${k(t.cacheWrite)}</td><td class="num">${k(t.cacheRead)}</td><td class="num">${k(t.output)}</td>
     <td class="num">${k(t.total)}</td><td class="num"><strong>${k(t.weighted)}</strong></td></tr>`).join('');
   const matched = stats.matchedByAgentId + stats.matchedByPrompt;
-  const reconcile = `${stats.helperTranscripts} helper transcript${stats.helperTranscripts === 1 ? '' : 's'} read in all: ${stats.matchedByAgentId} matched by agent id,
-    ${stats.matchedByPrompt} by prompt, ${stats.helperTranscripts - matched} unattributed (${cost.unattributed.length} of them in this period, in the row above).`;
+  const reconcile = words('report.tokens.reconcile', { n: stats.helperTranscripts, byId: stats.matchedByAgentId, byPrompt: stats.matchedByPrompt,
+    none: stats.helperTranscripts - matched, inPeriod: cost.unattributed.length });
 
   const tm = (x) => (x.runs ? `${dur(x.medianMs)} / ${dur(x.p90Ms)} <span class="muted">(${x.runs})</span>` : '—');
   const timingRows = cost.timing.map((t) => `<tr><th scope="row">${esc(t.type)}</th><td class="num">${tm(t.foreground)}</td>
@@ -462,11 +476,12 @@ function costSections({ cost, opt, stats, days }) {
   const loadTotal = cost.loads.reduce((n, l) => n + (l.bytes ?? 0), 0);
 
   // Project names only with --by-project, as everywhere else in the report.
-  const srcText = (s) => (s.source === 'local' ? 'local' : s.source === 'plugin' ? `plugin ${s.owner}${s.enabled ? '' : ' (disabled)'}`
-    : opt.byProject ? `project ${s.owner}` : 'project');
+  const srcText = (s) => (s.source === 'local' ? words('report.src.local') : s.source === 'plugin' ? words(s.enabled ? 'report.src.plugin' : 'report.src.pluginOff', { owner: s.owner })
+    : opt.byProject ? words('report.src.project', { owner: s.owner }) : words('report.src.projectAny'));
   const dupes = cost.sources.filter((r) => r.duplicate);
+  const srcHead = `<tr><th>${html('report.col.skill')}</th><th>${html('report.col.sources')}</th><th>${html('report.col.duplicate')}</th><th class="num">${html('report.col.size')}</th></tr>`;
   const srcRow = (r) => `<tr><th scope="row">${esc(r.name)}</th><td>${r.sources.map((x) => esc(srcText(x))).join(', ')}</td>
-    <td>${r.duplicate ? '<strong>⚠ installed twice</strong>' : '—'}</td><td class="num">${bytes(r.sources[0]?.bytes)}</td></tr>`;
+    <td>${r.duplicate ? `<strong>${html('report.src.twice')}</strong>` : '—'}</td><td class="num">${bytes(r.sources[0]?.bytes)}</td></tr>`;
 
   const cmp = cost.compare;
   const cmpRows = cmp ? cmp.rows.map((r) => `<tr><th scope="row">${esc(r.type)}</th>
@@ -478,59 +493,59 @@ function costSections({ cost, opt, stats, days }) {
 
   return `
   <section class="card">
-    <h2>Where general-purpose goes</h2>
-    <p class="muted">${gp.runs} general-purpose run${gp.runs === 1 ? '' : 's'}, ${k(gp.tokens)} tokens. The caller is the skill running the parent's turn when the helper was launched (a typed /command, or a skill Claude loaded in that turn), else "direct".</p>
-    <table><thead><tr><th>Caller</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Share</th><th class="num">Weighted</th>
-      <th class="num">Median time</th><th class="num">p90 time</th><th class="num">Background</th></tr></thead>
-      <tbody>${callerRows || '<tr><td colspan="8" class="muted">No general-purpose runs in this period.</td></tr>'}</tbody></table>
-    <h3>Could have been a typed agent</h3>
-    <p class="muted">From each run's tool mix (70% or more of its calls). A typed agent has a narrower prompt and tool set, and usually a smaller model.</p>
-    <table><thead><tr><th>Looks like</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Share of general-purpose</th></tr></thead>
+    <h2>${html('report.gp.h')}</h2>
+    <p class="muted">${html('report.gp.intro', { n: gp.runs, tokens: k(gp.tokens) })}</p>
+    <table><thead><tr><th>${html('report.col.caller')}</th><th class="num">${html('report.col.runs')}</th><th class="num">${html('report.col.tokens')}</th><th class="num">${html('report.col.share')}</th><th class="num">${html('report.col.weighted')}</th>
+      <th class="num">${html('report.col.medianTime')}</th><th class="num">${html('report.col.p90Time')}</th><th class="num">${html('report.col.background')}</th></tr></thead>
+      <tbody>${callerRows || `<tr><td colspan="8" class="muted">${html('report.gp.none')}</td></tr>`}</tbody></table>
+    <h3>${html('report.gp.typedH')}</h3>
+    <p class="muted">${html('report.gp.typedIntro')}</p>
+    <table><thead><tr><th>${html('report.col.looksLike')}</th><th class="num">${html('report.col.runs')}</th><th class="num">${html('report.col.tokens')}</th><th class="num">${html('report.col.shareGp')}</th></tr></thead>
       <tbody>${flagRows || '<tr><td colspan="4" class="muted">—</td></tr>'}</tbody></table>
-    <h3>The ${gp.expensive.length || 10} most expensive runs</h3>
-    <table><thead><tr><th>Description and first line</th><th>Caller</th><th>Mode</th><th>Model</th><th class="num">Tokens</th><th class="num">Weighted</th>
-      <th class="num">Time</th><th>Could be</th></tr></thead>
+    <h3>${html('report.gp.topH', { n: gp.expensive.length || 10 })}</h3>
+    <table><thead><tr><th>${html('report.col.description')}</th><th>${html('report.col.caller')}</th><th>${html('report.col.mode')}</th><th>${html('report.col.model')}</th><th class="num">${html('report.col.tokens')}</th><th class="num">${html('report.col.weighted')}</th>
+      <th class="num">${html('report.col.time')}</th><th>${html('report.col.couldBe')}</th></tr></thead>
       <tbody>${topRows || '<tr><td colspan="8" class="muted">—</td></tr>'}</tbody></table>
   </section>
 
   <section class="card">
-    <h2>Tokens by type</h2>
-    <p class="muted">Weighted = fresh input × ${costs.COST_WEIGHTS.input} + cache write × ${costs.COST_WEIGHTS.cacheWrite} + cache read × ${costs.COST_WEIGHTS.cacheRead} + output × ${costs.COST_WEIGHTS.output}, in fresh-input-token equivalents. Cache reads cost about a tenth of fresh input, so heavy cache re-reading does not look like fresh spending. Each run's own figures are in runs.csv.</p>
-    <table><thead><tr><th>Agent</th><th class="num">Runs</th><th class="num">Fresh input</th><th class="num">Cache write</th><th class="num">Cache read</th>
-      <th class="num">Output</th><th class="num">Total</th><th class="num">Weighted</th></tr></thead>
+    <h2>${html('report.tokens.h')}</h2>
+    <p class="muted">${html('report.tokens.intro', { input: costs.COST_WEIGHTS.input, write: costs.COST_WEIGHTS.cacheWrite, read: costs.COST_WEIGHTS.cacheRead, output: costs.COST_WEIGHTS.output })}</p>
+    <table><thead><tr><th>${html('report.col.agent')}</th><th class="num">${html('report.col.runs')}</th><th class="num">${html('report.col.freshInput')}</th><th class="num">${html('report.col.cacheWrite')}</th><th class="num">${html('report.col.cacheRead')}</th>
+      <th class="num">${html('report.col.output')}</th><th class="num">${html('report.col.total')}</th><th class="num">${html('report.col.weighted')}</th></tr></thead>
       <tbody>${tokenRows || '<tr><td colspan="8" class="muted">—</td></tr>'}</tbody></table>
-    <p class="muted">${reconcile}</p>
+    <p class="muted">${esc(reconcile)}</p>
   </section>
 
   <section class="card">
-    <h2>Foreground and background times</h2>
-    <p class="muted">Median / p90 (runs). A background run is timed from its launch to the helper's last transcript line or its completion notice, whichever is later, not to the launch's immediate return. Runs with no recorded end are counted on their own and left out of the times. The score compares foreground runs only with foreground runs, and background with background.</p>
-    <table><thead><tr><th>Agent</th><th class="num">Foreground</th><th class="num">Background</th><th class="num">No recorded end</th></tr></thead>
+    <h2>${html('report.timing.h')}</h2>
+    <p class="muted">${html('report.timing.intro')}</p>
+    <table><thead><tr><th>${html('report.col.agent')}</th><th class="num">${html('report.col.foreground')}</th><th class="num">${html('report.col.background')}</th><th class="num">${html('report.col.noEnd')}</th></tr></thead>
       <tbody>${timingRows || '<tr><td colspan="4" class="muted">—</td></tr>'}</tbody></table>
   </section>
 
   <section class="card">
-    <h2>Skills loaded inside helpers</h2>
-    <p class="muted">Each load reads the skill's SKILL.md into the helper's context; the size is that file's, and skills of 20 KB or more are highlighted. ${bytes(loadTotal)} loaded in all.${split ? ` Before and after ${cmpDate}.` : ''}</p>
-    <table><thead><tr><th>Agent</th><th>Skill</th><th class="num">Loads</th>${split ? `<th class="num">Before ${cmpDate}</th><th class="num">From ${cmpDate}</th>` : ''}
-      <th class="num">Size each</th><th class="num">Total</th></tr></thead>
-      <tbody>${loadRows || `<tr><td colspan="${split ? 7 : 5}" class="muted">No skill was loaded inside a helper in this period.</td></tr>`}</tbody></table>
+    <h2>${html('report.loads.h')}</h2>
+    <p class="muted">${split ? html('report.loads.introSplit', { total: bytes(loadTotal), date: cmpDate }) : html('report.loads.intro', { total: bytes(loadTotal) })}</p>
+    <table><thead><tr><th>${html('report.col.agent')}</th><th>${html('report.col.skill')}</th><th class="num">${html('report.col.loads')}</th>${split ? `<th class="num">${html('report.col.beforeDate', { date: cmpDate })}</th><th class="num">${html('report.col.fromDate', { date: cmpDate })}</th>` : ''}
+      <th class="num">${html('report.col.sizeEach')}</th><th class="num">${html('report.col.total')}</th></tr></thead>
+      <tbody>${loadRows || `<tr><td colspan="${split ? 7 : 5}" class="muted">${html('report.loads.none')}</td></tr>`}</tbody></table>
   </section>
 
   <section class="card">
-    <h2>Where skills come from</h2>
-    <p class="muted">Names are matched without their plugin prefix (mattpocock-skills:tdd and tdd are one skill). ${dupes.length ? `${dupes.length} skill${dupes.length === 1 ? ' is' : 's are'} installed from more than one place.` : 'No skill is installed twice.'}</p>
-    ${dupes.length ? `<table><thead><tr><th>Skill</th><th>Sources</th><th>Duplicate</th><th class="num">Size</th></tr></thead><tbody>${dupes.map(srcRow).join('')}</tbody></table>` : ''}
-    <details><summary>Every installed skill (${cost.sources.length})</summary>
-      <table><thead><tr><th>Skill</th><th>Sources</th><th>Duplicate</th><th class="num">Size</th></tr></thead><tbody>${cost.sources.map(srcRow).join('')}</tbody></table>
+    <h2>${html('report.src.h')}</h2>
+    <p class="muted">${html('report.src.intro')} ${dupes.length ? html('report.src.dupes', { n: dupes.length }) : html('report.src.noDupes')}</p>
+    ${dupes.length ? `<table><thead>${srcHead}</thead><tbody>${dupes.map(srcRow).join('')}</tbody></table>` : ''}
+    <details><summary>${html('report.src.every', { n: cost.sources.length })}</summary>
+      <table><thead>${srcHead}</thead><tbody>${cost.sources.map(srcRow).join('')}</tbody></table>
     </details>
   </section>
   ${cmp ? `
   <section class="card">
-    <h2>Before and after ${cmpDate}</h2>
-    <p class="muted">The period split at ${cmpDate}. Unattributed helper transcripts: ${cmp.unattributed.before} before, ${cmp.unattributed.after} after.</p>
-    <table><thead><tr><th>Agent</th><th class="num">Runs before</th><th class="num">Runs after</th><th class="num">Weighted before</th><th class="num">Weighted after</th>
-      <th class="num">Median before</th><th class="num">Median after</th><th class="num">Skill loads before</th><th class="num">Skill loads after</th></tr></thead>
+    <h2>${html('report.cmp.h', { date: cmpDate })}</h2>
+    <p class="muted">${html('report.cmp.intro', { date: cmpDate, before: cmp.unattributed.before, after: cmp.unattributed.after })}</p>
+    <table><thead><tr><th>${html('report.col.agent')}</th><th class="num">${html('report.col.runsBefore')}</th><th class="num">${html('report.col.runsAfter')}</th><th class="num">${html('report.col.weightedBefore')}</th><th class="num">${html('report.col.weightedAfter')}</th>
+      <th class="num">${html('report.col.medianBefore')}</th><th class="num">${html('report.col.medianAfter')}</th><th class="num">${html('report.col.loadsBefore')}</th><th class="num">${html('report.col.loadsAfter')}</th></tr></thead>
       <tbody>${cmpRows}</tbody></table>
   </section>` : ''}`;
 }
@@ -547,16 +562,16 @@ function ledgerSection(ledger) {
     return `<tr><th scope="row">${esc(n)}</th><td class="num">${a.rows}</td>
       <td class="num">${judged ? pct(a.FAIL / judged) : '—'}</td>
       <td class="num">${a.real}</td><td class="num">${a.unverified}</td><td class="num">${a.falseAlarm}</td><td class="num">${a.open}</td>
-      <td class="num" title="${labelled ? `${pct(a.real / labelled)} of labelled FAILs were real` : 'No FAIL labelled yet'}">${labelled ? pct(a.real / labelled) : '—'}</td>
+      <td class="num" title="${labelled ? html('report.ledger.realOf', { pct: pct(a.real / labelled) }) : html('report.ledger.noLabel')}">${labelled ? pct(a.real / labelled) : '—'}</td>
       <td class="num">${a.missed}</td><td class="num">${a.BLOCKED}</td><td class="num">${a.MISSING + a.UNREAD}</td></tr>`;
   }).join('');
   return `<section class="card">
-    <h2>Verdict ledger</h2>
-    <p class="muted">From your own verdict ledger: every review verdict your hook logged in this period, and what you recorded for it afterwards. A real FAIL found a bug; a missed PASS let one through.</p>
-    <table><thead><tr><th>Agent</th><th class="num">Verdicts</th><th class="num">FAIL share</th><th class="num">Real</th><th class="num">Unverified</th>
-      <th class="num">False alarm</th><th class="num">Not labelled</th><th class="num">Real of labelled</th><th class="num">Missed PASS</th>
-      <th class="num">Blocked</th><th class="num">No verdict line</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="11" class="muted">No verdicts in this period.</td></tr>'}</tbody></table>
+    <h2>${html('report.ledger.h')}</h2>
+    <p class="muted">${html('report.ledger.intro')}</p>
+    <table><thead><tr><th>${html('report.col.agent')}</th><th class="num">${html('report.col.verdicts')}</th><th class="num">${html('report.col.fails')}</th><th class="num">${html('report.col.real')}</th><th class="num">${html('report.col.unverified')}</th>
+      <th class="num">${html('report.col.falseAlarm')}</th><th class="num">${html('report.col.notLabelled')}</th><th class="num">${html('report.col.realOfLabelled')}</th><th class="num">${html('report.col.missedPass')}</th>
+      <th class="num">${html('report.col.blocked')}</th><th class="num">${html('report.col.noVerdictLine')}</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="11" class="muted">${html('report.ledger.none')}</td></tr>`}</tbody></table>
   </section>`;
 }
 
@@ -580,35 +595,34 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
   }
 
   const scoreCell = (sc, mixed) => {
-    if (sc.value === undefined) return `<td class="num muted" title="Not scored: ${esc(sc.reason)}">—</td>`;
+    if (sc.value === undefined) return `<td class="num muted" title="${html('report.score.notScored', { why: sayIn(lang, sc.reason) })}">—</td>`;
     const p = sc.parts;
-    const label = { reliability: 'Reliability', rightFirst: 'Right first time', speed: 'Speed', efficiency: 'Efficiency' };
     const max = { reliability: 40, rightFirst: 20, speed: 20, efficiency: 20 };
-    const title = Object.keys(label)
-      .map((k) => (k in p ? `${label[k]} ${p[k].toFixed(0)}/${max[k]}` : `${label[k]} not measured`))
-      .join(' · ') + (mixed ? ' · foreground and background runs each judged against their own median' : '');
-    return `<td class="num" title="${title}"><strong>${sc.value}</strong></td>`;
+    const title = Object.keys(max)
+      .map((k) => { const label = words(`report.part.${k}`); return k in p ? words('report.score.part', { label, value: p[k].toFixed(0), max: max[k] }) : words('report.score.notMeasured', { label }); })
+      .join(' · ') + (mixed ? ` · ${words('report.score.mixed')}` : '');
+    return `<td class="num" title="${esc(title)}"><strong>${sc.value}</strong></td>`;
   };
 
   const rows = typeOrder.map((t) => {
     const o = roll.overall[t];
     const lastWeek = roll.weekly.filter((w) => w.type === t).sort((a, b) => a.period.localeCompare(b.period)).at(-1);
     const verdicts = [Object.entries(o.verdicts).map(([k, n]) => `${n} ${k}`).join(', '),
-      o.noVerdict ? `${o.noVerdict} with no verdict` : ''].filter(Boolean).join(' · ') || '—';
+      o.noVerdict ? words('report.verdicts.none', { n: o.noVerdict }) : ''].filter(Boolean).join(' · ') || '—';
     const spark = days.slice(-14).map((d) => dailyByType.get(t)?.get(d) ?? 0);
     return `<tr>
       <th scope="row"><span class="swatch s${typeSlot(t)}"></span>${esc(t)}</th>
-      <td>${esc(roomName[roomFor(t, roomOverrides)] ?? '')}</td>
+      <td>${esc(placeWords(roomName[roomFor(t, roomOverrides)], lang).name)}</td>
       <td>${esc(modelsText(o.models))}</td>
       <td class="num">${o.runs}</td>
       ${scoreCell(lastWeek ? lastWeek.score : o.score, lastWeek?.mixed)}
-      <td class="num"${o.turnLimit ? ` title="${o.turnLimit} stopped at the turn limit before handing back"` : ''}>${pct(o.successRate)}${o.turnLimit ? ` <span class="muted">(${o.turnLimit} at limit)</span>` : ''}</td>
+      <td class="num"${o.turnLimit ? ` title="${html('report.turnLimit.title', { n: o.turnLimit })}"` : ''}>${pct(o.successRate)}${o.turnLimit ? ` <span class="muted">${html('report.turnLimit.note', { n: o.turnLimit })}</span>` : ''}</td>
       <td class="num">${pct(o.rerunRate)}</td>
-      <td class="num" title="${o.reviewed ? `${o.firstPass} of ${o.reviewed} reviewed runs` : 'No review after its runs'}">${o.reviewed ? pct(o.firstPassRate) : '—'}</td>
+      <td class="num" title="${o.reviewed ? html('report.firstPass.title', { pass: o.firstPass, n: o.reviewed }) : html('report.firstPass.none')}">${o.reviewed ? pct(o.firstPassRate) : '—'}</td>
       <td class="num">${o.medianRounds === undefined ? '—' : num(o.medianRounds, 1)}</td>
       <td class="num">${dur(o.medianMs)}</td>
       <td class="num">${dur(o.p90Ms)}</td>
-      <td class="num" title="${compact(o.medianTokens)} raw">${compact(o.medianWeighted)}</td>
+      <td class="num" title="${html('report.raw', { n: compact(o.medianTokens) })}">${compact(o.medianWeighted)}</td>
       <td class="num">${num(o.toolCallsPerRun, 1)}</td>
       <td class="num">${pct(o.toolErrorRate)}</td>
       <td>${esc(verdicts)}</td>
@@ -622,26 +636,26 @@ function page({ opt, roll, runs, prevRuns, days, stats, problems, team, cost, ma
       <td class="num">${dur(w.medianMs)}</td><td class="num">${compact(w.medianWeighted)}</td></tr>`).join('');
 
   const notes = [
-    'Counts below cover every file read, which includes the period before this one (used for the comparisons).',
-    stats.ambiguousHelpers ? `${stats.ambiguousHelpers} helper transcript${stats.ambiguousHelpers === 1 ? '' : 's'} matched more than one run with the same prompt and ${stats.ambiguousHelpers === 1 ? 'was' : 'were'} not counted, rather than guessed.` : '',
-    stats.unplacedReviews ? `${stats.unplacedReviews} review${stats.unplacedReviews === 1 ? '' : 's'} came after two or more builders had handed back, so ${stats.unplacedReviews === 1 ? 'it was' : 'they were'} not credited to either rather than guessed.` : '',
-    stats.unmatchedHandbacks ? `${stats.unmatchedHandbacks} hand-back${stats.unmatchedHandbacks === 1 ? '' : 's'} reached a session from a helper the report could not match to a run, and ${stats.unmatchedHandbacks === 1 ? 'its verdict is' : 'their verdicts are'} not counted.` : '',
-    stats.unknownNotifications ? `${stats.unknownNotifications} background run${stats.unknownNotifications === 1 ? '' : 's'} ended with a status the report does not recognise and ${stats.unknownNotifications === 1 ? 'is' : 'are'} treated as unknown.` : '',
-    stats.malformedLines ? `${stats.malformedLines} transcript line${stats.malformedLines === 1 ? '' : 's'} could not be read and were skipped.` : '',
-    stats.unlinkedHelpers ? `${stats.unlinkedHelpers} helper transcript${stats.unlinkedHelpers === 1 ? '' : 's'} could not be matched to the call that started ${stats.unlinkedHelpers === 1 ? 'it' : 'them'}; their tokens and tool calls are not counted.` : '',
-    all.unknown ? `${all.unknown} run${all.unknown === 1 ? ' has' : 's have'} no recorded end (still running, or the transcript stops) and ${all.unknown === 1 ? 'is' : 'are'} left out of success rates and times.` : '',
-    ...problems,
+    words('report.notes.preamble'),
+    stats.ambiguousHelpers ? words('report.notes.ambiguous', { n: stats.ambiguousHelpers }) : '',
+    stats.unplacedReviews ? words('report.notes.unplaced', { n: stats.unplacedReviews }) : '',
+    stats.unmatchedHandbacks ? words('report.notes.unmatched', { n: stats.unmatchedHandbacks }) : '',
+    stats.unknownNotifications ? words('report.notes.unknownStatus', { n: stats.unknownNotifications }) : '',
+    stats.malformedLines ? words('report.notes.malformed', { n: stats.malformedLines }) : '',
+    stats.unlinkedHelpers ? words('report.notes.unlinked', { n: stats.unlinkedHelpers }) : '',
+    all.unknown ? words('report.notes.noEnd', { n: all.unknown }) : '',
+    ...problems.map((p) => sayIn(lang, p)),
   ].filter(Boolean);
   if (notes.length === 1) notes.length = 0; // only the preamble: nothing to note
 
   const generated = new Date();
   return `<!doctype html>
-<html lang="en">
+<html lang="${languageInfo(lang).html}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-<title>Agent performance</title>
+<title>${html('report.title')}</title>
 <style>
 :root { color-scheme: light; --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #6b6a65;
   --grid: #e1e0d9; --axis: #c3c2b7; --up: #006300; --down: #b3261e; --ring: rgba(11,11,11,0.10); ${seriesCss} }
@@ -703,50 +717,51 @@ dl.score dd { margin: 0; color: var(--ink-2); }
 </head>
 <body>
 <main>
-  <h1>Agent performance</h1>
-  <p class="sub">${opt.since !== undefined ? 'Period' : `Last ${opt.days} day${opt.days === 1 ? '' : 's'}`} · ${days[0]} to ${days.at(-1)} · generated ${generated.toLocaleString()} from ${stats.files} transcript file${stats.files === 1 ? '' : 's'}</p>
+  <h1>${html('report.title')}</h1>
+  <p class="sub">${html('report.sub', { period: opt.since !== undefined ? words('report.period') : words('report.lastDays', { n: opt.days }), from: days[0], to: days.at(-1),
+    when: generated.toLocaleString(languageInfo(lang).dates), files: words('report.files', { n: stats.files }) })}</p>
   ${machine ? machineLine(machine) : ''}
 
-  <section class="kpis" aria-label="Headline numbers">
-    ${kpi('Helper runs', num(all.runs), prevRuns.length
-    ? `${all.runs >= before.runs ? '▲' : '▼'} ${num(Math.abs(all.runs - before.runs))} vs the period before` : 'no earlier period to compare')}
-    ${kpi('Finished successfully', pct(all.successRate), deltaText(all.successRate, before.successRate, (d) => `${Math.round(d * 100)} pts`))}
-    ${kpi('Median helper time', dur(all.medianMs), deltaText(all.medianMs, before.medianMs, dur, false))}
-    ${kpi('Helper cost, weighted tokens', compact(all.totalWeighted), `${compact(all.totalTokens)} raw, mostly cache re-reads at a tenth of the price${prevRuns.length
-    ? ` · ${all.totalWeighted >= before.totalWeighted ? '▲' : '▼'} ${compact(Math.abs(all.totalWeighted - before.totalWeighted))} vs the period before` : ''}`)}
+  <section class="kpis" aria-label="${html('report.kpis')}">
+    ${kpi(html('report.kpi.runs'), num(all.runs), prevRuns.length
+    ? html('report.kpi.vsBefore', { arrow: all.runs >= before.runs ? '▲' : '▼', diff: num(Math.abs(all.runs - before.runs)) }) : html('report.kpi.noEarlier'))}
+    ${kpi(html('report.kpi.success'), pct(all.successRate), deltaText(all.successRate, before.successRate, (d) => words('report.kpi.pts', { d: Math.round(d * 100) })))}
+    ${kpi(html('report.kpi.median'), dur(all.medianMs), deltaText(all.medianMs, before.medianMs, dur, false))}
+    ${kpi(html('report.kpi.cost'), compact(all.totalWeighted), `${html('report.kpi.raw', { raw: compact(all.totalTokens) })}${prevRuns.length
+    ? ` · ${html('report.kpi.vsBefore', { arrow: all.totalWeighted >= before.totalWeighted ? '▲' : '▼', diff: compact(Math.abs(all.totalWeighted - before.totalWeighted)) })}` : ''}`)}
   </section>
 
   <section class="card">
-    <h2>Scorecard</h2>
-    <p class="muted">Score is for each agent's latest week; hover a score to see its four parts. Finished leaves out runs stopped by their turn limit. First review passed: of the runs that edited files and were then reviewed, the share with no FAIL in the first round. Rounds: hand-backs per run, so 2 is one round of fixes. Verdicts count one per hand-back, re-checks included. Times run to the first hand-back. Times and tokens are medians over the whole period. Weighted tokens count what a run costs (cache re-reads at a tenth); hover one for the raw count. Model is what the helper ran on.</p>
+    <h2>${html('report.score.h')}</h2>
+    <p class="muted">${html('report.score.intro')}</p>
     <table>
-      <thead><tr><th>Agent</th><th>Room</th><th>Model</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
-        <th class="num">Re-runs</th><th class="num">First review passed</th><th class="num">Rounds</th><th class="num">Median time</th><th class="num">p90 time</th><th class="num">Weighted / run</th>
-        <th class="num">Tool calls / run</th><th class="num">Tool errors</th><th>Verdicts</th><th>Last 14 days</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="16" class="muted">No helper runs in this period.</td></tr>'}</tbody>
+      <thead><tr><th>${html('report.col.agent')}</th><th>${html('report.col.room')}</th><th>${html('report.col.model')}</th><th class="num">${html('report.col.runs')}</th><th class="num">${html('report.col.score')}</th><th class="num">${html('report.col.finished')}</th>
+        <th class="num">${html('report.col.reruns')}</th><th class="num">${html('report.col.firstPass')}</th><th class="num">${html('report.col.rounds')}</th><th class="num">${html('report.col.medianTime')}</th><th class="num">${html('report.col.p90Time')}</th><th class="num">${html('report.col.weightedRun')}</th>
+        <th class="num">${html('report.col.toolCalls')}</th><th class="num">${html('report.col.toolErrors')}</th><th>${html('report.col.verdicts')}</th><th>${html('report.col.last14')}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="16" class="muted">${html('report.score.none')}</td></tr>`}</tbody>
     </table>
   </section>
 
   <section class="card">
-    <h2>Helper runs per day</h2>
+    <h2>${html('report.daily.h')}</h2>
     <div class="legend">${legend}</div>
     ${dailyColumns(days, roll.daily, typeSlot)}
   </section>
 
   <section class="card">
-    <h2>Weekly score</h2>
+    <h2>${html('report.weekly.h')}</h2>
     <div class="legend">${legend}</div>
     ${weeklyScores(roll.weekly, typeSlot)}
-    <details><summary>Show the weekly numbers</summary>
-      <table><thead><tr><th>Week</th><th>Agent</th><th class="num">Runs</th><th class="num">Score</th><th class="num">Finished</th>
-        <th class="num">Re-runs</th><th class="num">Median time</th><th class="num">Weighted / run</th></tr></thead>
+    <details><summary>${html('report.weekly.show')}</summary>
+      <table><thead><tr><th>${html('report.col.week')}</th><th>${html('report.col.agent')}</th><th class="num">${html('report.col.runs')}</th><th class="num">${html('report.col.score')}</th><th class="num">${html('report.col.finished')}</th>
+        <th class="num">${html('report.col.reruns')}</th><th class="num">${html('report.col.medianTime')}</th><th class="num">${html('report.col.weightedRun')}</th></tr></thead>
       <tbody>${weeklyRows}</tbody></table>
     </details>
   </section>
 
   <section class="card">
-    <h2>How long each agent takes</h2>
-    <p class="muted">Dot: median run. Line: out to the slowest 10% (p90).</p>
+    <h2>${html('report.durations.h')}</h2>
+    <p class="muted">${html('report.durations.intro')}</p>
     ${durationRanges(typeOrder, roll.overall)}
   </section>
 
@@ -755,17 +770,17 @@ dl.score dd { margin: 0; color: var(--ink-2); }
   ${cost ? costSections({ cost, opt, stats, days }) : ''}
 
   <section class="card">
-    <h2>How the score works</h2>
+    <h2>${html('report.how.h')}</h2>
     <dl class="score">
-      <dt>Reliability, 40</dt><dd>Share of ended runs that finished: not failed, not stopped, and not cut off by the agent's own turn limit (its <code>maxTurns</code>) before handing back.</dd>
-      <dt>Right first time, 20</dt><dd>For an agent that edits files and had at least 3 runs reviewed: the share whose first review round had no FAIL. For any other agent: the share of runs that were not a re-run, the same session calling the same agent again within 30 minutes of it failing, being stopped or hitting its turn limit.</dd>
-      <dt>Speed, 20</dt><dd>This week's median time against the agent's own median for the period. Foreground and background runs are each compared with their own kind, so a week that mixes them is fair. Agents are never compared with each other.</dd>
-      <dt>Efficiency, 20</dt><dd>This week's median weighted tokens per run against the agent's own median for the period, again kind by kind.</dd>
+      <dt>${html('report.how.reliability')}</dt><dd>${markup('report.how.reliabilityDd', { maxTurns: raw('<code>maxTurns</code>') })}</dd>
+      <dt>${html('report.how.rightFirst')}</dt><dd>${html('report.how.rightFirstDd')}</dd>
+      <dt>${html('report.how.speed')}</dt><dd>${html('report.how.speedDd')}</dd>
+      <dt>${html('report.how.efficiency')}</dt><dd>${html('report.how.efficiencyDd')}</dd>
     </dl>
-    <p class="muted">An agent needs at least 3 runs in a week to be scored. Treat the score as a prompt to look closer, not a verdict: a reviewer that answers FAIL is doing its job, so its verdicts never lower its score. Whether a reviewer's verdicts were right needs a record of what happened after them, which only a verdict ledger keeps.</p>
+    <p class="muted">${html('report.how.note')}</p>
   </section>
 
-  ${notes.length ? `<section class="card"><h2>Notes on the data</h2><ul class="notes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : ''}
+  ${notes.length ? `<section class="card"><h2>${html('report.notes.h')}</h2><ul class="notes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : ''}
 </main>
 </body>
 </html>`;
@@ -786,8 +801,9 @@ function csv(rows, cols) {
 
 function run(argv) {
   const opt = args(argv);
+  lang = opt.lang;
   if (opt.help) {
-    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 13).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 14).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
     return;
   }
   const now = opt.until ?? Date.now();
