@@ -3,101 +3,65 @@
 // session's to-do list, so work can be followed while prompting elsewhere.
 // It only reads: the same snapshots the hospital gets, nothing more.
 
-import { overview, headline, headlineBadges, runningBadge, helperBadge, todoPips, SOURCE_NAMES, isRunning, icon } from './overview.js';
 import { installTips } from './tip.js';
-import { waitingList, waitingHtml, loadDismissed, dismissWait, clashHtml } from './waiting.js';
-import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
-import { statusText, glyphKey, elapsed } from './status.js';
-import { bubbleMarkup, personMarkup } from './people.js';
+import { loadDismissed, dismissWait } from './waiting.js';
+import { elapsed } from './status.js';
+import { personMarkup } from './people.js';
 import { demoSnapshot } from './demo.js';
 import { projectsHtml, wireProjects, demoProjects, demoTrees, paint } from './projects-view.js';
-import { fieldBadge } from './field-view.js';
+import { miniHtml } from './mini-view.js';
+import { tr, localise, setLanguage, resolveLanguage, onMissing } from './i18n.js';
 
 const bridge = window.agentsHome ?? (await import('./preview-bridge.js')).default;
 const $ = (id) => document.getElementById(id);
 
 // The hospital window's preferences (same origin, same storage): privacy
-// mode, demo and colourway follow it, and change here when changed there.
+// mode, demo, colourway and language follow it, and change here when
+// changed there. A new language comes with a reload: the main process
+// reloads both windows; the browser preview's tab reloads itself.
 const prefs = { private: true, demo: false, theme: 'blossom' };
+// Returns the language the preferences ask for.
 function readPrefs() {
+  let saved = {};
+  let unreadable = false;
   try {
-    Object.assign(prefs, JSON.parse(localStorage.getItem('agents-home-prefs') || '{}'));
+    saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}') ?? {};
+    Object.assign(prefs, saved);
   } catch {
-    // Storage blocked or unreadable: privacy mode stays on, which is safe.
+    // Storage blocked or unreadable: privacy mode stays on, which is safe,
+    // and the language follows Windows' (the hospital window says so).
+    unreadable = true;
   }
   if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
   document.documentElement.dataset.theme = prefs.theme;
+  return resolveLanguage({ saved: saved.language, unreadable, system: navigator.languages }).id;
 }
-readPrefs();
+const shownLanguage = setLanguage(readPrefs());
+onMissing((code, key) => bridge.missingWords?.({ lang: code, key })?.catch(() => {
+  // An older main process without the handler: the word has already fallen
+  // back to English, which is all a missing word can do here.
+}));
+localise(document);
 addEventListener('storage', (e) => {
   if (e.key === 'agents-home-prefs') {
-    readPrefs();
+    if (readPrefs() !== shownLanguage && !window.agentsHome) location.reload();
     last = '';
   }
 });
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const glyph = (x) => `<svg class="glyph" viewBox="-16 -16 32 32" aria-hidden="true">${bubbleMarkup(glyphKey(x))}</svg>`;
-
 $('mascot').innerHTML = personMarkup('nurses-station');
 
-let live = { sessions: [], here: 'This computer', fleet: { computers: [] } };
+let live = { sessions: [], fleet: { computers: [] } };
 bridge.onSnapshot?.((s) => { live = s; });
 const demoEpoch = Date.now();
 const open = new Set(); // sessions whose whole to-do list is open
 
-function todoBlock(s, key) {
-  const t = s.todos;
-  if (!t?.total) return '';
-  const pips = `<div class="todo-sum">${todoPips(t)}</div>`;
-  // Wording is the user's own: only with privacy mode off, and only for
-  // this computer's sessions (others share counts only).
-  if (prefs.private || !t.items) return pips;
-  const now = t.items.find((i) => i.status === 'in_progress') ?? t.items.find((i) => i.status === 'pending');
-  const nowText = now ? `<p class="todo-now">${esc(now.status === 'in_progress' && now.active ? now.active : now.text)}</p>` : '';
-  const isOpen = open.has(key);
-  const toggle = `<button type="button" class="todo-toggle" data-key="${esc(key)}" aria-expanded="${isOpen}" title="${isOpen ? 'Hide the list' : 'Whole list'}"><span class="visually-hidden">Whole to-do list for ${esc(s.project)}</span></button>`;
-  const list = isOpen ? `<ol class="todo-all">${t.items.map((i) => `<li class="${i.status}"><span class="pip ${i.status}" aria-hidden="true"></span><span>${esc(i.text || 'Untitled')}</span></li>`).join('')}</ol>` : '';
-  return `<div class="todo-row">${pips}${toggle}</div>${isOpen ? '' : nowText}${list}`;
-}
-
-// A short word for each status: the glyph's shape says the rest.
-const SHORT = { working: 'Working', thinking: 'Thinking', reporting: 'Writing up', blocked: 'Needs you?', delegating: 'With helpers', 'your-turn': 'Your turn', idle: 'Idle' };
-
-function sessionCard(s, local) {
-  const key = `${s.computer ?? ''}|${s.id ?? s.project}`;
-  const tag = s.source && s.source !== 'code' ? `<span class="tag">${esc(SOURCE_NAMES[s.source] ?? s.source)}</span>` : '';
-  const helpers = (s.agents ?? []).filter((a) => a.status !== 'done');
-  // Helpers as their status glyphs; the name is on hover and for screen readers.
-  // A thinking helper has no bubble: it shows as a plain person mark.
-  const helperMark = (a) => (a.status === 'thinking' ? `<span class="glyph-quiet">${icon('helper')}</span>` : glyph(a));
-  const helperLine = helpers.length ? `<span class="helpers">${helpers.slice(0, 5).map((a) => `<span class="helper" title="${esc(`${a.type}: ${statusText(a)}`)}">${helperMark(a)}<span class="visually-hidden">${esc(`${a.type}: ${statusText(a)}`)}</span></span>`).join('')}${helpers.length > 5 ? `<span class="more">+${helpers.length - 5}</span>` : ''}</span>` : '';
-  const since = local && s.startedAt ? `<span class="since" data-since="${s.startedAt}">${elapsed(s.startedAt, Date.now())}</span>` : '';
-  const full = local ? statusText(s) : statusText({ status: s.status });
-  return `<li class="sess${isRunning(s.status) ? ' running' : ''}" title="${esc(full)}">
-      ${glyph(s)}
-      <div class="sess-body">
-        <p class="sess-top"><span class="sess-what">${esc(SHORT[s.status] ?? full)}</span>${tag}${helperLine}${since}</p>
-        ${todoBlock(s, key)}
-      </div></li>`;
-}
-
 let last = '';
 function render() {
   const snap = prefs.demo ? demoSnapshot(Date.now(), demoEpoch) : live;
-  const o = overview(snap.sessions ?? [], snap.here ?? 'This computer', snap.fleet?.computers ?? [], { jobs: snap.jobs ?? [], machine: snap.machine, work: snap.work ?? [] });
-  const groups = o.computers.filter((c) => c.sessions || c.local || (c.jobs ?? []).length || (c.work ?? []).length).map((c) => {
-    const projects = c.projects.map((p) => `<li class="proj"><p class="proj-head"><span class="proj-name">${esc(p.project)}</span><span class="badges">${p.running ? runningBadge(p.running) : ''}${p.helpers ? helperBadge(p.helpers) : ''}</span></p>
-        <ul class="sessions">${p.sessions.map((s) => sessionCard(s, c.local)).join('')}</ul></li>`).join('');
-    const state = c.local ? '' : c.online ? 'online' : 'offline';
-    return `<section class="computer${c.online ? '' : ' offline'}"><h2>${esc(c.computer)}${state ? ` <span class="state">${state}</span>` : ''}</h2>
-        ${machineHtml(c.machine)}${jobsHtml(c.jobs)}${workHtml(c.work)}${projects ? `<ul class="projects">${projects}</ul>` : (c.jobs ?? []).length || (c.work ?? []).length ? '' : '<p class="empty">Nothing running here.</p>'}</section>`;
-  }).join('');
-  const waits = clashHtml(snap.clashes) + waitingHtml(waitingList(snap.sessions ?? [], loadDismissed()), Date.now(), glyph);
-  const html = waits + (groups || '<p class="empty">No sessions yet.</p>');
+  const { list: html, head } = miniHtml(snap, { privacy: prefs.private, open, dismissed: loadDismissed(), now: Date.now() });
   // Redraw only on change, so an open list and the scroll position stay put.
   const sig = JSON.stringify([html.replace(/(data-since="\d+">)[^<]*/g, '$1'), prefs.private]);
-  const head = headlineBadges(o) + fieldBadge(snap.field);
   if ($('headline').dataset.sig !== head) {
     $('headline').innerHTML = `<span class="badges">${head}</span>`;
     $('headline').dataset.sig = head;
@@ -109,7 +73,7 @@ function render() {
     // Same picture: only the elapsed times move on.
     for (const el of $('list').querySelectorAll('.since')) el.textContent = elapsed(Number(el.dataset.since), Date.now());
   }
-  $('foot').textContent = prefs.demo ? 'Demo' : '';
+  $('foot').textContent = prefs.demo ? tr('mini.demo') : '';
 }
 
 // ---- the projects tab ----------------------------------------------------------
@@ -128,13 +92,13 @@ wireProjects($('projects'), {
   open: projOpen,
   change: async (c) => {
     if (prefs.demo) return demoProj.change(c);
-    if (!bridge.projectChange) return { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
+    if (!bridge.projectChange) return { ok: false, error: tr('proj.previewSave') };
     return bridge.projectChange(c).catch((err) => ({ ok: false, error: err.message }));
   },
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
   worktrees: projTrees,
-  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: 'The browser preview cannot look at folders; this works in the app.' }),
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: tr('proj.previewTrees') }),
 });
 function showTab(which) {
   const projects = which === 'projects';
@@ -184,7 +148,7 @@ $('list').addEventListener('click', (e) => {
 $('pin').addEventListener('click', () => {
   const on = $('pin').getAttribute('aria-pressed') !== 'true';
   $('pin').setAttribute('aria-pressed', String(on));
-  $('pin').title = on ? 'Keep this window on top' : 'Let other windows cover this one';
+  $('pin').title = tr(on ? 'mini.pin' : 'mini.unpin');
   bridge.miniPin?.(on);
 });
 $('close').addEventListener('click', () => {

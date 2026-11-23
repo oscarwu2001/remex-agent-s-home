@@ -1,21 +1,29 @@
 // Status words and timings shared by the hospital window and the mini window.
 
+import { tr } from './i18n.js';
+
+// What a tool call is doing, in the window's language. A label without a
+// key (from an older copy of the app) is shown as it came.
+export const activityText = (a) => (a.labelKey ? tr(a.labelKey, a.labelParams) : a.label);
+
 // Distinct words lead each status, so they can be told apart at a glance.
 export function statusText(x) {
   switch (x.status) {
-    case 'standby': return 'Standby';
-    case 'working': return x.activity ? x.activity.label : 'Working';
-    case 'delegating': return x.activity ? x.activity.label.replace('Consulting', 'With') : 'With a helper';
-    case 'blocked': return 'Needs approval, or a long tool is running';
-    case 'thinking': return 'Thinking';
-    case 'reporting': return 'Writing up findings';
-    case 'your-turn': return 'Your turn';
+    case 'standby': return tr('status.standby');
+    case 'working': return x.activity ? activityText(x.activity) : tr('status.working');
+    case 'delegating':
+      if (!x.activity) return tr('status.withHelper');
+      return x.activity.labelKey === 'tool.delegate' ? tr('status.with', x.activity.labelParams) : x.activity.label.replace('Consulting', 'With');
+    case 'blocked': return tr('status.blocked');
+    case 'thinking': return tr('status.thinking');
+    case 'reporting': return tr('status.reporting');
+    case 'your-turn': return tr('status.your-turn');
     case 'done':
-      if (x.endReason === 'interrupted') return 'Stopped';
-      if (x.endReason === 'error') return 'Failed';
-      if (x.endReason === 'went quiet') return 'Presumed finished (went quiet)';
-      return 'Finished';
-    default: return 'Idle';
+      if (x.endReason === 'interrupted') return tr('status.stopped');
+      if (x.endReason === 'error') return tr('status.failed');
+      if (x.endReason === 'went quiet') return tr('status.quiet');
+      return tr('status.finished');
+    default: return tr('status.idle');
   }
 }
 

@@ -438,8 +438,8 @@ details > summary h2 { margin: 0; }
 }
 .link-btn:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:disabled { color: var(--ink-muted); cursor: not-allowed; }
-.hint { font-size: 13px; color: var(--ink-muted); margin: 0 0 var(--s-2); }
-.form-error { color: var(--warn); font-size: 13px; font-weight: 500; margin: 0 0 var(--s-2); }
+.hint { font-size: 13px; line-height: var(--lh-text); color: var(--ink-muted); margin: 0 0 var(--s-2); }
+.form-error { color: var(--warn); font-size: 13px; line-height: var(--lh-text); font-weight: 500; margin: 0 0 var(--s-2); }
 .dept-form { display: grid; gap: var(--s-3); margin-bottom: var(--s-3); }
 .field { display: grid; gap: var(--s-1); font-size: 13px; color: var(--ink-muted); border: 0; padding: 0; margin: 0; }
 .field legend { padding: 0; margin-bottom: var(--s-1); }
@@ -482,6 +482,9 @@ details > summary h2 { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .settings, .live-map, .field-sheet { animation: none; } }
 .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-2); }
 .settings-head h2 { margin: 0; font: 400 22px var(--font-display); letter-spacing: -0.015em; color: var(--ink); }
+:root:lang(zh) .settings-head h2, :root:lang(zh) .board-head h1 { letter-spacing: 0; }
+/* The language, always in view at the top of Settings. */
+.language-field { margin: 0 0 var(--s-3); }
 /* Five groups, each closed to its name and a one-line summary of what is
    set; one opens at a time. The sections inside keep their own hairlines. */
 .settings-cat { border-top: 1px solid var(--line); }

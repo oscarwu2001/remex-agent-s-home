@@ -7,44 +7,38 @@
 //
 // The grid: the core 3 x 3 (cells 0..2) is fixed. Users may add departments
 // in the ring around it (cells -1..3), making up to 5 x 5.
+//
+// Names and purposes come from the word tables (src/core/i18n.js), keyed by
+// these ids, in English here; each window shows them in its own language.
+
+const { translate } = require('./i18n');
+
+const en = (key, params) => translate('en', key, params);
 
 const ROOMS = [
-  { id: 'nurses-station', name: "Nurses' Station", purpose: 'Your main Claude Code sessions', cell: [1, 1] },
-  { id: 'operating-room', name: 'Operating Room', purpose: 'Code review', cell: [2, 1] },
-  { id: 'research-office', name: 'Research Office', purpose: 'Exploring, planning, researching', cell: [1, 2] },
-  { id: 'laboratory', name: 'Laboratory', purpose: 'Running tests, gates and analyses', cell: [0, 1] },
-  { id: 'radiology', name: 'Radiology', purpose: 'Hunting silent failures', cell: [0, 0] },
-  { id: 'vision-clinic', name: 'Vision Clinic', purpose: 'Interface and accessibility review', cell: [1, 0] },
-  { id: 'general-ward', name: 'General Ward', purpose: 'Every other agent', cell: [2, 2] },
-];
+  { id: 'nurses-station', cell: [1, 1] },
+  { id: 'operating-room', cell: [2, 1] },
+  { id: 'research-office', cell: [1, 2] },
+  { id: 'laboratory', cell: [0, 1] },
+  { id: 'radiology', cell: [0, 0] },
+  { id: 'vision-clinic', cell: [1, 0] },
+  { id: 'general-ward', cell: [2, 2] },
+].map((r) => ({ id: r.id, name: en(`room.${r.id}.name`), purpose: en(`room.${r.id}.purpose`), cell: r.cell }));
 
 // The two gardens built into the core. Users may add more in the ring
 // (layout.gardens); every garden is a plot people can plant, never a room.
 const SCENERY = [
-  { id: 'garden', name: 'Garden', cell: [0, 2] },
-  { id: 'grove', name: 'Grove', cell: [2, 0] },
-];
+  { id: 'garden', cell: [0, 2] },
+  { id: 'grove', cell: [2, 0] },
+].map((g) => ({ id: g.id, name: en(`garden.${g.id}`), cell: g.cell }));
 const SCENERY_CELLS = SCENERY.map((g) => g.cell);
 const GRID_MIN = -1;
 const GRID_MAX = 3;
 
 // Departments users can add: the specialties that use surgical navigation.
 // 'custom' takes a name of the user's own.
-const DEPARTMENT_KINDS = [
-  { kind: 'spine', name: 'Spine Surgery', purpose: 'Navigated spinal fixation' },
-  { kind: 'neuro', name: 'Neurosurgery', purpose: 'Cranial navigation' },
-  { kind: 'ent', name: 'ENT', purpose: 'Sinus and skull-base navigation' },
-  { kind: 'dental', name: 'Dental Implantology', purpose: 'Guided implant placement' },
-  { kind: 'cmf', name: 'Maxillofacial (CMF)', purpose: 'Jaw and facial reconstruction' },
-  { kind: 'ortho', name: 'Orthopaedics', purpose: 'Joint replacement and alignment' },
-  { kind: 'trauma', name: 'Trauma', purpose: 'Navigated fracture fixation' },
-  { kind: 'sports', name: 'Sports Medicine', purpose: 'Ligament reconstruction' },
-  { kind: 'pulmonology', name: 'Pulmonology', purpose: 'Navigated bronchoscopy' },
-  { kind: 'ir', name: 'Interventional Radiology', purpose: 'Needle and biopsy guidance' },
-  { kind: 'cardio', name: 'Cardiac Electrophysiology', purpose: 'Catheter mapping' },
-  { kind: 'oncology', name: 'Surgical Oncology', purpose: 'Tumour resection margins' },
-  { kind: 'custom', name: 'Your own department', purpose: 'Named by you' },
-];
+const DEPARTMENT_KINDS = ['spine', 'neuro', 'ent', 'dental', 'cmf', 'ortho', 'trauma', 'sports', 'pulmonology', 'ir', 'cardio', 'oncology', 'custom']
+  .map((kind) => ({ kind, name: en(`dept.${kind}.name`), purpose: en(`dept.${kind}.purpose`) }));
 const KIND_BY_ID = Object.fromEntries(DEPARTMENT_KINDS.map((k) => [k.kind, k]));
 
 const ROOM_IDS = new Set(ROOMS.map((r) => r.id));
@@ -157,7 +151,7 @@ function validateLayout(layout) {
       ? [...new Set(d.agents.filter((a) => typeof a === 'string' && a.trim()).map((a) => a.trim()))]
       : [];
     return {
-      id, kind: d.kind, name, purpose: d.kind === 'custom' ? (typeof d.purpose === 'string' && d.purpose.trim() ? d.purpose.trim().slice(0, 60) : 'Your department') : kind.purpose,
+      id, kind: d.kind, name, purpose: d.kind === 'custom' ? (typeof d.purpose === 'string' && d.purpose.trim() ? d.purpose.trim().slice(0, 60) : en('dept.ownPurpose')) : kind.purpose,
       cell: [c, r], via, agents,
     };
   });
@@ -203,7 +197,7 @@ function checkGardens(list, taken) {
     }
     ids.add(id);
     taken.set(key(cell), 'scenery');
-    const name = typeof g.name === 'string' && g.name.trim() ? g.name.trim().slice(0, 30) : `Garden ${id.slice(5)}`;
+    const name = typeof g.name === 'string' && g.name.trim() ? g.name.trim().slice(0, 30) : en('garden.numbered', { n: id.slice(5) });
     return { id, name, cell: [c, r] };
   });
 }

@@ -388,7 +388,7 @@ class Tracker {
           if (actor.skills.length > SKILL_LIMIT) actor.skills.shift();
         }
         const d = describeTool(ev.name, ev.input);
-        pushHistory(actor, { ts: ev.ts, kind: d.kind, label: d.label, detail: d.detail });
+        pushHistory(actor, { ts: ev.ts, kind: d.kind, label: d.label, labelKey: d.labelKey, labelParams: d.labelParams, detail: d.detail });
         break;
       }
       case 'tool-end':

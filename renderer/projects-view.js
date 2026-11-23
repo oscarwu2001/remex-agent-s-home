@@ -5,6 +5,7 @@
 
 import { icon, badge, runningBadge, todoPips, isRunning } from './overview.js';
 import { boardTime } from './dates.js';
+import { tr, trHtml, dateLocale } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ORDER = { active: 0, paused: 1, done: 2 };
@@ -14,12 +15,12 @@ const dayOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, 
 export function dueLabel(due, today = new Date()) {
   const t = dayOf(today);
   const tomorrow = dayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
-  if (due === t) return { text: 'Today', when: 'today' };
-  if (due === tomorrow) return { text: 'Tomorrow', when: 'soon' };
+  if (due === t) return { text: tr('date.today'), when: 'today' };
+  if (due === tomorrow) return { text: tr('date.tomorrow'), when: 'soon' };
   const [y, m, d] = due.split('-').map(Number);
   const date = new Date(y, m - 1, d);
-  const text = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', ...(y !== today.getFullYear() ? { year: 'numeric' } : {}) });
-  return due < t ? { text: `${text} · overdue`, when: 'overdue' } : { text, when: 'later' };
+  const text = date.toLocaleDateString(dateLocale(), { weekday: 'short', day: 'numeric', month: 'short', ...(y !== today.getFullYear() ? { year: 'numeric' } : {}) });
+  return due < t ? { text: tr('date.overdue', { day: text }), when: 'overdue' } : { text, when: 'later' };
 }
 
 // Projects with open to-dos first (the soonest day first), then the ones
@@ -65,23 +66,23 @@ const hhmm = (iso) => boardTime(iso);
 function assistantHtml(a, list, privacy, check = '') {
   if (!a?.on) return '';
   const names = new Map(list.map((p) => [p.id, p.name]));
-  const when = a.lastRun ? `Last scan ${hhmm(a.lastRun)}` : 'No scan yet';
-  const status = a.failures ? `${when} · the last ${a.failures === 1 ? 'scan' : `${a.failures} scans`} failed` : when;
-  const head = `<div class="asst-top">${icon('agent')}<h3 class="asst-head" id="asst-head">${a.questions.length ? 'Your assistant asks' : 'Your assistant has no questions'}</h3><span class="asst-when${a.failures ? ' warn' : ''}">${esc(status)}</span></div>`;
+  const when = a.lastRun ? tr('proj.lastScan', { time: hhmm(a.lastRun) }) : tr('proj.noScan');
+  const status = a.failures ? tr('proj.scansFailed', { when, n: a.failures }) : when;
+  const head = `<div class="asst-top">${icon('agent')}<h3 class="asst-head" id="asst-head">${esc(tr(a.questions.length ? 'proj.asks' : 'proj.noQuestions'))}</h3><span class="asst-when${a.failures ? ' warn' : ''}">${esc(status)}</span></div>`;
   const notes = [
-    ...(a.failures && a.lastError && !privacy ? [`Last error: ${a.lastError}. Details are in scan.log in the assistant’s folder.`] : []),
-    ...(a.failures && (!a.lastError || privacy) ? ['Details are in scan.log in the assistant’s folder.'] : []),
+    ...(a.failures && a.lastError && !privacy ? [tr('proj.lastError', { error: a.lastError })] : []),
+    ...(a.failures && (!a.lastError || privacy) ? [tr('proj.details')] : []),
     ...(a.notes ?? []),
   ].map((n) => `<p class="hint asst-note">${esc(n)}</p>`).join('');
   const checkLine = check ? `<p class="hint asst-check">${check}</p>` : '';
   if (!a.questions.length) return `<section class="asst" aria-labelledby="asst-head">${head}${checkLine}${notes}</section>`;
   const items = a.questions.map((q, i) => {
     const project = privacy && q.project && names.get(q.project);
-    return `<li><span class="asst-text${privacy ? ' hidden-text' : ''}">${esc(privacy ? `Question ${i + 1}` : q.text)}</span>${project ? `<span class="badge quiet" title="${esc(project)}">${esc(project)}</span>` : ''}</li>`;
+    return `<li><span class="asst-text${privacy ? ' hidden-text' : ''}">${esc(privacy ? tr('proj.question', { n: i + 1 }) : q.text)}</span>${project ? `<span class="badge quiet" title="${esc(project)}">${esc(project)}</span>` : ''}</li>`;
   }).join('');
-  const more = a.more ? `<li class="asst-more">${a.more} more question${a.more === 1 ? '' : 's'}</li>` : '';
+  const more = a.more ? `<li class="asst-more">${esc(tr('proj.moreQuestions', { n: a.more }))}</li>` : '';
   return `<section class="asst" aria-labelledby="asst-head">${head}<ul class="asst-q">${items}${more}</ul>
-    <p class="hint">Answer in Claude by saying “answer the assistant”. Ticking a question’s to-do dismisses it.</p>${checkLine}${notes}</section>`;
+    <p class="hint">${esc(tr('proj.answer'))}</p>${checkLine}${notes}</section>`;
 }
 
 // opts: { privacy, open: Set of project ids shown in full, error: { where, text } }
@@ -90,20 +91,20 @@ function assistantHtml(a, list, privacy, check = '') {
 export function projectsHtml(projects, sessions, opts) {
   const list = sortProjects(projects?.list ?? []);
   const unconfirmed = list.filter((p) => !p.confirmed).length;
-  const checkText = unconfirmed ? `Your assistant found ${unconfirmed} project${unconfirmed === 1 ? '' : 's'} to check. Confirm the ones you are working on.` : '';
+  const checkText = unconfirmed ? esc(tr('proj.toCheck', { n: unconfirmed })) : '';
   const asks = assistantHtml(projects?.assistant, list, opts.privacy, checkText);
   if (projects && projects.ok === false) {
-    return `${asks}<p class="hint">The project list could not be read. See “Needs attention”.</p>`;
+    return `${asks}<p class="hint">${esc(tr('proj.unreadable'))}</p>`;
   }
   const errFor = (where) => (opts.error?.where === where ? opts.error.text : '');
-  const newProject = addForm({ op: 'add-project', id: 'proj-new', label: 'Add a project', placeholder: list.length ? 'Add a project' : 'Or add a project by name', max: 120, error: errFor('new') });
+  const newProject = addForm({ op: 'add-project', id: 'proj-new', label: tr('proj.add'), placeholder: tr(list.length ? 'proj.add' : 'proj.addByName'), max: 120, error: errFor('new') });
   if (!list.length) {
-    return `${asks}<p class="hint">No projects yet. In Claude, ask your personal assistant to <strong>scan my computer for projects</strong>: it finds them, puts branch copies under their main project, and asks you to check the list before saving it.</p>${newProject}`;
+    return `${asks}<p class="hint">${trHtml('proj.noneHtml')}</p>${newProject}`;
   }
   // With the assistant's list showing, its "found N to check" line sits in it.
   const head = checkText && !asks ? `<p class="proj-check">${icon('agent')}<span>${checkText}</span></p>` : '';
   const privacyNote = opts.privacy && (list.some((p) => p.todos.length) || projects?.assistant?.questions?.length)
-    ? '<p class="hint">Question and to-do wording is hidden while “Hide file names, commands, survey answers and LINE chats” is on.</p>' : '';
+    ? `<p class="hint">${esc(tr('proj.privacyNote'))}</p>` : '';
   const cards = list.map((p) => {
     const live = sessions.filter((s) => s.projectId === p.id);
     const running = live.filter((s) => isRunning(s.status)).length;
@@ -113,38 +114,38 @@ export function projectsHtml(projects, sessions, opts) {
     const where = !opts.privacy && p.path ? ` title="${esc(p.path)}"` : '';
     const badges = [
       running ? runningBadge(running) : '',
-      p.copies?.length ? badge('branch', p.copies.length, `${p.copies.length} branch cop${p.copies.length === 1 ? 'y' : 'ies'} or worktree${p.copies.length === 1 ? '' : 's'}`, { quiet: true }) : '',
-      p.status !== 'active' ? `<span class="badge quiet">${esc(p.status === 'paused' ? 'Paused' : 'Done')}</span>` : '',
+      p.copies?.length ? badge('branch', p.copies.length, tr('proj.copies', { n: p.copies.length }), { quiet: true }) : '',
+      p.status !== 'active' ? `<span class="badge quiet">${esc(tr(p.status === 'paused' ? 'proj.paused' : 'proj.done'))}</span>` : '',
     ].join('');
     const items = isOpen ? `<ul class="ptodos">${sortTodos(p.todos).map((t, i) => {
-      const text = opts.privacy ? `To-do ${i + 1}` : t.text;
+      const text = opts.privacy ? tr('proj.todo', { n: i + 1 }) : t.text;
       const due = t.due ? dueLabel(t.due) : null;
       const dateId = `date-${p.id}-${t.id}`;
       // A date chip that opens the calendar; the native picker does the rest.
       const when = t.done && !due ? '<span></span>' : `<span class="when">
-          <button type="button" class="date-btn${due ? ` set ${due.when}` : ''}" data-op="pick-date" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="${due ? `Planned for ${esc(due.text)} (click to change)` : 'Pick a day for this'}">${icon('calendar')}${due ? `<span>${esc(due.text)}</span>` : ''}<span class="visually-hidden">${due ? '' : 'Pick a day for '}${esc(text)}</span></button>
+          <button type="button" class="date-btn${due ? ` set ${due.when}` : ''}" data-op="pick-date" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="${esc(due ? tr('proj.planned', { day: due.text }) : tr('proj.pickDay'))}">${icon('calendar')}${due ? `<span>${esc(due.text)}</span>` : ''}<span class="visually-hidden">${esc(due ? text : tr('proj.pickDayFor', { text }))}</span></button>
           <input type="date" class="date-input" id="${esc(dateId)}" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" value="${esc(t.due ?? '')}" tabindex="-1" aria-hidden="true"></span>`;
       return `<li class="${t.done ? 'completed' : ''}">
-        <button type="button" class="tick" data-op="toggle-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}"><span class="pip ${t.done ? 'completed' : 'pending'}" aria-hidden="true"></span><span class="visually-hidden">Mark as done: ${esc(text)}</span></button>
+        <button type="button" class="tick" data-op="toggle-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" aria-pressed="${t.done}" title="${esc(tr(t.done ? 'proj.markUndone' : 'proj.markDone'))}"><span class="pip ${t.done ? 'completed' : 'pending'}" aria-hidden="true"></span><span class="visually-hidden">${esc(tr('proj.markDoneFor', { text }))}</span></button>
         <span class="ptext${opts.privacy ? ' hidden-text' : ''}" aria-hidden="true">${esc(text)}</span>
         ${when}
-        ${t.by === 'agent' ? `<span class="by" title="Added by an agent">${icon('agent')}<span class="visually-hidden">Added by an agent</span></span>` : '<span></span>'}
-        <button type="button" class="icon-act subtle" data-op="remove-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="Remove">${icon('close')}<span class="visually-hidden">Remove ${esc(text)}</span></button></li>`;
+        ${t.by === 'agent' ? `<span class="by" title="${esc(tr('proj.byAgent'))}">${icon('agent')}<span class="visually-hidden">${esc(tr('proj.byAgent'))}</span></span>` : '<span></span>'}
+        <button type="button" class="icon-act subtle" data-op="remove-todo" data-project="${esc(p.id)}" data-todo="${esc(t.id)}" title="${esc(tr('common.remove'))}">${icon('close')}<span class="visually-hidden">${esc(tr('proj.removeFor', { text }))}</span></button></li>`;
     }).join('')}</ul>
-      ${addForm({ op: 'add-todo', project: p.id, id: `todo-${p.id}`, label: `Add a to-do to ${p.name}`, placeholder: 'Add a to-do', max: 300, error: errFor(p.id) })}
+      ${addForm({ op: 'add-todo', project: p.id, id: `todo-${p.id}`, label: tr('proj.addTodoTo', { name: p.name }), placeholder: tr('proj.addTodo'), max: 300, error: errFor(p.id) })}
       ${p.path ? worktreesHtml(p, opts.worktrees?.get(p.id), opts.privacy) : ''}` : '';
     return `<li class="pcard${p.confirmed ? '' : ' unconfirmed'}${isOpen ? ' open' : ''}" data-id="${esc(p.id)}">
       <div class="pcard-head">
         <button type="button" class="pname" data-op="open" data-project="${esc(p.id)}" aria-expanded="${isOpen}"${where}>${icon('project')}<span>${esc(p.name)}</span></button>
         <span class="badges">${badges}</span>
       </div>
-      <div class="pcard-sub"><span class="sub-left">${todos.total ? todoPips(todos) : '<span class="pip-n">No to-dos yet</span>'}${(() => {
+      <div class="pcard-sub"><span class="sub-left">${todos.total ? todoPips(todos) : `<span class="pip-n">${esc(tr('proj.noTodos'))}</span>`}${(() => {
         const next = p.todos.filter((t) => !t.done && t.due).map((t) => t.due).sort()[0];
         if (!next) return '';
         const d = dueLabel(next);
-        return `<span class="next-due ${d.when}" title="Next planned to-do">${icon('calendar')}${esc(d.text)}</span>`;
+        return `<span class="next-due ${d.when}" title="${esc(tr('proj.nextDue'))}">${icon('calendar')}${esc(d.text)}</span>`;
       })()}</span>
-        ${p.confirmed ? '' : `<button type="button" class="confirm" data-op="confirm" data-project="${esc(p.id)}">${icon('check')}Confirm<span class="visually-hidden"> ${esc(p.name)}</span></button>`}</div>
+        ${p.confirmed ? '' : `<button type="button" class="confirm" data-op="confirm" data-project="${esc(p.id)}">${icon('check')}${esc(tr('proj.confirm'))}<span class="visually-hidden"> ${esc(p.name)}</span></button>`}</div>
       ${errFor(`card:${p.id}`) ? `<p class="form-error" role="alert">${esc(errFor(`card:${p.id}`))}</p>` : ''}
       ${items}</li>`;
   }).join('');
@@ -154,32 +155,32 @@ export function projectsHtml(projects, sessions, opts) {
 // A project's worktrees, on request: each one's branch and state, the safe
 // ones (merged, nothing uncommitted or ignored) last, and their remove commands to copy.
 // The app itself never removes anything.
-const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 60 ? tr('time.minAgo', { n: m }) : m < 2880 ? tr('time.hAgo', { n: Math.round(m / 60) }) : tr('time.dAgo', { n: Math.round(m / 1440) }); };
 function worktreesHtml(p, wt, privacy) {
-  const button = `<button type="button" class="link-btn small wt-load" data-op="worktrees" data-project="${esc(p.id)}">${icon('branch')} ${wt?.loading ? 'Looking…' : wt ? 'Look again' : 'Worktrees'}</button>`;
+  const button = `<button type="button" class="link-btn small wt-load" data-op="worktrees" data-project="${esc(p.id)}">${icon('branch')} ${esc(tr(wt?.loading ? 'proj.looking' : wt ? 'proj.lookAgain' : 'proj.worktrees'))}</button>`;
   if (!wt || wt.loading) return `<div class="wt">${button}</div>`;
   // git's own words can hold paths and commands: shown only with privacy off.
   if (!wt.ok) return `<div class="wt">${button}<p class="form-error">${esc(wt.error)}${wt.detail && !privacy ? ` <span class="muted">${esc(wt.detail)}</span>` : ''}</p></div>`;
   const rows = wt.trees.map((t) => {
     const bits = [
-      t.main ? 'main checkout' : '',
-      t.missing ? 'folder gone' : '',
-      t.merged ? `merged into ${wt.base}` : '',
-      t.changed ? `${t.changed} uncommitted` : '',
-      t.ignored ? `${t.ignored} ignored (outputs, checkpoints?) kept from removal` : '',
-      t.lastCommit ? `committed ${ago(t.lastCommit)}` : '',
-      t.error ? 'could not be read' : '',
+      t.main ? tr('proj.main') : '',
+      t.missing ? tr('proj.gone') : '',
+      t.merged ? tr('proj.merged', { base: wt.base }) : '',
+      t.changed ? tr('proj.uncommitted', { n: t.changed }) : '',
+      t.ignored ? tr('proj.ignored', { n: t.ignored }) : '',
+      t.lastCommit ? tr('proj.committed', { ago: ago(t.lastCommit) }) : '',
+      t.error ? tr('proj.unreadableTree') : '',
     ].filter(Boolean).join(' · ');
     return `<li class="wt-row${t.safe ? ' safe' : ''}${t.changed ? ' dirty' : ''}"${privacy ? '' : ` title="${esc(t.path)}"`}>
-      <span class="wt-name">${esc(t.name)}</span><span class="wt-branch">${esc(t.branch ?? (t.detached ? 'detached' : ''))}</span>
-      ${t.safe ? '<span class="wt-safe">safe to remove</span>' : ''}<span class="wt-bits">${esc(bits)}</span></li>`;
+      <span class="wt-name">${esc(t.name)}</span><span class="wt-branch">${esc(t.branch ?? (t.detached ? tr('proj.detached') : ''))}</span>
+      ${t.safe ? `<span class="wt-safe">${esc(tr('proj.safe'))}</span>` : ''}<span class="wt-bits">${esc(bits)}</span></li>`;
   }).join('');
   const safe = wt.trees.filter((t) => t.safe);
   const gone = wt.trees.filter((t) => t.missing);
   return `<div class="wt">${button}
-    <p class="wt-sum">${wt.trees.length} checkout${wt.trees.length === 1 ? '' : 's'}${safe.length ? ` · <strong>${safe.length} safe to remove</strong> (merged, nothing uncommitted or ignored)` : ''}${gone.length ? ` · ${gone.length} already gone` : ''}</p>
+    <p class="wt-sum">${esc(tr('proj.checkouts', { n: wt.trees.length }))}${safe.length ? trHtml('proj.safeHtml', { n: safe.length }) : ''}${gone.length ? esc(tr('proj.alreadyGone', { n: gone.length })) : ''}</p>
     <ul class="wt-list">${rows}</ul>
-    ${safe.length || gone.length ? `<button type="button" class="link-btn small" data-op="copy-wt" data-project="${esc(p.id)}">Copy the commands to remove them</button>` : ''}</div>`;
+    ${safe.length || gone.length ? `<button type="button" class="link-btn small" data-op="copy-wt" data-project="${esc(p.id)}">${esc(tr('proj.copyCommands'))}</button>` : ''}</div>`;
 }
 
 export function removeCommands(wt) {
@@ -209,9 +210,9 @@ export function wireProjects(root, { open, change, rerender, setError, worktrees
       if (!wt?.ok) return;
       try {
         await navigator.clipboard.writeText(removeCommands(wt));
-        b.textContent = 'Copied: paste them in a terminal in the project folder';
+        b.textContent = tr('proj.copied');
       } catch {
-        b.textContent = 'Could not copy; the clipboard is not available here';
+        b.textContent = tr('proj.copyFailed');
       }
       return;
     }
@@ -285,12 +286,12 @@ export function demoProjects() {
     const p = list.find((x) => x.id === c.project);
     if (c.op === 'add-project') {
       const name = String(c.name ?? '').trim();
-      if (!name) return { ok: false, error: 'Give the project a name.' };
+      if (!name) return { ok: false, error: tr('proj.demoName') };
       list.push({ id: `demo-${++n}`, name, confirmed: true, status: 'active', copies: [], todos: [] });
-    } else if (!p) return { ok: false, error: 'That project is no longer on the list.' };
+    } else if (!p) return { ok: false, error: tr('proj.demoGone') };
     else if (c.op === 'add-todo') {
       const text = String(c.text ?? '').trim();
-      if (!text) return { ok: false, error: 'Type the to-do first.' };
+      if (!text) return { ok: false, error: tr('proj.demoText') };
       p.todos.push({ id: `d${++n}`, text, done: false, by: 'you' });
     } else if (c.op === 'toggle-todo') {
       const t = p.todos.find((x) => x.id === c.todo);

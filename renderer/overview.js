@@ -4,6 +4,8 @@
 
 // A session or helper counts as running in these states; "your turn",
 // idle and finished do not. Keep in step with RUNNING in src/core/fleet.js.
+import { tr } from './i18n.js';
+
 export const RUNNING = new Set(['working', 'thinking', 'reporting', 'blocked', 'delegating']);
 export const isRunning = (status) => RUNNING.has(status);
 
@@ -63,10 +65,9 @@ export function overview(localSessions, here, others = [], { jobs = [], machine,
 
 // "3 running · 2 projects · 1 computer": the one line both windows lead with.
 export function headline(o) {
-  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   const computers = o.computers.filter((c) => c.sessions || c.local).length;
-  const parts = [o.running ? `${o.running} running` : 'Nothing running', n(o.sessions, 'session', 'sessions'), n(o.projects, 'project', 'projects')];
-  if (computers > 1) parts.push(n(computers, 'computer', 'computers'));
+  const parts = [o.running ? tr('overview.running', { n: o.running }) : tr('overview.nothing'), tr('overview.sessions', { n: o.sessions }), tr('overview.projects', { n: o.projects })];
+  if (computers > 1) parts.push(tr('overview.computers', { n: computers }));
   return parts.join(' · ');
 }
 
@@ -96,7 +97,6 @@ export function icon(name) {
   return `<svg class="ico ico-${name}" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name] ?? ''}</svg>`;
 }
 
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const escAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // An icon and a number, e.g. ▶ 3 for "3 running".
@@ -104,18 +104,18 @@ export function badge(name, n, words, { quiet = false } = {}) {
   return `<span class="badge badge-${name}${quiet || !n ? ' quiet' : ''}" title="${escAttr(words)}">${icon(name)}<span aria-hidden="true">${n}</span><span class="visually-hidden">${escAttr(words)}</span></span>`;
 }
 
-export const runningBadge = (n) => badge('running', n, `${n} running`);
-export const helperBadge = (n) => badge('helper', n, plural(n, 'helper'));
+export const runningBadge = (n) => badge('running', n, tr('overview.running', { n }));
+export const helperBadge = (n) => badge('helper', n, tr('overview.helpers', { n }));
 
 // The overview as a row of badges: running, sessions, projects, computers.
 export function headlineBadges(o) {
   const computers = o.computers.filter((c) => c.sessions || c.local).length;
   return [
-    badge('running', o.running, `${o.running} running`),
-    badge('session', o.sessions, plural(o.sessions, 'session'), { quiet: true }),
-    badge('live', o.projects, `${plural(o.projects, 'project')} with sessions`, { quiet: true }),
-    computers > 1 ? badge('computer', computers, plural(computers, 'computer'), { quiet: true }) : '',
-    o.jobs ? badge('job', o.jobs, `${plural(o.jobs, 'job')} running (training, scripts on the GPU or busy CPU)`) : '',
+    badge('running', o.running, tr('overview.running', { n: o.running })),
+    badge('session', o.sessions, tr('overview.sessions', { n: o.sessions }), { quiet: true }),
+    badge('live', o.projects, tr('overview.projectsLive', { n: o.projects }), { quiet: true }),
+    computers > 1 ? badge('computer', computers, tr('overview.computers', { n: computers }), { quiet: true }) : '',
+    o.jobs ? badge('job', o.jobs, tr('overview.jobs', { n: o.jobs })) : '',
   ].join('');
 }
 
@@ -129,7 +129,7 @@ export function todoPips(todos) {
   const total = Math.max(0, Math.min(Math.floor(Number(todos.total) || 0), 10_000));
   const done = Math.max(0, Math.min(Math.floor(Number(todos.done) || 0), total));
   const doing = Math.max(0, Math.min(Math.floor(Number(todos.doing) || 0), total - done));
-  const words = `To-do list: ${done} of ${total} done${doing ? `, ${doing} in progress` : ''}`;
+  const words = doing ? tr('todo.pipsDoing', { done, total, doing }) : tr('todo.pips', { done, total });
   const STATES = new Set(['completed', 'in_progress', 'pending']);
   let marks;
   if (total <= PIP_LIMIT) {

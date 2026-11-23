@@ -6,7 +6,6 @@
 export const THEMES = {
   // Pink and peach towers, violet shade, mint accent, blossom trees.
   blossom: {
-    name: 'Blossom',
     light: '#ffe9c7',
     shadow: '#6e62d4',
     materials: {
@@ -23,7 +22,6 @@ export const THEMES = {
   },
   // Periwinkle and ice-blue towers, indigo shade, pink accent.
   tide: {
-    name: 'Tide',
     light: '#eef0ff',
     shadow: '#4f58c8',
     materials: {
@@ -40,7 +38,6 @@ export const THEMES = {
   },
   // Mint and jade towers, sea-blue shade, peach accent.
   grove: {
-    name: 'Grove',
     light: '#fbf6d8',
     shadow: '#3f7fa8',
     materials: {
@@ -84,11 +81,11 @@ export function floorTones(base, theme) {
 
 // Parts of the day, from the computer's clock.
 export const PHASES = [
-  { id: 'dawn', name: 'Early morning', from: 5 },
-  { id: 'morning', name: 'Morning', from: 8 },
-  { id: 'noon', name: 'Noon', from: 11 },
-  { id: 'afternoon', name: 'Afternoon', from: 14 },
-  { id: 'night', name: 'Night', from: 18 },
+  { id: 'dawn', from: 5 },
+  { id: 'morning', from: 8 },
+  { id: 'noon', from: 11 },
+  { id: 'afternoon', from: 14 },
+  { id: 'night', from: 18 },
 ];
 
 export function phaseAt(date) {

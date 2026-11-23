@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { parseFrontmatter } = require('./roster');
+const { translate } = require('./i18n');
 
 const HOOK_FILE = 'hooks/agents-home-router.sh';
 const HOOK_MARK = 'agents-home-router';
@@ -88,7 +89,7 @@ function listPack(packDir) {
   if (fs.existsSync(path.join(packDir, HOOK_FILE))) {
     items.push({
       kind: 'hook', name: 'team-reminders',
-      summary: 'Reminds Claude to hand work to the team when a request fits (adds one entry to settings.json)',
+      summary: translate('en', 'pack.summary.team-reminders'),
       from: HOOK_FILE, to: HOOK_FILE,
     });
   }

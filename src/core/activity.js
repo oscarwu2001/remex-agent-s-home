@@ -2,9 +2,13 @@
 
 // Human wording for a tool call. `label` is safe to show on a shared screen;
 // `detail` may carry a file name, pattern, command or host and is hidden
-// while privacy mode is on.
+// while privacy mode is on. The label is in English (the system log's);
+// `labelKey` and `labelParams` let each window say it in its own language.
 
 const path = require('path');
+const { translate } = require('./i18n');
+
+const said = (key, params) => ({ label: translate('en', key, params), labelKey: key, ...(params ? { labelParams: params } : {}) });
 
 function basename(p) {
   return typeof p === 'string' && p ? path.basename(p.replace(/\\/g, '/')) : '';
@@ -27,43 +31,43 @@ function host(url) {
 function describeTool(name, input = {}) {
   switch (name) {
     case 'Read':
-      return { kind: 'read', label: 'Reading a file', detail: basename(input.file_path) };
+      return { kind: 'read', ...said('tool.read'), detail: basename(input.file_path) };
     case 'Write':
-      return { kind: 'write', label: 'Writing a file', detail: basename(input.file_path) };
+      return { kind: 'write', ...said('tool.write'), detail: basename(input.file_path) };
     case 'Edit':
     case 'MultiEdit':
-      return { kind: 'write', label: 'Editing a file', detail: basename(input.file_path) };
+      return { kind: 'write', ...said('tool.edit'), detail: basename(input.file_path) };
     case 'NotebookEdit':
-      return { kind: 'write', label: 'Editing a notebook', detail: basename(input.notebook_path) };
+      return { kind: 'write', ...said('tool.notebook'), detail: basename(input.notebook_path) };
     case 'Bash':
     case 'PowerShell':
-      return { kind: 'run', label: 'Running a command', detail: clip(input.description || input.command) };
+      return { kind: 'run', ...said('tool.run'), detail: clip(input.description || input.command) };
     case 'Grep':
     case 'Glob':
-      return { kind: 'search', label: 'Searching the code', detail: clip(input.pattern) };
+      return { kind: 'search', ...said('tool.search'), detail: clip(input.pattern) };
     case 'WebFetch':
-      return { kind: 'web', label: 'Reading a web page', detail: host(input.url) };
+      return { kind: 'web', ...said('tool.webRead'), detail: host(input.url) };
     case 'WebSearch':
-      return { kind: 'web', label: 'Searching the web', detail: clip(input.query) };
+      return { kind: 'web', ...said('tool.webSearch'), detail: clip(input.query) };
     case 'Task':
     case 'Agent':
       return {
         kind: 'delegate',
-        label: `Consulting ${input.subagent_type || 'general-purpose'}`,
+        ...said('tool.delegate', { type: input.subagent_type || 'general-purpose' }),
         detail: clip(input.description),
       };
     case 'TodoWrite':
     case 'TaskCreate':
     case 'TaskUpdate':
-      return { kind: 'chart', label: 'Updating the chart', detail: '' };
+      return { kind: 'chart', ...said('tool.chart'), detail: '' };
     case 'Skill':
-      return { kind: 'skill', label: 'Using a skill', detail: clip(input.skill || input.command) };
+      return { kind: 'skill', ...said('tool.skill'), detail: clip(input.skill || input.command) };
     default:
       if (typeof name === 'string' && name.startsWith('mcp__')) {
-        const server = name.split('__')[1] || 'a connector';
-        return { kind: 'tool', label: `Using ${server}`, detail: clip(name.split('__').slice(2).join(' ')) };
+        const server = name.split('__')[1];
+        return { kind: 'tool', ...(server ? said('tool.using', { name: server }) : said('tool.usingConnector')), detail: clip(name.split('__').slice(2).join(' ')) };
       }
-      return { kind: 'tool', label: `Using ${name || 'a tool'}`, detail: '' };
+      return { kind: 'tool', ...(name ? said('tool.using', { name }) : said('tool.usingTool')), detail: '' };
   }
 }
 

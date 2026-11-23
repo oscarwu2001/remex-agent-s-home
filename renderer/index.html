@@ -9,10 +9,10 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="stage" aria-label="Hospital map">
+  <main class="stage" data-i18n-aria-label="stage.map">
     <div class="sky-body" id="sky-body" aria-hidden="true"></div>
     <svg id="scene" role="img" aria-labelledby="scene-title">
-      <title id="scene-title">Isometric hospital with a room for each kind of agent</title>
+      <title id="scene-title" data-i18n="stage.sceneTitle"></title>
       <defs id="defs"></defs>
       <g id="world">
         <g id="clouds"></g>
@@ -27,18 +27,18 @@
     <div class="weather" id="weather" aria-hidden="true"></div>
     <div class="gust" id="gust" aria-hidden="true"></div>
     <p class="clock" id="clock"></p>
-    <div class="camera" role="toolbar" aria-label="View">
-      <button type="button" class="cam-btn wide" id="cam-overview" title="Back to the whole hospital (Esc)">Whole hospital</button>
+    <div class="camera" role="toolbar" data-i18n-aria-label="stage.view">
+      <button type="button" class="cam-btn wide" id="cam-overview" data-i18n-title="stage.overviewTip" data-i18n="stage.overview"></button>
       <span class="cam-where" id="cam-where" aria-live="polite"></span>
-      <button type="button" class="cam-btn wide" id="cam-report" title="Open the performance report of your helpers">Report</button>
-      <button type="button" class="cam-btn wide" id="cam-mini" title="A small window that stays on top: what runs now and each to-do list">Mini window</button>
-      <button type="button" class="cam-btn wide accent" id="cam-decorate" aria-expanded="false" aria-controls="decorate" hidden>Decorate</button>
+      <button type="button" class="cam-btn wide" id="cam-report" data-i18n-title="stage.reportTip" data-i18n="stage.report"></button>
+      <button type="button" class="cam-btn wide" id="cam-mini" data-i18n-title="stage.miniTip" data-i18n="stage.mini"></button>
+      <button type="button" class="cam-btn wide accent" id="cam-decorate" aria-expanded="false" aria-controls="decorate" hidden data-i18n="decor.decorate"></button>
     </div>
-    <p class="cam-hint">Drag to turn · right-drag to move · scroll to zoom · click a room or garden to visit</p>
+    <p class="cam-hint" data-i18n="stage.hint"></p>
     <section class="decorate" id="decorate" hidden aria-labelledby="decorate-h">
       <header class="settings-head">
-        <h2 id="decorate-h">Decorate</h2>
-        <button type="button" class="icon-btn" id="decorate-close" aria-label="Close" title="Close (Esc)">
+        <h2 id="decorate-h" data-i18n="decor.decorate"></h2>
+        <button type="button" class="icon-btn" id="decorate-close" data-i18n-aria-label="common.close" data-i18n-title="common.closeEsc">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </header>
@@ -46,8 +46,8 @@
     </section>
     <section class="live-map" id="live-map" hidden aria-labelledby="live-map-h">
       <header class="settings-head">
-        <h2 id="live-map-h">Live map</h2>
-        <button type="button" class="icon-btn" id="live-map-close" aria-label="Close the live map" title="Close (Esc)">
+        <h2 id="live-map-h" data-i18n="map.title"></h2>
+        <button type="button" class="icon-btn" id="live-map-close" data-i18n-aria-label="map.close" data-i18n-title="common.closeEsc">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </header>
@@ -57,38 +57,38 @@
     <p class="source" id="source"></p>
   </main>
 
-  <aside class="board" aria-label="Ward board">
+  <aside class="board" data-i18n-aria-label="board.aria">
     <header class="board-head">
       <div class="title-row">
         <h1>Agent's Home</h1>
-        <button type="button" class="icon-btn" id="settings-open" aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings">
+        <button type="button" class="icon-btn" id="settings-open" data-i18n-aria-label="settings.title" aria-expanded="false" aria-controls="settings" data-i18n-title="settings.title">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
-      <p class="census" id="census" aria-live="polite">Looking for sessions…</p>
+      <p class="census" id="census" aria-live="polite" data-i18n="board.looking"></p>
     </header>
 
     <section class="board-section running" id="running" aria-labelledby="running-h">
-      <h2 id="running-h">Running now</h2>
+      <h2 id="running-h" data-i18n="board.running"></h2>
       <p class="running-head" id="running-head" aria-live="polite"></p>
       <div id="waiting"></div>
       <div id="sessions"></div>
     </section>
 
     <section class="board-section proj-section" id="projects" aria-labelledby="projects-h">
-      <div class="title-row"><h2 id="projects-h">Projects</h2>
-        <button type="button" class="link-btn small" id="projects-file" title="Show the project list file">List file</button></div>
+      <div class="title-row"><h2 id="projects-h" data-i18n="board.projects"></h2>
+        <button type="button" class="link-btn small" id="projects-file" data-i18n-title="board.listFileTip" data-i18n="board.listFile"></button></div>
       <p class="hint" id="projects-file-status" role="status"></p>
       <div id="projects-body"></div>
     </section>
 
     <section class="board-section field-section" id="field" hidden aria-labelledby="field-h">
-      <h2 id="field-h">Field feedback</h2>
+      <h2 id="field-h" data-i18n="field.title"></h2>
       <div id="field-body"></div>
     </section>
 
     <section class="board-section line-section" id="line" hidden aria-labelledby="line-h">
-      <h2 id="line-h" tabindex="-1">LINE</h2>
+      <h2 id="line-h" tabindex="-1" data-i18n="line.title"></h2>
       <div id="line-body"></div>
       <p class="line-status" id="line-status" role="status"></p>
     </section>
@@ -96,82 +96,87 @@
     <section class="board-section pack-offer" id="pack-offer" hidden aria-labelledby="pack-h" aria-live="polite"></section>
 
     <section class="board-section usage" id="usage" hidden aria-labelledby="usage-h">
-      <h2 id="usage-h">Claude Code use</h2>
+      <h2 id="usage-h" data-i18n="usage.title"></h2>
       <div id="usage-body"></div>
     </section>
 
     <section class="board-section chart" id="chart" aria-labelledby="chart-h" hidden>
-      <h2 id="chart-h">Chart</h2>
+      <h2 id="chart-h" data-i18n="chart.title"></h2>
       <div id="chart-body"></div>
     </section>
 
     <details class="board-section" id="directory">
-      <summary><h2>Staff directory <span class="count" id="directory-count"></span></h2></summary>
+      <summary><h2><span data-i18n="board.directory"></span> <span class="count" id="directory-count"></span></h2></summary>
       <ul id="directory-list" class="directory"></ul>
     </details>
 
     <section class="board-section problems" id="problems" hidden aria-labelledby="problems-h">
-      <h2 id="problems-h">Needs attention</h2>
+      <h2 id="problems-h" data-i18n="problems.title"></h2>
       <ul id="problem-list"></ul>
     </section>
 
     <section class="settings" id="settings" hidden aria-labelledby="settings-h" role="dialog" tabindex="-1">
       <header class="settings-head">
-        <h2 id="settings-h">Settings</h2>
-        <button type="button" class="icon-btn" id="settings-close" aria-label="Close settings" title="Close (Esc)">
+        <h2 id="settings-h" data-i18n="settings.title"></h2>
+        <button type="button" class="icon-btn" id="settings-close" data-i18n-aria-label="settings.close" data-i18n-title="common.closeEsc">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </header>
 
+      <label class="field language-field" for="opt-language"><span data-i18n="settings.language"></span>
+        <select id="opt-language"></select>
+      </label>
+      <p class="hint" id="language-note" role="status" hidden></p>
+
       <section class="settings-cat" id="group-look" data-group="look" aria-labelledby="group-look-name">
         <h3 class="group-h"><button type="button" class="group-toggle" id="group-look-btn" aria-expanded="false" aria-controls="group-look-body">
-          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-look-name">Look &amp; layout</span>
+          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-look-name" data-i18n="settings.group.look"></span>
           <span class="group-summary" id="group-look-summary"></span></span></button></h3>
         <div class="group-body" id="group-look-body" hidden>
           <section class="settings-group" aria-labelledby="look-h">
-            <h4 id="look-h" tabindex="-1">Look</h4>
+            <h4 id="look-h" tabindex="-1" data-i18n="settings.look"></h4>
             <fieldset class="colourways" id="colourways">
-              <legend>Colourway</legend>
+              <legend data-i18n="settings.colourway"></legend>
               <div class="options">
-                <label class="colourway blossom"><input type="radio" name="theme" value="blossom"><span class="dot" aria-hidden="true"></span>Blossom</label>
-                <label class="colourway tide"><input type="radio" name="theme" value="tide"><span class="dot" aria-hidden="true"></span>Tide</label>
-                <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span>Grove</label>
+                <label class="colourway blossom"><input type="radio" name="theme" value="blossom"><span class="dot" aria-hidden="true"></span><span data-i18n="theme.blossom"></span></label>
+                <label class="colourway tide"><input type="radio" name="theme" value="tide"><span class="dot" aria-hidden="true"></span><span data-i18n="theme.tide"></span></label>
+                <label class="colourway grove"><input type="radio" name="theme" value="grove"><span class="dot" aria-hidden="true"></span><span data-i18n="theme.grove"></span></label>
               </div>
             </fieldset>
             <fieldset class="colourways" id="room-style">
-              <legend>Room style</legend>
+              <legend data-i18n="settings.roomStyle"></legend>
               <div class="options">
-                <label class="colourway style-simple"><input type="radio" name="detail" value="simple">Simple</label>
-                <label class="colourway style-detailed"><input type="radio" name="detail" value="detailed">Detailed</label>
+                <label class="colourway style-simple"><input type="radio" name="detail" value="simple"><span data-i18n="settings.roomStyle.simple"></span></label>
+                <label class="colourway style-detailed"><input type="radio" name="detail" value="detailed"><span data-i18n="settings.roomStyle.detailed"></span></label>
               </div>
             </fieldset>
-            <label class="field" for="opt-time">Time of day
+            <label class="field" for="opt-time"><span data-i18n="settings.time"></span>
               <select id="opt-time">
-                <option value="auto">Follow my clock</option>
-                <option value="dawn">Early morning</option>
-                <option value="morning">Morning</option>
-                <option value="noon">Noon</option>
-                <option value="afternoon">Afternoon</option>
-                <option value="night">Night</option>
+                <option value="auto" data-i18n="time.auto"></option>
+                <option value="dawn" data-i18n="phase.dawn"></option>
+                <option value="morning" data-i18n="phase.morning"></option>
+                <option value="noon" data-i18n="phase.noon"></option>
+                <option value="afternoon" data-i18n="phase.afternoon"></option>
+                <option value="night" data-i18n="phase.night"></option>
               </select>
             </label>
-            <label class="field" for="opt-weather">Weather
+            <label class="field" for="opt-weather"><span data-i18n="settings.weather"></span>
               <select id="opt-weather">
-                <option value="clear">Clear</option>
-                <option value="cloudy">Cloudy</option>
-                <option value="rain">Rain</option>
-                <option value="snow">Snow</option>
-                <option value="fog">Fog</option>
-                <option value="changing">Changes through the day</option>
+                <option value="clear" data-i18n="weather.clear"></option>
+                <option value="cloudy" data-i18n="weather.cloudy"></option>
+                <option value="rain" data-i18n="weather.rain"></option>
+                <option value="snow" data-i18n="weather.snow"></option>
+                <option value="fog" data-i18n="weather.fog"></option>
+                <option value="changing" data-i18n="weather.changing"></option>
               </select>
             </label>
-            <label class="switch"><input type="checkbox" id="opt-live"> <span>Use the real weather (goes online)</span></label>
+            <label class="switch"><input type="checkbox" id="opt-live"> <span data-i18n="settings.live"></span></label>
             <div class="live" id="live-body" hidden></div>
-            <p class="hint" id="live-hint">Off: the weather above is what you see, and the app stays fully offline.</p>
+            <p class="hint" id="live-hint"></p>
           </section>
 
           <section class="settings-group" id="layout-editor" aria-labelledby="layout-h">
-            <h4 id="layout-h" tabindex="-1">Hospital layout <span class="count" id="layout-count"></span></h4>
+            <h4 id="layout-h" tabindex="-1"><span data-i18n="settings.layout"></span> <span class="count" id="layout-count"></span></h4>
             <div id="layout-body"></div>
           </section>
         </div>
@@ -179,64 +184,64 @@
 
       <section class="settings-cat" id="group-privacy" data-group="privacy" aria-labelledby="group-privacy-name">
         <h3 class="group-h"><button type="button" class="group-toggle" id="group-privacy-btn" aria-expanded="false" aria-controls="group-privacy-body">
-          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-privacy-name">Privacy &amp; alerts</span>
+          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-privacy-name" data-i18n="settings.group.privacy"></span>
           <span class="group-summary" id="group-privacy-summary"></span></span></button></h3>
         <div class="group-body" id="group-privacy-body" hidden>
           <section class="settings-group" aria-labelledby="screen-h">
-            <h4 id="screen-h" tabindex="-1">On screen</h4>
-            <label class="switch"><input type="checkbox" id="opt-private" checked> <span>Hide file names, commands, survey answers and LINE chats</span></label>
-            <label class="switch"><input type="checkbox" id="opt-names" checked> <span>Show name tags</span></label>
+            <h4 id="screen-h" tabindex="-1" data-i18n="settings.screen"></h4>
+            <label class="switch"><input type="checkbox" id="opt-private" checked> <span data-i18n="settings.private"></span></label>
+            <label class="switch"><input type="checkbox" id="opt-names" checked> <span data-i18n="settings.names"></span></label>
           </section>
 
           <section class="settings-group" aria-labelledby="warn-h">
-            <h4 id="warn-h" tabindex="-1">Usage warnings</h4>
-            <p class="hint">A session whose context is nearly full is always flagged: save your work before Claude Code compacts it. Claude Code's own usage-limit messages are passed on too.</p>
-            <label class="field" for="opt-budget">Also warn me after this many tokens in 5 hours (leave empty for no warning)
-              <input id="opt-budget" type="number" min="0" step="100000" inputmode="numeric" placeholder="e.g. 5000000"></label>
-            <label class="switch"><input type="checkbox" id="opt-notify" checked> <span>Show warnings as Windows notifications too</span></label>
-            <label class="field" for="opt-wait">Tell me when a session has waited for me
+            <h4 id="warn-h" tabindex="-1" data-i18n="settings.warn"></h4>
+            <p class="hint" data-i18n="settings.warn.hint"></p>
+            <label class="field" for="opt-budget"><span data-i18n="settings.budget"></span>
+              <input id="opt-budget" type="number" min="0" step="100000" inputmode="numeric" data-i18n-placeholder="settings.budget.example"></label>
+            <label class="switch"><input type="checkbox" id="opt-notify" checked> <span data-i18n="settings.notify"></span></label>
+            <label class="field" for="opt-wait"><span data-i18n="settings.wait"></span>
               <select id="opt-wait">
-                <option value="0">Never</option>
-                <option value="2">2 minutes</option>
-                <option value="5">5 minutes</option>
-                <option value="10">10 minutes</option>
-                <option value="15">15 minutes</option>
+                <option value="0" data-i18n="settings.wait.never"></option>
+                <option value="2" data-i18n="time.minutes" data-i18n-n="2"></option>
+                <option value="5" data-i18n="time.minutes" data-i18n-n="5"></option>
+                <option value="10" data-i18n="time.minutes" data-i18n-n="10"></option>
+                <option value="15" data-i18n="time.minutes" data-i18n-n="15"></option>
               </select>
             </label>
-            <label class="switch"><input type="checkbox" id="opt-ends" checked> <span>Tell me when training or other long work ends</span></label>
+            <label class="switch"><input type="checkbox" id="opt-ends" checked> <span data-i18n="settings.ends"></span></label>
           </section>
         </div>
       </section>
 
       <section class="settings-cat" id="group-connect" data-group="connect" aria-labelledby="group-connect-name">
         <h3 class="group-h"><button type="button" class="group-toggle" id="group-connect-btn" aria-expanded="false" aria-controls="group-connect-body">
-          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-connect-name">Connections</span>
+          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-connect-name" data-i18n="settings.group.connect"></span>
           <span class="group-summary" id="group-connect-summary"></span></span></button></h3>
         <div class="group-body" id="group-connect-body" hidden>
           <section class="settings-group" aria-labelledby="field-settings-h">
-            <h4 id="field-settings-h" tabindex="-1">Field feedback (Google Sheet)</h4>
-            <p class="hint">Your field survey’s answers on the board: how many, the average scores and what is new. The app reads one Google Sheet on Monday, Wednesday and Friday at 08:00, and when it starts after missing one: through a small reader script you attach to the sheet, or with your own Google Cloud service account. Only the reader’s secret, or the sheet’s id and a signed sign-in request, are sent, never anything from your sessions. Each way says what to do once chosen below.</p>
-            <label class="switch"><input type="checkbox" id="opt-field"> <span>Show field feedback (goes online)</span></label>
+            <h4 id="field-settings-h" tabindex="-1" data-i18n="settings.field"></h4>
+            <p class="hint" data-i18n="settings.field.hint"></p>
+            <label class="switch"><input type="checkbox" id="opt-field"> <span data-i18n="settings.field.switch"></span></label>
             <div class="field-settings" id="field-settings"></div>
           </section>
 
           <section class="settings-group" aria-labelledby="fleet-h">
-            <h4 id="fleet-h" tabindex="-1">Other computers</h4>
-            <p class="hint">See what runs on your other computers under “Running now”. Pick a folder they all sync, such as OneDrive, Dropbox or a network drive, and do the same on each computer. Each one writes a small status file there: project names, statuses, helper types and to-do counts. Never file names, commands, prompts or to-do wording. The app itself never goes online for this; your folder's own sync does.</p>
+            <h4 id="fleet-h" tabindex="-1" data-i18n="settings.fleet"></h4>
+            <p class="hint" data-i18n="settings.fleet.hint"></p>
             <p class="hint" id="fleet-status" aria-live="polite"></p>
             <div class="form-actions">
-              <button type="button" class="button" id="fleet-choose">Choose shared folder</button>
-              <button type="button" class="button" id="fleet-git">Use a git status folder</button>
-              <button type="button" class="link-btn" id="fleet-off" hidden>Stop sharing</button>
+              <button type="button" class="button" id="fleet-choose" data-i18n="settings.fleet.choose"></button>
+              <button type="button" class="button" id="fleet-git" data-i18n="settings.fleet.git"></button>
+              <button type="button" class="link-btn" id="fleet-off" hidden data-i18n="settings.fleet.off"></button>
             </div>
-            <p class="hint"><strong>Git status folder</strong> (pull only): your other computers post a short status every hour, 9:00–19:00, to the <code>agents-status</code> branch, with no Claude tokens. Clone that branch here and pick the clone; the app pulls it every 10 minutes and writes nothing.</p>
-            <p class="hint">Sessions in the cloud (claude.ai, or the Claude app's cloud tasks) keep no files on your computers, so they can't be shown here. Code-tab sessions and Cowork tasks that run on a computer are shown.</p>
+            <p class="hint" data-i18n-html="settings.fleet.gitHint"></p>
+            <p class="hint" data-i18n="settings.fleet.cloud"></p>
           </section>
 
           <section class="settings-group" aria-labelledby="line-settings-h">
-            <h4 id="line-settings-h" tabindex="-1">LINE chats</h4>
-            <p class="hint">Requests for you in your LINE group chats: mentions of your names, your keywords, and what you said you would do. Two ways in, either or both: chats you save from the LINE desktop app into a folder (only read, never changed, nothing goes online), and your own LINE bot in your groups, collected from your relay. The app reads only the chats and groups you tick, and never sends anything to LINE.</p>
-            <label class="switch"><input type="checkbox" id="opt-line"> <span>Read my LINE chats</span></label>
+            <h4 id="line-settings-h" tabindex="-1" data-i18n="settings.line"></h4>
+            <p class="hint" data-i18n="settings.line.hint"></p>
+            <label class="switch"><input type="checkbox" id="opt-line"> <span data-i18n="settings.line.switch"></span></label>
             <div class="field-settings line-settings" id="line-settings"></div>
           </section>
         </div>
@@ -244,27 +249,27 @@
 
       <section class="settings-cat" id="group-agents" data-group="agents" aria-labelledby="group-agents-name">
         <h3 class="group-h"><button type="button" class="group-toggle" id="group-agents-btn" aria-expanded="false" aria-controls="group-agents-body">
-          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-agents-name">Agents &amp; reports</span>
+          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-agents-name" data-i18n="settings.group.agents"></span>
           <span class="group-summary" id="group-agents-summary"></span></span></button></h3>
         <div class="group-body" id="group-agents-body" hidden>
           <section class="settings-group" aria-labelledby="pack-settings-h">
-            <h4 id="pack-settings-h" tabindex="-1">Office team for Claude (optional)</h4>
+            <h4 id="pack-settings-h" tabindex="-1" data-i18n="settings.pack"></h4>
             <div id="pack-settings"></div>
           </section>
 
           <section class="settings-group" aria-labelledby="report-h">
-            <h4 id="report-h" tabindex="-1">Performance report</h4>
-            <p class="hint">How each agent has been doing: runs, finished rate, re-runs, time, tokens and a score, by day and by week.</p>
-            <label class="field" for="report-days">Period
+            <h4 id="report-h" tabindex="-1" data-i18n="settings.report"></h4>
+            <p class="hint" data-i18n="settings.report.hint"></p>
+            <label class="field" for="report-days"><span data-i18n="settings.report.period"></span>
               <select id="report-days">
-                <option value="7">Last 7 days</option>
-                <option value="28" selected>Last 28 days</option>
-                <option value="90">Last 90 days</option>
+                <option value="7" data-i18n="settings.report.days" data-i18n-n="7"></option>
+                <option value="28" selected data-i18n="settings.report.days" data-i18n-n="28"></option>
+                <option value="90" data-i18n="settings.report.days" data-i18n-n="90"></option>
               </select>
             </label>
             <div class="form-actions report-actions">
-              <button type="button" class="button" id="report-open">Open report</button>
-              <button type="button" class="link-btn" id="report-files">Show the files</button>
+              <button type="button" class="button" id="report-open" data-i18n="settings.report.open"></button>
+              <button type="button" class="link-btn" id="report-files" data-i18n="settings.report.files"></button>
             </div>
             <p class="hint" id="report-status" aria-live="polite"></p>
           </section>
@@ -273,36 +278,36 @@
 
       <section class="settings-cat" id="group-app" data-group="app" aria-labelledby="group-app-name">
         <h3 class="group-h"><button type="button" class="group-toggle" id="group-app-btn" aria-expanded="false" aria-controls="group-app-body">
-          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-app-name">App</span>
+          <svg class="ico group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="group-words"><span class="group-name" id="group-app-name" data-i18n="settings.group.app"></span>
           <span class="group-summary" id="group-app-summary"></span></span></button></h3>
         <div class="group-body" id="group-app-body" hidden>
           <section class="settings-group" aria-labelledby="demo-h">
-            <h4 id="demo-h" tabindex="-1">Demo</h4>
-            <label class="switch"><input type="checkbox" id="opt-demo"> <span>Demo patients</span></label>
-            <p class="hint">Made-up sessions, helpers, sample field feedback and LINE items, to try the app out. Your own sessions show again when it is off.</p>
+            <h4 id="demo-h" tabindex="-1" data-i18n="settings.demo"></h4>
+            <label class="switch"><input type="checkbox" id="opt-demo"> <span data-i18n="settings.demo.switch"></span></label>
+            <p class="hint" data-i18n="settings.demo.hint"></p>
           </section>
 
           <section class="settings-group" aria-labelledby="update-h">
-            <h4 id="update-h" tabindex="-1">Updates</h4>
+            <h4 id="update-h" tabindex="-1" data-i18n="settings.update"></h4>
             <p class="hint" id="update-version"></p>
             <div class="form-actions">
-              <button type="button" class="button" id="update-run">Update and restart</button>
-              <button type="button" class="button" id="update-agents">Update agents</button>
+              <button type="button" class="button" id="update-run" data-i18n="settings.update.run"></button>
+              <button type="button" class="button" id="update-agents" data-i18n="settings.update.agents"></button>
             </div>
             <p class="hint" id="update-status" aria-live="polite"></p>
-            <p class="hint">Update agents refreshes the office team helpers you added yourself, if a newer version came with the app. It adds nothing new, never turns reminders on, and leaves anything you changed, and all your own agents, skills and hooks, as they are.</p>
+            <p class="hint" data-i18n="settings.update.hint"></p>
           </section>
 
           <section class="settings-group" aria-labelledby="log-h">
-            <h4 id="log-h" tabindex="-1">System log</h4>
-            <p class="hint">A record for checking the team works, and for debugging: which agents worked, when, how they finished and their tokens, every few minutes who is working, and any errors. It is kept in the app's own folder, with names and times only, never your prompts or files.</p>
+            <h4 id="log-h" tabindex="-1" data-i18n="settings.log"></h4>
+            <p class="hint" data-i18n="settings.log.hint"></p>
             <p class="hint" id="log-reminders" aria-live="polite"></p>
             <div class="form-actions">
-              <button type="button" class="button" id="log-activity">Show activity</button>
-              <button type="button" class="button" id="log-errors">Show errors</button>
-              <button type="button" class="link-btn" id="log-open">Open the log folder</button>
+              <button type="button" class="button" id="log-activity" data-i18n="settings.log.activity"></button>
+              <button type="button" class="button" id="log-errors" data-i18n="settings.log.errors"></button>
+              <button type="button" class="link-btn" id="log-open" data-i18n="settings.log.open"></button>
             </div>
-            <pre class="log-view" id="log-view" tabindex="0" hidden aria-label="Log lines, newest last"></pre>
+            <pre class="log-view" id="log-view" tabindex="0" hidden data-i18n-aria-label="settings.log.lines"></pre>
           </section>
         </div>
       </section>
@@ -311,8 +316,8 @@
 
   <section class="field-sheet" id="field-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="field-sheet-h" tabindex="-1">
     <header class="settings-head">
-      <h2 id="field-sheet-h">Field feedback</h2>
-      <button type="button" class="icon-btn" id="field-sheet-close" aria-label="Close field feedback" title="Close (Esc)">
+      <h2 id="field-sheet-h" data-i18n="field.title"></h2>
+      <button type="button" class="icon-btn" id="field-sheet-close" data-i18n-aria-label="field.close" data-i18n-title="common.closeEsc">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </header>
@@ -321,8 +326,8 @@
 
   <section class="field-sheet line-sheet" id="line-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="line-sheet-h" tabindex="-1">
     <header class="settings-head">
-      <h2 id="line-sheet-h">Send to agent</h2>
-      <button type="button" class="icon-btn" id="line-sheet-close" aria-label="Close Send to agent" title="Close (Esc)">
+      <h2 id="line-sheet-h" data-i18n="line.send.title"></h2>
+      <button type="button" class="icon-btn" id="line-sheet-close" data-i18n-aria-label="line.send.close" data-i18n-title="common.closeEsc">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </header>

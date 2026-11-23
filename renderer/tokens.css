@@ -20,10 +20,14 @@
   --s-5: 24px;
   --s-6: 32px;
 
-  /* System fonts only: the app never loads a web font. */
-  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  /* System fonts only: the app never loads a web font. Chinese glyphs fall
+     through the Latin faces to the system's own Traditional Chinese one
+     (Windows' JhengHei, the Mac's PingFang, Linux's Noto). */
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", system-ui, -apple-system, "Helvetica Neue", sans-serif;
   --track-tight: -0.012em;
+  /* Running text's line height: the font's own in English. */
+  --lh-text: normal;
 
   /* A spring that settles with a small overshoot, for hovers and panels. */
   --spring: linear(0, 0.08 4%, 0.3 9%, 0.56 14%, 0.8 20%, 0.95 26%, 1.03 32%, 1.045 38%, 1.03 46%, 1.01 58%, 1);
@@ -31,6 +35,13 @@
   --shadow-soft: 0 1px 2px rgba(20, 20, 30, 0.04), 0 8px 24px rgba(20, 20, 30, 0.06);
   --shadow-float: 0 2px 6px rgba(20, 20, 30, 0.05), 0 18px 40px rgba(20, 20, 30, 0.10);
   color-scheme: light;
+}
+
+/* Chinese (<html lang="zh-Hant-TW">): no tight tracking, which crowds the
+   glyphs, and taller running text, as CJK lines read best at about 1.6. */
+:root:lang(zh) {
+  --track-tight: 0;
+  --lh-text: 1.6;
 }
 
 /* Colourways. The scene's solids come from renderer/themes.js; these are the

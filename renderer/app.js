@@ -16,6 +16,9 @@ import { waitingList, waitingHtml, waitText, waitFor, waitKey, endedWork, loadDi
 import { jobsHtml, machineHtml, workHtml } from './jobs-view.js';
 import { fieldHtml, fieldSheetHtml, fieldSettingsHtml, rolesFrom, stepRows, draftWith, dropFieldDrafts, FIXES, problemLabel, age as fieldAge } from './field-view.js';
 import { lineHtml, lineSettingsHtml, lineSummary, lineSheetHtml, folderChoices, statusHtml, sendDraft, takeEdits, sendStatus, nextFocus, dropLineBotDrafts, dropLineDrafts, keepFileNames } from './line-view.js';
+import { tr, trHtml, raw, hasWords, localise, setLanguage, language, LANGUAGES, resolveLanguage, onMissing } from './i18n.js';
+import { placeWords, gardenWords } from './places.js';
+import { clockTime } from './dates.js';
 
 installTips();
 import { THEMES, DEFAULT_THEME, themeFor, PHASES, phaseAt } from './themes.js';
@@ -64,12 +67,25 @@ const prefs = {
   live: { on: false, place: null, unit: 'celsius' },
 };
 let saved = {};
+let prefsUnreadable = false;
 try {
-  saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}');
+  saved = JSON.parse(localStorage.getItem('agents-home-prefs') || '{}') ?? {};
   Object.assign(prefs, saved);
 } catch {
-  /* storage unavailable or unreadable: defaults stand */
+  // Storage unavailable or unreadable: defaults stand, and the language,
+  // which falls back to Windows', says so under Needs attention.
+  prefsUnreadable = true;
 }
+// The language: the one picked in Settings, else Windows' (Chromium's own
+// locale, which follows it). Switching reloads both windows.
+const startLanguage = resolveLanguage({ saved: saved.language, unreadable: prefsUnreadable, system: navigator.languages });
+setLanguage(startLanguage.id);
+if (startLanguage.from !== 'saved') delete prefs.language; // keeps following Windows until one is picked
+onMissing((code, key) => bridge.missingWords?.({ lang: code, key })?.catch(() => {
+  // An older main process without the handler: the word has already fallen
+  // back to English, which is all a missing word can do here.
+}));
+localise(document);
 if (new URLSearchParams(location.search).get('demo') === '1') prefs.demo = true;
 if (!THEMES[prefs.theme]) prefs.theme = DEFAULT_THEME; // e.g. the retired night mode
 if (prefs.detail !== 'simple' && prefs.detail !== 'detailed') prefs.detail = 'simple';
@@ -79,8 +95,9 @@ if ('night' in prefs) {
   delete prefs.night;
 }
 if (prefs.time !== 'auto' && !PHASES.some((p) => p.id === prefs.time)) prefs.time = 'auto';
-const WEATHERS = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', fog: 'Fog' };
-if (!WEATHERS[prefs.weather] && prefs.weather !== 'changing') prefs.weather = 'clear';
+const WEATHERS = ['clear', 'cloudy', 'rain', 'snow', 'fog'];
+const weatherName = (w) => tr(`weather.${w}`);
+if (!WEATHERS.includes(prefs.weather) && prefs.weather !== 'changing') prefs.weather = 'clear';
 if (!prefs.live || typeof prefs.live !== 'object') prefs.live = { on: false, place: null, unit: 'celsius' };
 prefs.live = { on: prefs.live.on === true, place: prefs.live.place ?? null, unit: prefs.live.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius' };
 
@@ -118,8 +135,11 @@ function phase() {
 function savePrefs() {
   try {
     localStorage.setItem('agents-home-prefs', JSON.stringify(prefs));
+    return true;
   } catch {
-    /* not persisted this time; the toggle still applies */
+    // Not persisted this time; the toggle still applies. The language,
+    // which needs a reload to apply, says so instead (see opt-language).
+    return false;
   }
 }
 
@@ -130,7 +150,7 @@ function applyPrefs() {
   document.documentElement.dataset.weather = weather();
   $('weather').className = `weather ${weather()}`;
   $('opt-weather').value = prefs.weather;
-  $('opt-weather').options[5].textContent = `Changes through the day (now: ${WEATHERS[weather(new Date())].toLowerCase()})`;
+  $('opt-weather').options[5].textContent = tr('weather.changingNow', { weather: weatherName(weather(new Date())).toLowerCase() });
   document.body.classList.toggle('no-tags', !prefs.names);
   $('opt-private').checked = prefs.private;
   $('opt-names').checked = prefs.names;
@@ -139,7 +159,7 @@ function applyPrefs() {
   $('opt-demo').checked = prefs.demo;
   const sel = $('opt-time');
   sel.value = prefs.time;
-  sel.options[0].textContent = `Follow my clock (now: ${PHASES.find((p) => p.id === phaseAt(new Date())).name.toLowerCase()})`;
+  sel.options[0].textContent = tr('time.autoNow', { phase: tr(`phase.${phaseAt(new Date())}`).toLowerCase() });
 }
 
 for (const [id, key] of [['opt-private', 'private'], ['opt-names', 'names'], ['opt-demo', 'demo']]) {
@@ -173,17 +193,59 @@ $('opt-weather').addEventListener('change', (e) => {
   showClock();
 });
 
+// The language, picked at the top of Settings and saved with the other
+// preferences. A pick reloads this window (and the mini window, which
+// follows the storage); Settings opens again at the Language field.
+const REOPEN_LANGUAGE = 'agents-home-reopen-language';
+{
+  const pick = $('opt-language');
+  pick.innerHTML = LANGUAGES.map((l) => `<option value="${l.id}" lang="${l.html}">${escapeXml(l.name)}</option>`).join('');
+  pick.value = language();
+  const note = $('language-note');
+  if (startLanguage.unreadable) {
+    note.textContent = tr('language.unreadable');
+    note.hidden = false;
+  }
+  pick.addEventListener('change', () => {
+    prefs.language = pick.value;
+    if (!savePrefs()) {
+      if (startLanguage.from === 'saved') prefs.language = language();
+      else delete prefs.language;
+      pick.value = language();
+      note.textContent = tr('language.notSaved');
+      note.hidden = false;
+      return;
+    }
+    note.textContent = tr('language.reloading');
+    note.hidden = false;
+    try {
+      sessionStorage.setItem(REOPEN_LANGUAGE, '1');
+    } catch {
+      // Settings just opens closed after the reload; the language is saved.
+    }
+    // The app's windows never navigate themselves: the main process reloads
+    // them. The browser preview reloads its own page.
+    if (!bridge.useLanguage) {
+      location.reload();
+      return;
+    }
+    bridge.useLanguage(pick.value, { reload: true })
+      .then((res) => { if (!res?.ok) throw new Error(res?.error); })
+      .catch(() => { note.textContent = tr('language.restart'); });
+  });
+}
+
 // The time, the part of the day and the weather, bottom right of the map.
 // Only the computer's clock is read.
 function showClock() {
   const now = new Date();
-  const hm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const part = PHASES.find((p) => p.id === phase()).name;
+  const hm = clockTime(now);
+  const part = tr(`phase.${phase()}`);
   const real = liveReading();
   const temp = real ? ` · ${real.temperature}${real.unit}` : '';
-  const off = prefs.live.on && prefs.live.place && !real ? ' · real weather unavailable' : '';
-  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(WEATHERS[weather()])}${escapeXml(temp)}${escapeXml(off)}`;
-  $('clock').title = real && prefs.live.place ? `Weather in ${placeName(prefs.live.place)}` : '';
+  const off = prefs.live.on && prefs.live.place && !real ? ` · ${tr('clock.unavailable')}` : '';
+  $('clock').innerHTML = `<span class="now">${escapeXml(hm)}</span>${escapeXml(part)} · ${escapeXml(weatherName(weather()))}${escapeXml(temp)}${escapeXml(off)}`;
+  $('clock').title = real && prefs.live.place ? tr('clock.weatherIn', { place: placeName(prefs.live.place) }) : '';
 }
 
 // ---- the real weather (opt-in, online) --------------------------------------
@@ -219,26 +281,24 @@ function renderLive() {
   $('opt-live').checked = prefs.live.on;
   $('opt-live').disabled = !online;
   body.hidden = !prefs.live.on;
-  $('live-hint').textContent = !online ? 'The desktop app can read the real weather; this preview cannot.'
-    : prefs.live.on ? 'Asks Open-Meteo (open-meteo.com) every 30 minutes for the weather at the place below. Only the place is sent, never anything from your sessions. The weather you chose above stands in when it cannot be reached.'
-      : 'Off: the weather above is what you see, and the app stays fully offline.';
+  $('live-hint').textContent = tr(!online ? 'live.preview' : prefs.live.on ? 'live.on' : 'live.off');
   if (!prefs.live.on) return;
   if (!prefs.live.place) {
     body.innerHTML = `
-      <form class="add-row" id="live-search"><label class="visually-hidden" for="live-q">Town or city</label>
-        <input id="live-q" type="search" placeholder="Your town or city" autocomplete="off">
-        <button class="button" type="submit">Find</button></form>
+      <form class="add-row" id="live-search"><label class="visually-hidden" for="live-q">${escapeXml(tr('live.town'))}</label>
+        <input id="live-q" type="search" placeholder="${escapeXml(tr('live.townPlaceholder'))}" autocomplete="off">
+        <button class="button" type="submit">${escapeXml(tr('live.find'))}</button></form>
       ${liveError ? `<p class="form-error" role="alert">${escapeXml(liveError)}</p>` : ''}
       <ul class="live-results">${liveResults.map((p, i) => `<li><button type="button" class="link-btn" data-place="${i}">${escapeXml(placeName(p))}</button></li>`).join('')}</ul>`;
     return;
   }
   const real = liveReading();
-  const status = liveError ? `<p class="form-error" role="alert">Could not read the weather: ${escapeXml(liveError)}.</p>`
-    : real ? `<p class="hint">Now: ${escapeXml(WEATHERS[real.weather].toLowerCase())}, ${real.temperature}${real.unit} (checked ${new Date(real.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).</p>`
-      : '<p class="hint">Checking…</p>';
+  const status = liveError ? `<p class="form-error" role="alert">${escapeXml(tr('live.error', { error: liveError }))}</p>`
+    : real ? `<p class="hint">${escapeXml(tr('live.now', { weather: weatherName(real.weather).toLowerCase(), temp: `${real.temperature}${real.unit}`, time: new Date(real.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }))}</p>`
+      : `<p class="hint">${escapeXml(tr('live.checking'))}</p>`;
   body.innerHTML = `
-    <p class="live-place">${escapeXml(placeName(prefs.live.place))} <button type="button" class="link-btn" id="live-change">Change place</button></p>
-    <label class="field" for="live-unit">Temperature in
+    <p class="live-place">${escapeXml(placeName(prefs.live.place))} <button type="button" class="link-btn" id="live-change">${escapeXml(tr('live.change'))}</button></p>
+    <label class="field" for="live-unit">${escapeXml(tr('live.unit'))}
       <select id="live-unit"><option value="celsius" ${prefs.live.unit === 'celsius' ? 'selected' : ''}>°C</option>
         <option value="fahrenheit" ${prefs.live.unit === 'fahrenheit' ? 'selected' : ''}>°F</option></select></label>
     ${status}`;
@@ -261,7 +321,7 @@ $('live-body').addEventListener('submit', async (e) => {
   const q = $('live-q').value;
   const res = await bridge.weatherSearch(q);
   liveResults = res.ok ? res.places : [];
-  liveError = res.ok ? (res.places.length ? '' : `No place called “${q.trim()}” was found`) : `Could not search: ${res.error}`;
+  liveError = res.ok ? (res.places.length ? '' : tr('live.notFound', { q: q.trim() })) : tr('live.searchFailed', { error: res.error });
   renderLive();
   $('live-body').querySelector('[data-place]')?.focus();
 });
@@ -1686,9 +1746,9 @@ function spotName([c, r]) {
   const sides = [[-1, 0, 'east'], [1, 0, 'west'], [0, -1, 'south'], [0, 1, 'north']];
   for (const [dc, dr, dir] of sides) {
     const room = config.rooms.find((x) => x.cell[0] === c + dc && x.cell[1] === r + dr);
-    if (room) return `${dir} of the ${room.name}`;
+    if (room) return tr(`spot.${dir}`, { room: placeWords(room).name });
   }
-  return 'here';
+  return tr('spot.here');
 }
 
 let confirmRemove; // department id awaiting a yes
@@ -1748,81 +1808,81 @@ function renderLayoutEditor() {
     ? `<ul class="dept-list">${depts.map((d) => {
       const child = reachedThrough(d.id);
       const action = child
-        ? `<span class="blocked">Remove ${escapeXml(child.name)} first: it is reached through here.</span>`
+        ? `<span class="blocked">${escapeXml(tr('layout.blocked', { name: placeWords(child).name }))}</span>`
         : confirmRemove === d.id
-          ? `<span class="confirm">Remove ${escapeXml(d.name)}?
-              <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(d.id)}">Remove</button>
-              <button type="button" class="link-btn" data-remove-no>Keep</button></span>`
-          : `<button type="button" class="link-btn" data-remove="${escapeXml(d.id)}">Remove</button>`;
+          ? `<span class="confirm">${escapeXml(tr('layout.confirm', { name: placeWords(d).name }))}
+              <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(d.id)}">${escapeXml(tr('common.remove'))}</button>
+              <button type="button" class="link-btn" data-remove-no>${escapeXml(tr('common.keep'))}</button></span>`
+          : `<button type="button" class="link-btn" data-remove="${escapeXml(d.id)}">${escapeXml(tr('common.remove'))}</button>`;
       return `<li>
-        <span class="agent">${escapeXml(d.name)}</span>
-        <span class="summary">${escapeXml(d.purpose)}${d.agents.length ? ` · ${escapeXml(d.agents.join(', '))}` : ' · no agents yet'}</span>
+        <span class="agent">${escapeXml(placeWords(d).name)}</span>
+        <span class="summary">${escapeXml(placeWords(d).purpose)} · ${escapeXml(d.agents.length ? d.agents.join(tr('common.listSep')) : tr('layout.noAgents'))}</span>
         <span class="actions">${action}</span>
       </li>`;
     }).join('')}</ul>`
-    : plots.length ? '' : '<p class="empty">Only the core hospital so far. Add a department for each specialty your agents serve, or a garden to plant.</p>';
+    : plots.length ? '' : `<p class="empty">${escapeXml(tr('layout.empty'))}</p>`;
   const gardenList = plots.length
     ? `<ul class="dept-list">${plots.map((g) => {
       const action = confirmRemove === g.id
-        ? `<span class="confirm">Remove ${escapeXml(g.name)} and all that grows there?
-            <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(g.id)}">Remove</button>
-            <button type="button" class="link-btn" data-remove-no>Keep</button></span>`
-        : `<button type="button" class="link-btn" data-remove="${escapeXml(g.id)}">Remove</button>`;
-      return `<li><span class="agent">${escapeXml(g.name)}</span>
-        <span class="summary">A garden ${escapeXml(spotName(g.cell))}</span>
+        ? `<span class="confirm">${escapeXml(tr('layout.confirmGarden', { name: gardenWords(g) }))}
+            <button type="button" class="link-btn danger" data-remove-yes="${escapeXml(g.id)}">${escapeXml(tr('common.remove'))}</button>
+            <button type="button" class="link-btn" data-remove-no>${escapeXml(tr('common.keep'))}</button></span>`
+        : `<button type="button" class="link-btn" data-remove="${escapeXml(g.id)}">${escapeXml(tr('common.remove'))}</button>`;
+      return `<li><span class="agent">${escapeXml(gardenWords(g))}</span>
+        <span class="summary">${escapeXml(tr('layout.gardenAt', { spot: spotName(g.cell) }))}</span>
         <span class="actions">${action}</span></li>`;
     }).join('')}</ul>`
     : '';
 
   let form = '';
   if (buildMode && !draft) {
-    form = `<p class="hint">Choose a “+” spot next to the hospital. ${config.openCells.length} ${config.openCells.length === 1 ? 'spot is' : 'spots are'} free.</p>`;
+    form = `<p class="hint">${escapeXml(tr('layout.chooseSpot', { n: config.openCells.length }))}</p>`;
   } else if (draft && draft.what === 'garden') {
     form = `<form class="dept-form" id="dept-form">
       ${buildChoice()}
-      <label class="field">Name <input id="garden-name" maxlength="30" placeholder="Garden ${(config.layout.gardens ?? []).length + 1}" value="${escapeXml(draft.gardenName)}"></label>
-      <p class="hint">A floating garden of 4 × 4 tiles. Once it is built, click it and press Plant.</p>
+      <label class="field">${escapeXml(tr('layout.name'))} <input id="garden-name" maxlength="30" placeholder="${escapeXml(tr('garden.numbered', { n: (config.layout.gardens ?? []).length + 1 }))}" value="${escapeXml(draft.gardenName)}"></label>
+      <p class="hint">${escapeXml(tr('layout.gardenHint'))}</p>
       <div class="form-actions">
-        <button type="submit" class="button">Build garden</button>
-        <button type="button" class="link-btn" id="dept-cancel">Cancel</button>
+        <button type="submit" class="button">${escapeXml(tr('layout.buildGarden'))}</button>
+        <button type="button" class="link-btn" id="dept-cancel">${escapeXml(tr('common.cancel'))}</button>
       </div>
     </form>`;
   } else if (draft) {
-    const kinds = config.departmentKinds.map((k) => `<option value="${k.kind}" ${k.kind === draft.kind ? 'selected' : ''}>${escapeXml(k.name)}</option>`).join('');
+    const kinds = config.departmentKinds.map((k) => `<option value="${k.kind}" ${k.kind === draft.kind ? 'selected' : ''}>${escapeXml(tr(`dept.${k.kind}.name`))}</option>`).join('');
     const agents = knownAgentNames().map((a) => `<label class="check"><input type="checkbox" value="${escapeXml(a)}" ${draft.agents.has(a) ? 'checked' : ''}> ${escapeXml(a)}</label>`).join('');
     form = `<form class="dept-form" id="dept-form">
       ${buildChoice()}
-      <label class="field">Department
+      <label class="field">${escapeXml(tr('layout.department'))}
         <select id="dept-kind">${kinds}</select></label>
-      <label class="field" ${draft.kind === 'custom' ? '' : 'hidden'}>Name
-        <input id="dept-name" maxlength="40" placeholder="e.g. Hand Surgery" value="${escapeXml(draft.name)}"
+      <label class="field" ${draft.kind === 'custom' ? '' : 'hidden'}>${escapeXml(tr('layout.name'))}
+        <input id="dept-name" maxlength="40" placeholder="${escapeXml(tr('layout.namePlaceholder'))}" value="${escapeXml(draft.name)}"
           ${nameError ? 'aria-invalid="true" aria-describedby="dept-name-error"' : ''}>
         ${nameError ? `<span class="field-error" id="dept-name-error">${escapeXml(nameError)}</span>` : ''}</label>
-      <fieldset class="field"><legend>Agents who work here</legend>
-        <div class="checks">${agents || '<span class="muted">No agents seen yet.</span>'}</div>
-        <label class="field" for="dept-agent-new">Another agent, by its name in .claude/agents</label>
+      <fieldset class="field"><legend>${escapeXml(tr('layout.agents'))}</legend>
+        <div class="checks">${agents || `<span class="muted">${escapeXml(tr('layout.noAgentsSeen'))}</span>`}</div>
+        <label class="field" for="dept-agent-new">${escapeXml(tr('layout.another'))}</label>
         <div class="add-row">
-          <input id="dept-agent-new" placeholder="e.g. spine-planner">
-          <button type="button" class="link-btn" id="dept-agent-add">Add</button>
+          <input id="dept-agent-new" placeholder="${escapeXml(tr('layout.agentPlaceholder'))}">
+          <button type="button" class="link-btn" id="dept-agent-add">${escapeXml(tr('common.add'))}</button>
         </div>
       </fieldset>
       <div class="form-actions">
-        <button type="submit" class="button">Build department</button>
-        <button type="button" class="link-btn" id="dept-cancel">Cancel</button>
+        <button type="submit" class="button">${escapeXml(tr('layout.buildDept'))}</button>
+        <button type="button" class="link-btn" id="dept-cancel">${escapeXml(tr('common.cancel'))}</button>
       </div>
     </form>`;
   }
   $('layout-body').innerHTML = `${list}${gardenList}
     ${layoutError ? `<p class="form-error" role="alert">${escapeXml(layoutError)}</p>` : ''}
     ${form}
-    ${buildMode ? '' : `<button type="button" class="button" id="build-start" ${config.openCells.length ? '' : 'disabled'}>Add a department or garden</button>`}
-    ${buildMode && !draft ? '<button type="button" class="link-btn" id="build-stop">Done</button>' : ''}`;
+    ${buildMode ? '' : `<button type="button" class="button" id="build-start" ${config.openCells.length ? '' : 'disabled'}>${escapeXml(tr('layout.start'))}</button>`}
+    ${buildMode && !draft ? `<button type="button" class="link-btn" id="build-stop">${escapeXml(tr('common.done'))}</button>` : ''}`;
 }
 
 // What to build on the chosen spot.
 function buildChoice() {
   const opt = (v, label) => `<label class="chip"><input type="radio" name="build-what" value="${v}" ${draft.what === v ? 'checked' : ''}>${label}</label>`;
-  return `<fieldset class="chips"><legend>Build here</legend><div class="options">${opt('department', 'A department')}${opt('garden', 'A garden')}</div></fieldset>`;
+  return `<fieldset class="chips"><legend>${escapeXml(tr('layout.buildHere'))}</legend><div class="options">${opt('department', escapeXml(tr('layout.aDept')))}${opt('garden', escapeXml(tr('layout.aGarden')))}</div></fieldset>`;
 }
 
 function addTypedAgent() {
@@ -1896,7 +1956,7 @@ $('layout-body').addEventListener('submit', async (e) => {
   const extra = $('dept-agent-new')?.value.trim();
   if (extra) draft.agents.add(extra);
   if (draft.kind === 'custom' && !draft.name.trim()) {
-    nameError = 'Give your department a name.';
+    nameError = tr('layout.nameNeeded');
     renderLayoutEditor();
     $('dept-name')?.focus();
     return;
@@ -2270,14 +2330,14 @@ if (!bridge.buildReport) {
   // The browser preview cannot read transcripts; the desktop app can.
   $('report-open').disabled = true;
   $('report-files').hidden = true;
-  $('report-status').textContent = 'The report is built by the desktop app.';
+  $('report-status').textContent = tr('report.desktopOnly');
 }
 
 $('report-open').addEventListener('click', async () => {
   const button = $('report-open');
   button.disabled = true;
   const status = $('report-status');
-  status.textContent = 'Reading your transcripts…';
+  status.textContent = tr('report.reading');
   try {
     const res = await bridge.buildReport(Number($('report-days').value), !prefs.private);
     if (!res.ok) {
@@ -2285,10 +2345,10 @@ $('report-open').addEventListener('click', async () => {
       return;
     }
     const x = res.summary;
-    const pctText = x.successRate === undefined ? '' : `, ${Math.round(x.successRate * 100)}% finished`;
-    status.textContent = `Opened: last ${x.days} days, ${x.runs} helper run${x.runs === 1 ? '' : 's'}${pctText}.`;
+    const pctText = x.successRate === undefined ? '' : tr('report.finishedPct', { pct: Math.round(x.successRate * 100) });
+    status.textContent = tr('report.opened', { days: x.days, n: x.runs, pct: pctText });
   } catch (err) {
-    status.textContent = `The report could not be built: ${err.message}`;
+    status.textContent = tr('report.failed', { error: err.message });
   } finally {
     button.disabled = false;
   }
@@ -2354,17 +2414,17 @@ setTimeout(gust, 12_000); // a first one soon after opening
 
 async function showUpdateInfo() {
   if (!bridge.updateInfo) {
-    $('update-version').textContent = 'The desktop app updates itself from its git clone; this preview cannot.';
+    $('update-version').textContent = tr('update.preview');
     $('update-run').disabled = true;
-    updateSummary = 'Updates come with the desktop app';
+    updateSummary = tr('update.summaryPreview');
     return;
   }
   const info = await bridge.updateInfo();
   $('update-version').textContent = info.available
-    ? `Version ${info.version}, ${info.branch} at ${info.commit}. Pulls the newest code from GitHub, then restarts.`
-    : `Version ${info.version}. ${info.reason}`;
+    ? tr('update.version', { version: info.version, branch: info.branch, commit: info.commit })
+    : tr('update.versionOff', { version: info.version, reason: info.reason });
   $('update-run').disabled = !info.available;
-  updateSummary = info.available ? `Version ${info.version} · updates from GitHub` : `Version ${info.version} · updates off here`;
+  updateSummary = tr(info.available ? 'update.summaryOn' : 'update.summaryOff', { version: info.version });
   if (!$('settings').hidden) renderGroupSummaries();
 }
 
@@ -2373,7 +2433,7 @@ $('update-run').addEventListener('click', async () => {
   const status = $('update-status');
   button.disabled = true;
   status.classList.remove('form-error');
-  status.textContent = 'Getting the newest version…';
+  status.textContent = tr('update.getting');
   try {
     const res = await bridge.update();
     status.textContent = res.ok ? res.message : res.error;
@@ -2383,7 +2443,7 @@ $('update-run').addEventListener('click', async () => {
       showUpdateInfo();
     }
   } catch (err) {
-    status.textContent = `The update did not complete: ${err.message}`;
+    status.textContent = tr('update.failed', { error: err.message });
     status.classList.add('form-error');
     button.disabled = false;
   }
@@ -2395,9 +2455,10 @@ if (!bridge.packUpdate) $('update-agents').disabled = true;
 // "Your own 3 agents and 2 skills were not touched." Only the counts: the
 // names are the user's and Settings already lists the team's own.
 function ownText(own) {
-  const n = (k, one) => (own?.[k]?.length ? `${own[k].length} ${one}${own[k].length === 1 ? '' : 's'}` : '');
-  const what = [n('agents', 'agent'), n('skills', 'skill')].filter(Boolean).join(' and ');
-  return what ? `Your own ${what} ${own.agents.length + own.skills.length === 1 ? 'was' : 'were'} not touched.` : '';
+  const n = (k) => (own?.[k]?.length ? tr(`pack.${k}`, { n: own[k].length }) : '');
+  const [a, b] = [n('agents'), n('skills')];
+  const what = a && b ? tr('common.and', { a, b }) : a || b;
+  return what ? tr('pack.own', { what, n: own.agents.length + own.skills.length }) : '';
 }
 
 $('update-agents').addEventListener('click', async () => {
@@ -2405,7 +2466,7 @@ $('update-agents').addEventListener('click', async () => {
   const status = $('update-status');
   button.disabled = true;
   status.classList.remove('form-error');
-  status.textContent = 'Updating the team in Claude…';
+  status.textContent = tr('pack.updating');
   try {
     const res = await bridge.packUpdate();
     if (!res.updated) {
@@ -2413,20 +2474,19 @@ $('update-agents').addEventListener('click', async () => {
       status.classList.add('form-error');
       return;
     }
-    const list = (names) => names.map(packLabel).join(', ');
+    const list = (names) => names.map(packLabel).join(tr('common.listSep'));
     const parts = [
-
-      res.updated.length ? `Updated: ${list(res.updated)}.` : '',
-      res.edited.length ? `Left alone, because you changed them or they are your own with the same name: ${list(res.edited)}.` : '',
-      !res.updated.length ? (res.upToDate.length || res.edited.length ? 'The helpers you added were already up to date.' : 'You have not added any of the team; nothing to update.') : 'Start a new Claude session to use the changes.',
+      res.updated.length ? tr('pack.updated', { list: list(res.updated) }) : '',
+      res.edited.length ? tr('pack.edited', { list: list(res.edited) }) : '',
+      tr(res.updated.length ? 'pack.newSession' : res.upToDate.length || res.edited.length ? 'pack.upToDate' : 'pack.noneAdded'),
       ownText(res.own),
-      res.errors.length ? `Problems: ${res.errors.join('; ')}` : '',
+      res.errors.length ? tr('pack.problems', { list: res.errors.join(tr('common.semiSep')) }) : '',
     ].filter(Boolean);
-    status.textContent = parts.join(' ');
+    status.textContent = parts.join(tr('common.sentenceSep'));
     status.classList.toggle('form-error', res.errors.length > 0);
     await loadPack();
   } catch (err) {
-    status.textContent = `The team could not be updated: ${err.message}`;
+    status.textContent = tr('pack.updateFailed', { error: err.message });
     status.classList.add('form-error');
   } finally {
     button.disabled = false;
@@ -2442,7 +2502,7 @@ window.addEventListener('unhandledrejection', (e) => bridge.logError?.({ message
 async function showLogStatus() {
   const line = $('log-reminders');
   if (!bridge.logTail) {
-    line.textContent = 'The desktop app keeps the log; this preview cannot.';
+    line.textContent = tr('log.preview');
     for (const id of ['log-activity', 'log-errors', 'log-open']) $(id).disabled = true;
     return;
   }
@@ -2453,12 +2513,12 @@ async function showLogStatus() {
   }
   const { summary: s, team } = res;
   if (team.reminders !== 'on') {
-    line.textContent = `Team reminders are off (${team.team} of the team in Claude). To turn them on, tick Team reminders in Settings → Agents & reports → Office team.`;
+    line.textContent = tr('log.remindersOff', { team: team.team });
   } else if (!s.runs) {
-    line.textContent = `Team reminders are on but have not run in the last 24 hours. They run on every prompt in a Claude Code session started after they were turned on.`;
+    line.textContent = tr('log.remindersIdle');
   } else {
-    const last = s.last ? ` Last reminder at ${clock(s.last.time)}: ${s.last.fired.split(',').join(', ')}.` : '';
-    line.textContent = `Team reminders are working: in the last 24 hours they ran on ${s.runs} prompt${s.runs === 1 ? '' : 's'} and reminded Claude on ${s.reminded}.${last}`;
+    const last = s.last ? tr('log.remindersLast', { time: clock(s.last.time), fired: s.last.fired.split(',').join(tr('common.listSep')) }) : '';
+    line.textContent = tr('log.remindersWorking', { n: s.runs, reminded: s.reminded, last });
   }
 }
 
@@ -2467,7 +2527,7 @@ async function showLog(which) {
   const res = await bridge.logTail(which);
   view.hidden = false;
   view.textContent = res.ok
-    ? res.lines.length ? res.lines.join('\n') : `Nothing in the ${which} log yet.`
+    ? res.lines.length ? res.lines.join('\n') : tr(`log.empty.${which}`)
     : res.error;
   view.scrollTop = view.scrollHeight;
   showLogStatus();
@@ -2476,15 +2536,17 @@ $('log-activity').addEventListener('click', () => showLog('activity'));
 $('log-errors').addEventListener('click', () => showLog('errors'));
 $('log-open').addEventListener('click', async () => {
   const res = await bridge.logOpen();
-  if (!res.ok) $('log-reminders').textContent = `The log folder could not be opened: ${res.error}`;
+  if (!res.ok) $('log-reminders').textContent = tr('log.openFailed', { error: res.error });
 });
 
 // ---- the Office pack: a ready-made team offered to Claude ---------------------------
 
 // Asked once in a short card on the board: "Not now" is remembered until the
 // pack has something new. The same list stays in Settings.
-const packLabel = (name) => ({ handover: 'Handover note', 'break-down': 'Break into tasks', 'team-reminders': 'Team reminders' }[name]
-  ?? name.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
+const packLabel = (name) => (hasWords(`pack.name.${name}`) ? tr(`pack.name.${name}`) : name.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
+// What a pack item does, from the tables (the pack's own first sentence in
+// English, test/i18n-surfaces checks), else the item's own words.
+const packSummary = (i) => (hasWords(`pack.summary.${i.name}`) ? tr(`pack.summary.${i.name}`) : i.summary);
 let pack; // { hasOwnAgents, items: [{ kind, name, summary, installed }] }
 let packNote = '';
 let packError = '';
@@ -2505,7 +2567,7 @@ async function loadPack() {
 function packChoices(id, withSummary) {
   return pack.items.filter((i) => !i.installed).map((i) => `<label class="check">
     <input type="checkbox" name="${id}" value="${escapeXml(i.name)}">
-    <span><strong>${escapeXml(packLabel(i.name))}</strong>${withSummary ? ` <span class="muted">${escapeXml(i.summary)}</span>` : ''}</span></label>`).join('');
+    <span><strong>${escapeXml(packLabel(i.name))}</strong>${withSummary ? ` <span class="muted">${escapeXml(packSummary(i))}</span>` : ''}</span></label>`).join('');
 }
 
 function renderPack() {
@@ -2513,7 +2575,7 @@ function renderPack() {
   const settings = $('pack-settings');
   if (!bridge.packStatus) {
     offer.hidden = true;
-    settings.innerHTML = '<p class="hint">The desktop app can add the office team to Claude; this preview cannot.</p>';
+    settings.innerHTML = `<p class="hint">${escapeXml(tr('pack.preview'))}</p>`;
     return;
   }
   if (!pack) {
@@ -2529,10 +2591,10 @@ function renderPack() {
   offer.hidden = true;
   settings.innerHTML = `
     ${pack.items.map((i) => `<p class="pack-row">${i.installed ? '✓' : '○'} <strong>${escapeXml(packLabel(i.name))}</strong>
-      <span class="muted">${i.installed ? 'in Claude' : 'not added'}</span></p>`).join('')}
-    ${missing.length ? `<p class="hint">Optional. Nothing is added to Claude unless you tick it here; your own agents, skills and hooks are never touched.</p>
+      <span class="muted">${escapeXml(tr(i.installed ? 'pack.inClaude' : 'pack.notAdded'))}</span></p>`).join('')}
+    ${missing.length ? `<p class="hint">${escapeXml(tr('pack.optional'))}</p>
       <div class="checks">${packChoices('pack-pick-settings', true)}</div>
-      <button type="button" class="button" id="pack-add-settings">Add the ticked ones</button>` : '<p class="hint">All of the office team is in Claude.</p>'}
+      <button type="button" class="button" id="pack-add-settings">${escapeXml(tr('pack.addTicked'))}</button>` : `<p class="hint">${escapeXml(tr('pack.allIn'))}</p>`}
     ${err}${note}`;
 }
 
@@ -2541,7 +2603,7 @@ async function addPack(names) {
   packError = '';
   const res = await bridge.packInstall(names);
   const added = res.installed?.length ?? 0;
-  packNote = added ? `Added to Claude. Start a new Claude session to use ${added === 1 ? 'it' : 'them'}.` : '';
+  packNote = added ? tr('pack.added', { n: added }) : '';
   if (res.errors?.length) packError = res.errors.join('; ');
   else if (!res.ok) packError = res.error;
   await loadPack();
@@ -2560,8 +2622,7 @@ loadPack();
 
 {
   const button = $('cam-report');
-  button.textContent = 'Report';
-  button.title = 'Open the performance report of your helpers';
+
   button.addEventListener('click', async () => {
     // The browser preview cannot build it: show where it lives instead.
     if (!bridge.buildReport) {
@@ -2569,10 +2630,10 @@ loadPack();
       return;
     }
     button.disabled = true;
-    button.textContent = 'Building report…';
-    const res = await bridge.buildReport(Number($('report-days').value), !prefs.private).catch((err) => ({ ok: false, error: `The report could not be built: ${err.message}` }));
+    button.textContent = tr('stage.building');
+    const res = await bridge.buildReport(Number($('report-days').value), !prefs.private).catch((err) => ({ ok: false, error: tr('report.failed', { error: err.message }) }));
     button.disabled = false;
-    button.textContent = 'Report';
+    button.textContent = tr('stage.report');
     if (!res.ok) {
       // Shown where the report's other messages go, not lost.
       $('report-status').textContent = res.error;
@@ -2595,18 +2656,18 @@ wireProjects($('projects-body'), {
   open: projOpen,
   change: async (c) => {
     if (prefs.demo) return demoProj.change(c);
-    if (!bridge.projectChange) return { ok: false, error: 'The browser preview cannot save the project list; this works in the app.' };
+    if (!bridge.projectChange) return { ok: false, error: tr('proj.previewSave') };
     return bridge.projectChange(c).catch((err) => ({ ok: false, error: err.message }));
   },
   // The app's list arrives with the next snapshot, half a second later.
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
   worktrees: projTrees,
-  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: 'The browser preview cannot look at folders; this works in the app.' }),
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: tr('proj.previewTrees') }),
 });
 $('projects-file').addEventListener('click', async () => {
   const res = await bridge.projectsShow?.();
-  $('projects-file-status').textContent = !res ? 'The browser preview has no list file.' : !res.ok ? res.error : !prefs.private ? `The list is ${res.file}` : '';
+  $('projects-file-status').textContent = !res ? tr('proj.previewFile') : !res.ok ? res.error : !prefs.private ? tr('proj.fileIs', { file: res.file }) : '';
 });
 setInterval(renderProjects, 1000);
 
@@ -3493,19 +3554,20 @@ $('cam-mini').addEventListener('click', () => {
 function showFleet() {
   const on = Boolean(snapshot.fleet?.on);
   $('fleet-off').hidden = !on || snapshot.demo;
-  $('fleet-choose').textContent = on ? 'Choose another folder' : 'Choose shared folder';
+  $('fleet-choose').textContent = tr(on ? 'settings.fleet.another' : 'settings.fleet.choose');
   const others = (snapshot.fleet?.computers ?? []).length;
   const f = snapshot.fleet ?? {};
-  const where = prefs.private || !f.dir ? '' : ` (${f.dir})`;
-  const pulled = f.lastPull ? (f.lastPull.ok ? ` Last pull ${clock(f.lastPull.at)}.` : ` Last pull failed: ${f.lastPull.error}.`) : '';
-  $('fleet-status').textContent = snapshot.demo ? 'The demo shows a made-up second computer.'
-    : !on ? 'Off.'
-      : f.mode === 'git' ? `Pulling the status branch${where}.${pulled} ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No computer has posted yet.'}`
-        : `Sharing${where}. ${others ? `${others} other computer${others === 1 ? '' : 's'} found.` : 'No other computer has written there yet.'}`;
+  const where = prefs.private || !f.dir ? '' : tr('fleet.where', { dir: f.dir });
+  const pulled = f.lastPull ? (f.lastPull.ok ? tr('fleet.lastPull', { time: clock(f.lastPull.at) }) : tr('fleet.pullFailed', { error: f.lastPull.error })) : '';
+  const found = (none) => (others ? tr('fleet.found', { n: others }) : tr(none));
+  $('fleet-status').textContent = snapshot.demo ? tr('fleet.demo')
+    : !on ? tr('fleet.off')
+      : f.mode === 'git' ? tr('fleet.git', { where, pulled, found: found('fleet.noneGit') })
+        : tr('fleet.sharing', { where, found: found('fleet.noneFolder') });
 }
 $('fleet-choose').addEventListener('click', async () => {
   if (!bridge.fleetChoose) {
-    $('fleet-status').textContent = 'The browser preview cannot pick folders; this works in the app.';
+    $('fleet-status').textContent = tr('fleet.preview');
     return;
   }
   const res = await bridge.fleetChoose();
@@ -3513,7 +3575,7 @@ $('fleet-choose').addEventListener('click', async () => {
 });
 $('fleet-git').addEventListener('click', async () => {
   if (!bridge.fleetGitChoose) {
-    $('fleet-status').textContent = 'The browser preview cannot pick folders; this works in the app.';
+    $('fleet-status').textContent = tr('fleet.preview');
     return;
   }
   const res = await bridge.fleetGitChoose();
@@ -3533,7 +3595,7 @@ setInterval(() => { if (!$('settings').hidden) showFleet(); }, 1000);
 
 const SETTINGS_GROUPS = ['look', 'privacy', 'connect', 'agents', 'app'];
 const GROUP_KEY = 'agents-home-settings-group';
-let updateSummary = 'Updates and the system log';
+let updateSummary = tr('summary.app');
 
 function rememberedGroup() {
   try {
@@ -3583,20 +3645,20 @@ document.addEventListener('click', (e) => {
 // sheet or folder name, so privacy mode changes nothing here.
 function groupSummaries() {
   const theme = document.querySelector(`input[name="theme"][value="${CSS.escape(prefs.theme)}"]`)?.parentElement?.textContent.trim() || prefs.theme;
-  const time = prefs.time === 'auto' ? 'follows your clock' : ($('opt-time').selectedOptions[0]?.textContent.toLowerCase() ?? prefs.time);
+  const time = prefs.time === 'auto' ? tr('summary.time.auto') : ($('opt-time').selectedOptions[0]?.textContent.toLowerCase() ?? prefs.time);
   const wait = Number(prefs.waitMin ?? 5);
   const f = snapshot?.field;
-  const field = !f?.enabled ? 'Field feedback off'
-    : f.demo ? 'Field feedback on · sample answers'
-      : !f.sheetUrl || !f.keyName ? 'Field feedback on · not set up yet'
-        : f.error ? 'Field feedback on · the last update failed'
-          : f.fetchedAt ? `Field feedback on · updated ${fieldAge(f.fetchedAt)}` : 'Field feedback on · not updated yet';
+  const field = tr(!f?.enabled ? 'summary.field.off'
+    : f.demo ? 'summary.field.demo'
+      : !f.sheetUrl || !f.keyName ? 'summary.field.notSet'
+        : f.error ? 'summary.field.failed'
+          : f.fetchedAt ? 'summary.field.updated' : 'summary.field.notYet', { age: f?.fetchedAt ? fieldAge(f.fetchedAt) : '' });
   return {
     look: `${theme} · ${time}`,
-    privacy: `Privacy ${prefs.private ? 'on' : 'off'} · ${wait ? `waiting alert after ${wait} min` : 'no waiting alerts'}`,
-    connect: `${field} · ${lineSummary(lineState())} · ${snapshot?.fleet?.on ? 'sharing with other computers' : 'other computers off'}`,
-    agents: `Report for the ${$('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? 'last 28 days'}`,
-    app: `${updateSummary}${prefs.demo ? ' · demo patients on' : ''}`,
+    privacy: `${tr(prefs.private ? 'summary.privacy.on' : 'summary.privacy.off')} · ${wait ? tr('summary.wait', { n: wait }) : tr('summary.noWait')}`,
+    connect: `${field} · ${lineSummary(lineState())} · ${tr(snapshot?.fleet?.on ? 'summary.fleet.on' : 'summary.fleet.off')}`,
+    agents: tr('summary.report', { period: $('report-days').selectedOptions[0]?.textContent.toLowerCase() ?? tr('settings.report.days', { n: 28 }).toLowerCase() }),
+    app: `${updateSummary}${prefs.demo ? ` · ${tr('summary.demoOn')}` : ''}`,
   };
 }
 function renderGroupSummaries() {
@@ -3642,3 +3704,12 @@ renderLive();
 refreshLive();
 render(true);
 setInterval(render, 250);
+try {
+  if (sessionStorage.getItem(REOPEN_LANGUAGE)) {
+    sessionStorage.removeItem(REOPEN_LANGUAGE);
+    setSettings(true);
+    $('opt-language').focus();
+  }
+} catch {
+  // Storage blocked: Settings stays closed after the switch, as on any start.
+}

@@ -29,6 +29,7 @@ const lineBot = require('../src/core/linebot');
 const officePack = require('../src/core/officepack');
 const { UsageScanner } = require('../src/core/usage');
 const { SystemLog, logEvents, loggedSoFar, loggedFromLog, closeOnBoard, utilisation, reminderSummary, tailFile } = require('../src/core/syslog');
+const i18n = require('../src/core/i18n');
 
 const PUSH_MS = 500;
 const ROSTER_MS = 30_000;
@@ -2209,6 +2210,19 @@ app.whenReady().then(() => {
     return { ok: true };
   });
   if (process.argv.includes('--mini')) openMini();
+
+  // ---- the language -----------------------------------------------------------
+  // Picked in Settings and saved with the window's preferences. A new pick
+  // reloads both windows from here: they never navigate themselves.
+  ipcMain.handle('home:language', (_event, id, { reload = false } = {}) => {
+    if (!Object.hasOwn(i18n.TABLES, id)) return { ok: false, error: 'unknown language' };
+    if (reload) for (const w of [win, mini]) if (w && !w.isDestroyed()) w.webContents.reload();
+    return { ok: true };
+  });
+  // A word a table lacks shows in English; the log hears of it once.
+  const tellMissing = i18n.missingWordsLog(syslog);
+  i18n.onMissing(tellMissing);
+  ipcMain.handle('home:missing-words', (_event, { lang, key } = {}) => ({ ok: tellMissing(String(lang), String(key)) }));
 
   createWindow();
 

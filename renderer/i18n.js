@@ -69,6 +69,8 @@ export function translate(lang, key, params = {}) {
 }
 
 export const tr = (key, params) => translate(current, key, params);
+// Whether the tables have words for `key`, for words that may come from elsewhere.
+export const hasWords = (key) => Object.hasOwn(en, key);
 export const trFor = (lang) => (key, params) => translate(lang, key, params);
 
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

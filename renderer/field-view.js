@@ -11,6 +11,7 @@
 // is shown.
 
 import { boardTime, boardDay } from './dates.js';
+import { tr } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const DASH = '<span class="none"><span aria-hidden="true">–</span><span class="visually-hidden">none</span></span>';
@@ -23,10 +24,10 @@ export const ROLE_WORDS = {
 
 export function age(ms, now = Date.now()) {
   const m = Math.max(0, Math.round((now - ms) / 60_000));
-  if (m < 2) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  if (m < 48 * 60) return `${Math.round(m / 60)} h ago`;
-  return `${Math.round(m / 1440)} days ago`;
+  if (m < 2) return tr('time.justNow');
+  if (m < 60) return tr('time.minAgo', { n: m });
+  if (m < 48 * 60) return tr('time.hAgo', { n: Math.round(m / 60) });
+  return tr('time.daysAgo', { n: Math.round(m / 1440) });
 }
 
 // A Needs attention line as the board draws it: the wording for the privacy
@@ -635,7 +636,7 @@ export function fieldBadge(f, now = Date.now()) {
   const n = f.summary.newSince ?? 0;
   const stale = Boolean(f.error);
   if (!n && !stale) return '';
-  const when = f.fetchedAt ? `updated ${age(f.fetchedAt, now)}` : 'not updated yet';
-  const words = `Field feedback: ${plural(n, 'new response')}, ${when}${stale ? '; the last update failed' : ''}`;
-  return `<span class="badge badge-field${n ? '' : ' quiet'}" title="${esc(words)}">${FORM_ICON}<span aria-hidden="true">${n || ''}${stale ? `${n ? ' ' : ''}old` : ''}</span><span class="visually-hidden">${esc(words)}</span></span>`;
+  const when = f.fetchedAt ? tr('fieldBadge.updated', { age: age(f.fetchedAt, now) }) : tr('fieldBadge.notYet');
+  const words = `${tr('fieldBadge.words', { n, when })}${stale ? tr('fieldBadge.failed') : ''}`;
+  return `<span class="badge badge-field${n ? '' : ' quiet'}" title="${esc(words)}">${FORM_ICON}<span aria-hidden="true">${n || ''}${stale ? `${n ? ' ' : ''}${esc(tr('fieldBadge.old'))}` : ''}</span><span class="visually-hidden">${esc(words)}</span></span>`;
 }
