@@ -182,11 +182,12 @@ const RAW = Symbol('raw');
 export const raw = (markup) => ({ [RAW]: String(markup) });
 
 // A sentence whose table entry holds markup: params are escaped, unless raw().
-export function trHtml(key, params = {}) {
-  const text = pick(entry(current, key), params.n);
+export function trHtmlIn(lang, key, params = {}) {
+  const text = pick(entry(lang, key), params.n);
   if (typeof text !== 'string') return escapeHtml(key);
   return fill(text, params, (v) => (v && typeof v === 'object' && RAW in v ? v[RAW] : escapeHtml(v)));
 }
+export const trHtml = (key, params) => trHtmlIn(current, key, params);
 
 // Both windows' fixed words: data-i18n="key" sets an element's text (with
 // data-i18n-n as its count), data-i18n-html its markup, data-i18n-title

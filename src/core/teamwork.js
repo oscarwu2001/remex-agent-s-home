@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseFrontmatter } = require('./roster');
+const { en } = require('./i18n');
 
 const YOU = 'You';
 const MAX_CHAIN = 6;
@@ -23,7 +24,7 @@ function readInventory(claudeDirs) {
       return fs.readdirSync(dir, { withFileTypes: true });
     } catch (err) {
       // A missing folder is normal: not everyone has agents or skills.
-      if (err.code !== 'ENOENT') problems.push(`A folder of agents or skills could not be listed (${err.code})`);
+      if (err.code !== 'ENOENT') problems.push(en('said.teamwork.folderUnlisted', { code: err.code }));
       return [];
     }
   };
@@ -34,7 +35,7 @@ function readInventory(claudeDirs) {
       try {
         name = parseFrontmatter(fs.readFileSync(path.join(base, 'agents', d.name), 'utf8'))?.name || name;
       } catch (err) {
-        problems.push(`An agent definition could not be read (${err.code || 'error'})`);
+        problems.push(en('said.roster.unreadable', { code: err.code || 'error' }));
       }
       agents.add(name);
     }

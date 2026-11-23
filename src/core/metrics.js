@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseLine, eventsFromEntry } = require('./transcript');
+const { en } = require('./i18n');
 
 const RERUN_WINDOW_MS = 30 * 60_000;
 const MIN_RUNS_FOR_SCORE = 3;
@@ -26,7 +27,7 @@ function listTranscripts(roots, sinceMs, problems) {
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch (err) {
-      if (err.code !== 'ENOENT') problems.push(`A transcripts folder could not be listed (${err.code})`);
+      if (err.code !== 'ENOENT') problems.push(en('said.metrics.folderUnlisted', { code: err.code }));
       return;
     }
     for (const ent of entries) {
@@ -36,7 +37,7 @@ function listTranscripts(roots, sinceMs, problems) {
         try {
           if (fs.statSync(full).mtimeMs >= sinceMs) files.push(full);
         } catch (err) {
-          if (err.code !== 'ENOENT') problems.push(`A transcript could not be opened (${err.code})`);
+          if (err.code !== 'ENOENT') problems.push(en('said.metrics.notOpened', { code: err.code }));
         }
       }
     }
@@ -103,7 +104,7 @@ function turnLimits(roots, problems) {
         text = fs.readFileSync(path.join(dir, `${type}.md`), 'utf8');
       } catch (err) {
         // Most agents are not defined in every folder; only a real failure is reported.
-        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(`An agent definition could not be read (${err.code})`);
+        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(en('said.roster.unreadable', { code: err.code }));
         continue;
       }
       const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
@@ -197,7 +198,7 @@ function collect(roots, { since, until = Date.now(), details = false } = {}) {
     try {
       text = fs.readFileSync(file, 'utf8');
     } catch (err) {
-      problems.push(`A transcript could not be read (${err.code || 'error'})`);
+      problems.push(en('said.metrics.unreadable', { code: err.code || 'error' }));
       continue;
     }
     stats.files += 1;
@@ -733,8 +734,8 @@ function ratio(base, now) {
 // and its background runs against its background median, then the two are
 // weighted by how many runs each fraction covers.
 function score(summary, baseline, byMode) {
-  if (summary.runs < MIN_RUNS_FOR_SCORE) return { value: undefined, reason: `fewer than ${MIN_RUNS_FOR_SCORE} runs` };
-  if (summary.successRate === undefined) return { value: undefined, reason: 'no run has ended yet' };
+  if (summary.runs < MIN_RUNS_FOR_SCORE) return { value: undefined, reason: en('said.metrics.fewRuns', { n: MIN_RUNS_FOR_SCORE }) };
+  if (summary.successRate === undefined) return { value: undefined, reason: en('said.metrics.noneEnded') };
   const fraction = {
     reliability: summary.successRate,
     // A builder that is reviewed is right first time when its first review

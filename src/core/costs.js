@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { totalTokens, COST_WEIGHTS, weighted } = require('./metrics');
+const { en } = require('./i18n');
 
 // The cost weighting (COST_WEIGHTS, weighted) lives in metrics.js, which
 // scores efficiency on it; it is re-exported here for the report.
@@ -135,7 +136,7 @@ function readSkillSources({ claudeDirs = [], cwds = [], enabledPlugins = [] } = 
     try {
       bytes = fs.statSync(file).size;
     } catch (err) {
-      problems.push(`A skill could not be measured (${err.code})`);
+      problems.push(en('said.costs.notMeasured', { code: err.code }));
     }
     found.push({ name, source, owner, bytes, enabled: source !== 'plugin' || enabled.has(owner) });
   };
@@ -148,13 +149,13 @@ function readSkillSources({ claudeDirs = [], cwds = [], enabledPlugins = [] } = 
         try {
           return fs.statSync(path.join(dir, d.name)).isDirectory();
         } catch (err) {
-          problems.push(`A linked skill folder could not be followed (${err.code})`);
+          problems.push(en('said.costs.linkNotFollowed', { code: err.code }));
           return false;
         }
       }).map((d) => d.name);
     } catch (err) {
       // Most folders have no skills folder: that is normal.
-      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(`A skills folder could not be listed (${err.code})`);
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(en('said.costs.folderUnlisted', { code: err.code }));
       return [];
     }
   };

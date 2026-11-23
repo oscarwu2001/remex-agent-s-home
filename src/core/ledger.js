@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { en } = require('./i18n');
 
 const VERDICTS = ['PASS', 'FAIL', 'BLOCKED', 'MISSING', 'UNREAD'];
 
@@ -39,7 +40,7 @@ function readLedger(claudeDirs, { since = -Infinity, until = Infinity, fsys = fs
       text = fsys.readFileSync(file, 'utf8');
     } catch (err) {
       // No ledger is the usual case: only people who keep one have it.
-      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(`The verdict ledger could not be read (${err.code || 'error'})`);
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') problems.push(en('said.ledger.unreadable', { code: err.code || 'error' }));
       continue;
     }
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -47,7 +48,7 @@ function readLedger(claudeDirs, { since = -Infinity, until = Infinity, fsys = fs
     const col = (name) => head.indexOf(name);
     const [cT, cA, cV, cO] = [col('timestamp'), col('agent'), col('verdict'), col('outcome')];
     if (cT < 0 || cA < 0 || cV < 0) {
-      problems.push('The verdict ledger has no timestamp, agent or verdict column, so it was not counted');
+      problems.push(en('said.ledger.noColumns'));
       continue;
     }
     found += 1;
@@ -74,7 +75,7 @@ function readLedger(claudeDirs, { since = -Infinity, until = Infinity, fsys = fs
       }
       if (verdict === 'PASS' && outcome === 'missed') a.missed += 1;
     }
-    if (odd) problems.push(`${odd} row${odd === 1 ? '' : 's'} of the verdict ledger could not be read and ${odd === 1 ? 'was' : 'were'} skipped`);
+    if (odd) problems.push(en('said.ledger.oddRows', { n: odd }));
   }
   return { found, agents, problems };
 }
