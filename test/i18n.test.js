@@ -335,3 +335,72 @@ test('a row far too long, or with too many ways to split it, is shown as it came
     i18n.onMissing(null);
   }
 });
+
+test('a reason left unread in a {why} or {reason} the tables fill is told by its entry; an error\'s own words in a raw {why} are not', async () => {
+  const i18n = await load();
+  const core = require('../src/core/i18n');
+  const rooms = require('../src/core/rooms');
+  const thrown = (fn) => { try { fn(); } catch (err) { return err.message; } throw new Error('expected a throw'); };
+  const overrides = thrown(() => rooms.validateOverrides('nope'));
+  const layout = thrown(() => rooms.validateLayout({}));
+  const why = 'Some reason the code wrote without an entry';
+  const rows = [
+    ['said.main.roomsIgnored', { reason: overrides }, overrides],
+    ['said.main.layoutIgnored', { reason: layout }, layout],
+    ['said.report.roomsIgnored', { why: overrides }, overrides],
+    ['said.report.layoutIgnored', { why: layout }, layout],
+    ['said.main.projectsUnchangeable', { why }, why],
+    ['said.lb.onNotCollecting', { why }, why],
+    ['said.lb.notCollected', { why }, why],
+  ];
+  const told = [];
+  i18n.onMissing((lang, key) => { told.push(key); });
+  try {
+    for (const [key, params, part] of rows) {
+      i18n.sayIn('zh-TW', core.en(key, params));
+      assert.ok(told.includes(`${key}>${i18n.sentenceMark(part)}`), `${key}: told by the entry that held it`);
+    }
+    const raw = 'EPERM: operation not permitted, open the file';
+    const before = told.length;
+    i18n.sayIn('zh-TW', core.en('said.main.officePack', { what: core.en('said.pack.notAdded', { name: 'builder', why: raw }) }));
+    i18n.sayIn('zh-TW', core.en('said.fs.offline', { why: 'getaddrinfo failed for the host' }));
+    i18n.sayIn('zh-TW', core.en('said.main.reportExit', { code: 1, why: ': Error: Cannot find the module named here' }));
+    assert.deepEqual(told.slice(before), [], 'a git, file or network message as it came is not told');
+  } finally {
+    i18n.onMissing(null);
+  }
+  const en = require('../renderer/i18n/en.js');
+  const table = en.default ?? en;
+  for (const key of i18n.RAW_WHY) assert.ok(String(table[key] ?? '').includes('{why}'), `${key} is an entry with a {why}`);
+});
+
+// main.js needs Electron to load, so its two top-level functions are taken
+// from its source as they are and run here with the core's en().
+function fromMain(...names) {
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const src = names.map((name) => {
+    const at = main.indexOf(`\nfunction ${name}(`);
+    assert.ok(at >= 0, `main.js has ${name}()`);
+    return main.slice(at, main.indexOf('\n}\n', at) + 2);
+  }).join('\n');
+  return vm.runInNewContext(`${src}\n({ ${names.join(', ')} })`, { en: require('../src/core/i18n').en });
+}
+
+test('a report that failed reads in Chinese as "could not be built" around the reason as it was logged', async () => {
+  const i18n = await load();
+  const { scrubPaths, reportFailedText } = fromMain('scrubPaths', 'reportFailedText');
+  const module = { name: 'Error', code: 'MODULE_NOT_FOUND', message: scrubPaths("Cannot find module 'C:\Users\Jane Doe\report.js'") };
+  const zh = (code, why) => i18n.translate('zh-TW', 'said.main.reportExit', { code, why });
+  assert.equal(i18n.sayIn('zh-TW', reportFailedText(module, 1)), zh(1, ": Error (MODULE_NOT_FOUND): Cannot find module '…'"), 'a failure it did not catch, with its exit');
+  const parse = { name: 'SyntaxError', message: scrubPaths('Unexpected token \'S\', "Sample crew" is not valid JSON') };
+  assert.equal(i18n.sayIn('zh-TW', reportFailedText(parse, undefined)), zh(1, ': SyntaxError: Unexpected token \'…\', "…" is not valid JSON'), 'a failure the report caught');
+  assert.equal(i18n.sayIn('zh-TW', reportFailedText({ name: 'FatalError', message: 'Reached heap limit' }, 134)), zh(134, ': FatalError: Reached heap limit'));
+  assert.equal(i18n.sayIn('zh-TW', reportFailedText(null, 3)), zh(3, ''), 'an exit with nothing to read');
+  assert.equal(i18n.sayIn('zh-TW', reportFailedText(null, undefined)), i18n.translate('zh-TW', 'said.main.reportFailed'), 'a reply with no reason');
+  assert.equal(reportFailedText(module, 1), "The report could not be built (exit 1): Error (MODULE_NOT_FOUND): Cannot find module '…'", 'English as before, with the reason');
+  assert.ok(!/Jane Doe/.test(reportFailedText(module, 1)));
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const handler = main.slice(main.indexOf("ipcMain.handle('home:build-report'"), main.indexOf('function openReport('));
+  assert.equal(handler.match(/resolve\(\{ ok: false, error: reportFailedText\(/g)?.length, 2, 'the report\'s reply and its exit both answer with it');
+});

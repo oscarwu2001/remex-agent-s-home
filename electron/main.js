@@ -251,6 +251,17 @@ function scrubPaths(text) {
     .slice(0, 160);
 }
 
+// What the window says when the report failed: "could not be built" around
+// the failure as it was logged ({ name, code, message }, paths already out),
+// so the sentence reads in the window's language and the reason as it came.
+// A failure the report itself caught has no exit code yet: it says exit 1,
+// as the report's own uncaught failures exit.
+function reportFailedText(f, exit) {
+  if (!f && exit === undefined) return en('said.main.reportFailed');
+  const what = f ? [`${f.name}${f.code ? ` (${f.code})` : ''}`, f.message].filter(Boolean).join(': ') : '';
+  return en('said.main.reportExit', { code: exit === undefined ? 1 : exit, why: what ? `: ${what}` : '' });
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -478,13 +489,13 @@ app.whenReady().then(() => {
         // The report said why (it caught the error, or one it could not load):
         // logged, and the window hears the same reason without paths.
         const f = reportFailure(result?.failure ?? (result?.error ? { message: result.error } : null), undefined);
-        resolve({ ok: false, error: f?.message || en('said.main.reportFailed') });
+        resolve({ ok: false, error: reportFailedText(f, undefined) });
       }
     });
     child.on('exit', (code) => {
       if (answered) return;
       const f = reportFailure(failureIn(err), code);
-      resolve({ ok: false, error: en('said.main.reportExit', { code, why: f ? `: ${f.name}${f.code ? ` (${f.code})` : ''}` : '' }) });
+      resolve({ ok: false, error: reportFailedText(f, code) });
     });
   }));
 

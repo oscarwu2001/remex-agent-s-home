@@ -255,14 +255,20 @@ export function sentenceMark(text) {
 }
 
 // The placeholders whose words the tables build (a row's {what}, a step's
-// {settings}): an English sentence (three lower-case words or more) left in
-// one is a gap in the code, told by the entry that held it
-// ("said.line.row>said#…"). Any other ({name}, {code}, {why}: a person's
-// words, a git, file or network message) holds text as its caller passed
-// it, and is not told.
+// {settings}, a reason such as rooms.js's or the project list's): an English
+// sentence (three lower-case words or more) left in one is a gap in the
+// code, told by the entry that held it ("said.line.row>said#…"). Any other
+// ({name}, {code}: a person's words, an error code) holds text as its caller
+// passed it, and is not told.
 const SENTENCE_PARAMS = new Set(['what', 'words', 'parts', 'how', 'because', 'days', 'settings', 'close', 'help', 'again', 'copy', 'paste',
   'where', 'save', 'later', 'anyone', 'botSwitch', 'relink', 'newDeployment', 'againScript', 'newVersion', 'missing', 'shows', 'choose',
-  'script', 'button', 'noun']);
+  'script', 'button', 'noun', 'why', 'reason']);
+// The entries whose {why} is a git, file, network or system message as it
+// came (an error's own words, which no table holds): not told.
+export const RAW_WHY = new Set(['said.fs.offline', 'said.main.cloneUnreadable', 'said.main.updateFailed', 'said.main.statusNotPulled',
+  'said.main.folderNotOpened', 'said.main.reportExit', 'said.pack.settingsUnreadable', 'said.pack.remindersFailed', 'said.pack.notAdded',
+  'said.pack.notCounted', 'said.pack.notRead', 'said.pack.notUpdated', 'said.ui.sheetNotRead']);
+const holdsSentence = (key, name) => SENTENCE_PARAMS.has(name) && !(name === 'why' && RAW_WHY.has(key));
 function tellUnread(lang, node, outer = null, held = true) {
   if (node.text !== undefined) {
     const sentence = node.text.split(/\s+/).filter((w) => /^[a-z]{2,}[,.;:]?$/.test(w)).length >= 3;
@@ -270,7 +276,7 @@ function tellUnread(lang, node, outer = null, held = true) {
     return;
   }
   if (node.list) for (const item of node.list) tellUnread(lang, item, outer, held);
-  else for (const [name, child] of Object.entries(node.params ?? {})) tellUnread(lang, child, node.key, SENTENCE_PARAMS.has(name));
+  else for (const [name, child] of Object.entries(node.params ?? {})) tellUnread(lang, child, node.key, holdsSentence(node.key, name));
 }
 
 // Reads a whole sentence with a fresh split budget; { tooLong } when it is
