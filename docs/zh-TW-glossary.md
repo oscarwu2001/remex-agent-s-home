@@ -8,7 +8,7 @@ Kept as they are: **Claude**, **Claude Code**, **LINE**, **Agent's Home**,
 **Cowork**, **token**, **App**, **Windows**, **Google**, **GitHub**, **WSL**,
 **GPU**, **CPU**, file names (`rooms.json`, `settings.json`, `.claude/agents`,
 `scan.log`), the `claude` command, agent names (`reviewer`, `Explore`, …) and
-the git words **git**, **clone** and **worktree**.
+the git words **git**, **clone** and **worktree**, Claude Code's tool names (`Read`, `Bash`, …), the review words **PASS** and **FAIL**, and **MRI** and **X 光** as Taiwan's hospitals write them.
 
 | English | 繁體中文 |
 | --- | --- |
@@ -91,3 +91,26 @@ the git words **git**, **clone** and **worktree**.
 | silent failure | 靜默失敗 |
 | min, h, d | 分鐘, 小時, 天 |
 | just now | 剛剛 |
+| export (a LINE chat's saved text) | 匯出 |
+| relay (the LINE relay script) | 中繼站 |
+| reader script (field feedback) | 讀取器指令碼 |
+| secret (the relay's, the reader's) | 密鑰 |
+| key file (service account) | 金鑰檔 |
+| service account | 服務帳戶 |
+| web app (Apps Script) | 網頁應用程式 |
+| deploy, Manage deployments | 部署, 管理部署作業 |
+| Script properties | 指令碼屬性 |
+| flag (field feedback) | 旗標 |
+| Check the columns | 檢查欄位 |
+| decoration names (floors, room items, plants) | by id in the tables (`decor.floor.*`, `decor.item.*`, `decor.plant.*`) |
+| verdict, verdict ledger | 判定, 判定記錄簿 |
+| hand-back | 交回 |
+| review, reviewed | 審查, 受審查 |
+| scorecard | 計分卡 |
+| weighted tokens | 加權 token |
+| cache read / write | 快取讀取 / 寫入 |
+| foreground / background (a run) | 前景 / 背景 |
+| median, p90 | 中位數, p90 |
+| turn limit (`maxTurns`) | 回合上限 |
+| plugin | 外掛 |
+| prompt (what a helper was asked) | 提示詞 |
