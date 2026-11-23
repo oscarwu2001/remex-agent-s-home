@@ -4,11 +4,14 @@
 // is, and how many tokens all sessions used over the last 5 hours, today
 // and the last 7 days. Plan limits (Pro, Max) are not written anywhere
 // locally, so none are assumed here: the user can set their own warning
-// level, and Claude Code's own limit messages are passed on as they are.
+// level, Claude Code's own limit messages are passed on as they are, and the
+// limit hits among them are offered to src/core/limits.js, which learns
+// from the tokens used before each.
 
 const fs = require('fs');
 const path = require('path');
 const { en } = require('./i18n');
+const { hitWindow } = require('./limits');
 
 // The context window of a model when no compaction has shown where it
 // really stops. Current models read 1M tokens; Haiku 4.5 and older models
@@ -29,6 +32,9 @@ const LIMIT_TEXT = /usage limit|limit (?:reached|will reset|resets)|rate limit|o
 
 const WEEK_MS = 7 * 24 * 3_600_000;
 const FIVE_H_MS = 5 * 3_600_000;
+// Replies are kept for two weeks, so the week before any limit hit of the
+// last 7 days can be counted in full.
+const KEEP_MS = 2 * WEEK_MS;
 const CHUNK = 1 << 20;
 
 function emptyTotals() {
@@ -50,9 +56,10 @@ function add(t, u) {
   t.replies += 1;
 }
 
-// Reads every transcript touched in the last 7 days under the given
+// Reads every transcript touched in the last 14 days under the given
 // projects folders, once in full and then only what was appended, and keeps
-// each reply's usage (once per message id, at its fullest).
+// each reply's usage (once per message id, at its fullest) and the limit
+// hits of the last 7 days.
 class UsageScanner {
   constructor({ roots = [] } = {}) {
     this.roots = roots;
@@ -60,6 +67,7 @@ class UsageScanner {
     this.replies = new Map(); // message id -> { ts, usage }
     this.loose = []; // [{ ts, usage }] replies without an id
     this.limitNotice = undefined;
+    this.hits = new Map(); // `${window}@${ts}` -> { ts, window }
     this.unreadable = 0;
     this.problems = new Map(); // folder -> message
   }
@@ -119,6 +127,8 @@ class UsageScanner {
     if (errorLine && e.isApiErrorMessage === true && m) {
       const text = (Array.isArray(m.content) ? m.content : []).filter((b) => b && b.type === 'text').map((b) => b.text).join(' ').trim();
       if (LIMIT_TEXT.test(text) && (!this.limitNotice || ts > this.limitNotice.ts)) this.limitNotice = { ts, text: text.slice(0, 200) };
+      const window = hitWindow(text);
+      if (window) this.hits.set(`${window}@${ts}`, { ts, window });
       return;
     }
     if (e.type !== 'assistant' || !m || !m.usage || typeof m.usage !== 'object') return;
@@ -132,7 +142,7 @@ class UsageScanner {
   }
 
   async scan(now = Date.now()) {
-    const since = now - WEEK_MS;
+    const since = now - KEEP_MS;
     for (const root of this.roots) {
       for (const file of await this.listFiles(root)) {
         let stat;
@@ -155,6 +165,24 @@ class UsageScanner {
     }
     for (const [id, r] of this.replies) if (r.ts < since) this.replies.delete(id);
     this.loose = this.loose.filter((r) => r.ts >= since);
+    for (const [key, h] of this.hits) if (h.ts < now - WEEK_MS) this.hits.delete(key);
+  }
+
+  // The limit hits read in the last 7 days: [{ ts, window }].
+  limitHits() {
+    return [...this.hits.values()];
+  }
+
+  // Tokens (the `total` measure) of the replies written in [from, to).
+  tokensBetween(from, to) {
+    const t = emptyTotals();
+    for (const r of [...this.replies.values(), ...this.loose]) if (r.ts >= from && r.ts < to) add(t, r.usage);
+    return t.total;
+  }
+
+  // Whether any reply was written in (from, to).
+  repliedBetween(from, to) {
+    return [...this.replies.values(), ...this.loose].some((r) => r.ts > from && r.ts < to);
   }
 
   summary(now = Date.now()) {
