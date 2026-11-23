@@ -1605,7 +1605,7 @@ export default {
   'report.period': '期間',
   'report.lastDays': '最近 {n} 天',
   'report.files': '{n} 個對話記錄檔',
-  'report.sub': '{period} · {from} 至 {to} · {when}依 {files}產生',
+  'report.sub': '{period} · {from} 至 {to} · {when} 依 {files}產生',
   'report.machine.line': '電腦 {host} · {dirs}',
   'report.machine.dir': '{dir}，版本 {commit}',
   'report.machine.noGit': '不是 git 資料夾',

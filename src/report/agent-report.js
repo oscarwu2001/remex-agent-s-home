@@ -120,16 +120,18 @@ const num = (x, d = 0) => (x === undefined ? '—' : x.toLocaleString('en-US', {
 // The CSV columns and the command line's own lines stay English.
 let lang = DEFAULT_LANGUAGE;
 const words = (key, params) => translate(lang, key, params);
+const english = (key, params) => translate(DEFAULT_LANGUAGE, key, params);
 const html = (key, params) => esc(words(key, params));
 const markup = (key, params) => trHtmlIn(lang, key, params);
 
-function dur(ms) {
+// `say`: the page's words, or English for the command line's own lines.
+function dur(ms, say = words) {
   if (ms === undefined) return '—';
   const s = Math.round(ms / 1000);
-  if (s < 60) return words('report.dur.s', { s });
+  if (s < 60) return say('report.dur.s', { s });
   const m = Math.floor(s / 60);
-  if (m < 60) return words('report.dur.ms', { m, s: String(s % 60).padStart(2, '0') });
-  return words('report.dur.hm', { h: Math.floor(m / 60), m: String(m % 60).padStart(2, '0') });
+  if (m < 60) return say('report.dur.ms', { m, s: String(s % 60).padStart(2, '0') });
+  return say('report.dur.hm', { h: Math.floor(m / 60), m: String(m % 60).padStart(2, '0') });
 }
 
 function compact(n) {
@@ -945,10 +947,10 @@ function run(argv) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
-  console.log(`Agent report, last ${opt.days} days: ${all.runs} helper runs, ${pct(all.successRate)} finished, median ${dur(all.medianMs)}.`);
+  console.log(`Agent report, last ${opt.days} days: ${all.runs} helper runs, ${pct(all.successRate)} finished, median ${dur(all.medianMs, english)}.`);
   for (const t of roll.types) {
     const o = roll.overall[t];
-    console.log(`  ${t.padEnd(24)} ${String(o.runs).padStart(4)} runs  ${pct(o.successRate).padStart(4)} finished  median ${dur(o.medianMs)}`);
+    console.log(`  ${t.padEnd(24)} ${String(o.runs).padStart(4)} runs  ${pct(o.successRate).padStart(4)} finished  median ${dur(o.medianMs, english)}`);
   }
   if (data.stats.malformedLines || data.stats.unlinkedHelpers || data.problems.length) {
     console.log(`Notes: ${data.stats.malformedLines} unreadable lines, ${data.stats.unlinkedHelpers} unmatched helper transcripts${data.problems.length ? `, ${data.problems.join('; ')}` : ''}.`);
