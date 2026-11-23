@@ -3,34 +3,55 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1795395601644,
+ "at": 1795399202172,
  "every": 3600000,
  "sessions": [
+  {
+   "project": "spine-demo",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795398082035,
+   "agents": []
+  },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795395272644.371,
+   "lastAt": 1795397712286.966,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795398101227,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795398435183.3171,
    "agents": []
   }
  ],
  "repos": [
   {
-   "project": "spine-sim",
-   "branch": "handle-map-model",
-   "lastCommit": 1795084341000,
-   "changed": 0
-  },
-  {
    "project": "spine-recon",
    "branch": "main",
-   "lastCommit": 1794877796000,
+   "lastCommit": 1795398097000,
    "changed": 0
   },
   {
    "project": "spine-ct",
    "branch": "handle-map-model",
-   "lastCommit": 1794877775000,
+   "lastCommit": 1795398066000,
+   "changed": 0
+  },
+  {
+   "project": "spine-sim",
+   "branch": "handle-map-model",
+   "lastCommit": 1795084341000,
    "changed": 0
   },
   {
@@ -65,13 +86,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 622,
+    "memUsed": 621,
     "memTotal": 16380,
     "temp": 36
    }
   ],
-  "cpu": 8,
-  "memUsed": 14549,
+  "cpu": 7,
+  "memUsed": 14321,
   "memTotal": 48916
  }
 }
