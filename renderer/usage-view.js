@@ -32,8 +32,15 @@ export function shownPlan(prefs, snap) {
 // is picked), a line for each window with hits ({ kind: 'estimate' | 'over'
 // | 'wait', window, text, row, value, basis }), and notes ({ kind, text,
 // card, board }: where each is said) on hits that wait, expired or are not
-// counted. Without a plan, only the hits waiting for one are said.
+// counted, what waits first. Without a plan, only the hits waiting for one
+// are said.
 export function planWords(usage, plan) {
+  const words = planWordsAsSeen(usage, plan);
+  const waits = words.notes.filter((n) => n.kind === 'waiting');
+  return { ...words, notes: [...waits, ...words.notes.filter((n) => n.kind !== 'waiting')] };
+}
+
+function planWordsAsSeen(usage, plan) {
   const limits = usage?.limits;
   const notes = [];
   const note = (kind, text, { card = true, board = true } = {}) => notes.push({ kind, text, card, board });

@@ -83,9 +83,10 @@ test('limit messages that named no limit are said as not counted; hits that wait
 
 test('the notes come after the tokens line on the card, just before Exact limits, and after the rows on the board', async () => {
   const { useCardHtml, planRowsHtml } = await load();
-  const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 1 }, unnamed: 2 });
+  const s = snap(twoHits, { last5h: 3000, waiting: { wsl: 1 }, unnamed: 2, expiredPlan: 1 });
   const card = text(useCardHtml(s, 'pro'));
-  const order = ['Estimate:', 'Tokens', 'until WSL is running', 'not counted', 'Exact limits'].map((w) => card.indexOf(w));
+  // What waits, then what is not counted, together.
+  const order = ['Estimate:', 'Tokens', 'until WSL is running', 'not counted: it waited', 'not counted: their messages', 'Exact limits'].map((w) => card.indexOf(w));
   assert.ok(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), card);
   const board = text(planRowsHtml(s.usage, 'pro'));
   assert.ok(board.indexOf('learned from') < board.indexOf('until WSL is running'), board);
