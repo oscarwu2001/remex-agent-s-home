@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const projectList = require('./projects');
+const { en } = require('./i18n');
 const { runningDistros, decode } = require('./wsl');
 
 const HEAD_BYTES = 4096; // enough for the header and the saved line
@@ -43,7 +44,7 @@ class LineChatError extends Error {
 
 // ---- bytes to text -----------------------------------------------------------------
 
-const ENCODING = () => new LineChatError('encoding', 'The export is in an encoding the app cannot read; save it again from LINE.');
+const ENCODING = () => new LineChatError('encoding', en('said.lc.encodingError'));
 function strictDecode(label, buf) {
   try {
     return new TextDecoder(label, { fatal: true, ignoreBOM: true }).decode(buf);
@@ -177,7 +178,7 @@ function chatFromHeader(line) {
 function chatFromFile(fileName = '') {
   const stem = String(fileName).split(/[\\/]/).pop().replace(/\.txt$/i, '').trim();
   const asHeader = stem.startsWith('[LINE]') ? stem : `[LINE] ${stem}`;
-  return chatFromHeader(asHeader) ?? (unwrap(stem.replace(/^\[LINE\]\s*/, '')) || stem || 'Unnamed chat');
+  return chatFromHeader(asHeader) ?? (unwrap(stem.replace(/^\[LINE\]\s*/, '')) || stem || en('said.lc.unnamed'));
 }
 
 const MEDIA = {
@@ -676,40 +677,29 @@ function scanFolder(dir, { read = new Set(), fsys = fs, prev = new Map(), now = 
 function lineProblems({ enabled, folder, scan, read = [], olderOnly = 0 }) {
   if (!enabled || !folder || !scan) return [];
   const out = [];
-  const add = (label, detail = '', fix = null) => out.push({ label: `LINE chats: ${label}`, detail, ...(fix ? { fix } : {}) });
+  const add = (label, detail = '', fix = null) => out.push({ label: en('said.line.row', { what: label }), detail, ...(fix ? { fix } : {}) });
   if (scan.error) {
-    if (scan.error.code === 'ENOENT' || scan.error.code === 'ENOTDIR') add('the exports folder is missing; choose it again in Settings → Connections → LINE chats', folder, 'line');
-    else add('the exports folder can’t be read. Check that it still exists and that you can open it in Explorer', `${folder} (${scan.error.code})`, 'line');
+    if (scan.error.code === 'ENOENT' || scan.error.code === 'ENOTDIR') add(en('said.lc.folderMissing'), folder, 'line');
+    else add(en('said.lc.folderUnreadable'), `${folder} (${scan.error.code})`, 'line');
     return out;
   }
   const of = (p) => scan.files.filter((f) => f.problem === p);
   const names = (list) => list.map((f) => f.name).join(', ');
-  const count = (n) => (n === 1 ? '1 export' : `${n} exports`);
-  const is = (n) => (n === 1 ? 'is' : 'are');
-  const them = (n) => (n === 1 ? 'it' : 'them');
   const bad = of('unreadable');
-  if (bad.length) add(`${count(bad.length)} could not be read; close any app that has ${them(bad.length)} open, and the app tries again within a minute`, bad.map((f) => `${f.name} (${f.code})`).join(', '));
+  if (bad.length) add(en('said.lc.unreadable', { n: bad.length }), bad.map((f) => `${f.name} (${f.code})`).join(', '));
   const enc = of('encoding');
-  if (enc.length) add(`${count(enc.length)} ${is(enc.length)} in an encoding the app cannot read; save ${enc.length === 1 ? 'it' : 'them'} again from LINE`, names(enc));
+  if (enc.length) add(en('said.lc.encoding', { n: enc.length }), names(enc));
   const empty = of('empty');
-  if (empty.length) add(`${count(empty.length)} ${is(empty.length)} empty; save the ${empty.length === 1 ? 'chat' : 'chats'} again from LINE`, names(empty));
+  if (empty.length) add(en('said.lc.empty', { n: empty.length }), names(empty));
   const big = of('too-large');
-  if (big.length) add(`${count(big.length)} ${is(big.length)} too large to read (over ${MAX_BYTES / 1024 / 1024} MB); untick ${them(big.length)} in Settings`, names(big), 'line');
+  if (big.length) add(en('said.lc.tooLarge', { n: big.length, mb: MAX_BYTES / 1024 / 1024 }), names(big), 'line');
   const odd = scan.files.filter((f) => f.unread);
   const lines = odd.reduce((n, f) => n + f.unread, 0);
-  if (lines) {
-    add(`${lines === 1 ? '1 line' : `${lines} lines`} in the chats you read ${is(lines)} not in a format the app knows, so ${lines === 1 ? 'it was' : 'they were'} left out`, names(odd));
-  }
+  if (lines) add(en('said.lc.oddLines', { n: lines }), names(odd));
   const present = new Set(scan.files.map((f) => f.chat));
   const gone = read.filter((c) => !present.has(c)).length;
-  if (gone) {
-    add(`${gone === 1 ? '1 ticked chat has' : `${gone} ticked chats have`} no export in the folder; save ${them(gone)} from LINE again, or untick ${them(gone)} in Settings`, '', 'line');
-  }
-  if (olderOnly > 0) {
-    add(olderOnly === 1
-      ? '1 message in older exports is not in the newest export of its chat; it is still listed'
-      : `${olderOnly} messages in older exports are not in the newest export of their chat; they are still listed`);
-  }
+  if (gone) add(en('said.lc.noExport', { n: gone }), '', 'line');
+  if (olderOnly > 0) add(en('said.lc.olderOnly', { n: olderOnly }));
   return out;
 }
 
@@ -750,7 +740,7 @@ function changeSettings(current, change = {}, { now = Date.now() } = {}) {
   const notes = [];
   const capped = (v, limit, what) => {
     const all = wordList(v);
-    if (all.length > limit) notes.push(`Saved ${limit} ${what}; the rest were left out.`);
+    if (all.length > limit) notes.push(en(`said.lc.capped.${what}`, { n: limit }));
     return all.slice(0, limit);
   };
   if ('enabled' in change) {
@@ -771,14 +761,14 @@ function changeSettings(current, change = {}, { now = Date.now() } = {}) {
   if ('keywords' in change) next.keywords = capped(change.keywords, KEYWORD_LIMIT, 'keywords');
   if ('tick' in change) {
     const chat = typeof change.tick?.chat === 'string' ? change.tick.chat.trim() : '';
-    if (!chat) return { error: 'No chat was named.' };
+    if (!chat) return { error: en('said.lc.noChat') };
     next.read = next.read.filter((c) => c !== chat);
     if (change.tick.on === true) next.read.push(chat);
   }
   if ('mark' in change) {
     const { key, what } = change.mark ?? {};
-    if (typeof key !== 'string' || !KEY.test(key)) return { error: 'That item is not known.' };
-    if (what !== 'added' && what !== 'dismissed') return { error: 'An item can only be added or dismissed.' };
+    if (typeof key !== 'string' || !KEY.test(key)) return { error: en('said.lc.unknownItem') };
+    if (what !== 'added' && what !== 'dismissed') return { error: en('said.lc.addOrDismiss') };
     next.marks[key] = { what, at: now };
     const keys = Object.keys(next.marks);
     if (keys.length > MARK_LIMIT) {
@@ -788,10 +778,11 @@ function changeSettings(current, change = {}, { now = Date.now() } = {}) {
   // Undo: the item is listed again.
   if ('unmark' in change) {
     const key = change.unmark?.key;
-    if (typeof key !== 'string' || !next.marks[key]) return { error: 'That item is not known.' };
+    if (typeof key !== 'string' || !next.marks[key]) return { error: en('said.lc.unknownItem') };
     delete next.marks[key];
   }
-  return { settings: next, ...(notes.length ? { note: notes.join(' ') } : {}) };
+  const note = notes.length > 1 ? en('said.lc.cappedBoth', { names: NAME_LIMIT, keywords: KEYWORD_LIMIT }) : notes[0];
+  return { settings: next, ...(note ? { note } : {}) };
 }
 
 // ---- add to project --------------------------------------------------------------------
@@ -805,8 +796,8 @@ function addTodo(file, { project, text }, fsys = fs) {
   const loaded = projectList.loadProjects(file, fsys);
   if (!loaded.raw) {
     const unread = /could not be read \(([^)]+)\)/.exec(loaded.problems[0] ?? '');
-    if (unread) throw Object.assign(new Error('The project list could not be read.'), { code: unread[1], stage: 'read' });
-    throw new Error(`The project list cannot be changed: ${loaded.problems[0]}`);
+    if (unread) throw Object.assign(new Error(en('said.lc.projectsUnreadable')), { code: unread[1], stage: 'read' });
+    throw new Error(en('said.main.projectsUnchangeable', { why: loaded.problems[0] }));
   }
   const next = projectList.applyChange(loaded.raw, { op: 'add-todo', project, text });
   projectList.saveProjects(file, next, fsys);
@@ -852,7 +843,7 @@ function wslTarget(p) {
   m = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)(\\.*)?$/i.exec(s);
   if (m) return { path: tidy(m[2]) || '/', distro: m[1] };
   if (s.startsWith('/')) return { path: s, distro: null };
-  throw launchError('WSL cannot reach this folder. Choose one on a drive (C:, D:…) or inside WSL.');
+  throw launchError(en('said.lc.wslUnreachable'));
 }
 // The Linux path for tmux, which runs in the default distro (`distro`, as
 // WSL said it): a WSL share path in another distro is refused, not turned
@@ -860,9 +851,9 @@ function wslTarget(p) {
 function toWslPath(p, { distro = null } = {}) {
   const t = wslTarget(p);
   if (t.distro) {
-    if (!distro) throw launchError('The app could not tell which WSL distro tmux runs in. Open this sheet again, or choose a folder on a drive.');
+    if (!distro) throw launchError(en('said.lc.noDistro'));
     if (t.distro.toLowerCase() !== distro.toLowerCase()) {
-      throw launchError(`This folder is in the WSL distro ${t.distro}, but tmux runs in ${distro}. Choose a folder in ${distro} or on a drive.`);
+      throw launchError(en('said.lc.otherDistro', { from: t.distro, distro }));
     }
   }
   return t.path;
@@ -903,15 +894,15 @@ const PROMPT_MAX = 20_000;
 // message's text never goes to it as an argument.
 // Returns { write: { file, text }, file, args, label }; throws when it cannot run.
 function launchPlan({ target, session, cwd, prompt, promptFile, name, distro = null }) {
-  if (target !== 'tmux' && target !== 'wt') throw launchError('That is not a place the app can start Claude.');
-  if (typeof prompt !== 'string' || !prompt.trim()) throw launchError('The prompt is empty.');
-  if (prompt.length > PROMPT_MAX) throw launchError(`The prompt is too long: at most ${PROMPT_MAX} characters.`);
-  if (!NAME_OK.test(name ?? '')) throw launchError('That window name cannot be used.');
-  if (typeof cwd !== 'string' || !cwd.trim()) throw launchError('Choose a folder first.');
-  if (typeof promptFile !== 'string' || !WINDOWS_PATH.test(promptFile)) throw launchError('The prompt file has no place to go.');
+  if (target !== 'tmux' && target !== 'wt') throw launchError(en('said.lc.noPlace'));
+  if (typeof prompt !== 'string' || !prompt.trim()) throw launchError(en('said.lc.promptEmpty'));
+  if (prompt.length > PROMPT_MAX) throw launchError(en('said.lc.promptLong', { n: PROMPT_MAX }));
+  if (!NAME_OK.test(name ?? '')) throw launchError(en('said.lc.badName'));
+  if (typeof cwd !== 'string' || !cwd.trim()) throw launchError(en('said.lc.folderFirst'));
+  if (typeof promptFile !== 'string' || !WINDOWS_PATH.test(promptFile)) throw launchError(en('said.lc.noPromptPlace'));
   const write = { file: promptFile, text: prompt };
   if (target === 'tmux') {
-    if (typeof session !== 'string' || !session.trim()) throw launchError('Choose a tmux session.');
+    if (typeof session !== 'string' || !session.trim()) throw launchError(en('said.lc.chooseSession'));
     // tmux reads an argument ending in ; as the end of its command: such a
     // folder goes as \; which tmux turns back into ;.
     const tmuxArg = (a) => (a.endsWith(';') ? `${a.slice(0, -1)}\\;` : a);
@@ -919,10 +910,10 @@ function launchPlan({ target, session, cwd, prompt, promptFile, name, distro = n
       write,
       file: 'wsl.exe',
       args: ['-e', 'tmux', 'new-window', '-t', `=${session}:`, '-n', name, 'sh', '-c', TMUX_SCRIPT, 'agents-home', tmuxArg(toWslPath(promptFile)), tmuxArg(toWslPath(cwd, { distro }))],
-      label: `tmux window ${name}`,
+      label: en('said.lc.tmuxWindow', { name }),
     };
   }
-  if (!WINDOWS_PATH.test(cwd)) throw launchError('Choose a Windows folder for a Windows Terminal tab; this one is inside WSL.');
+  if (!WINDOWS_PATH.test(cwd)) throw launchError(en('said.lc.windowsFolder'));
   // A folder that cannot be entered stops the script: claude never starts
   // in the wrong place, and the tab (-NoExit) shows why.
   const script = [
@@ -933,7 +924,7 @@ function launchPlan({ target, session, cwd, prompt, promptFile, name, distro = n
     write,
     file: 'wt.exe',
     args: ['-w', '0', 'new-tab', '--title', name, 'powershell.exe', '-NoLogo', '-NoExit', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    label: 'a new Windows Terminal tab',
+    label: en('said.lc.newTab'),
   };
 }
 
@@ -952,25 +943,25 @@ function parseSessions(text) {
 // words, why there are none and what to do; code (for the system log) is
 // the error code when WSL could not be asked.
 async function tmuxSessions({ platform = process.platform, execFile = childProcess.execFile } = {}) {
-  if (platform !== 'win32') return { sessions: [], why: 'Starting Claude from here works only on Windows.' };
+  if (platform !== 'win32') return { sessions: [], why: en('said.lc.windowsOnly') };
   const { distros, problem } = await runningDistros({ platform, execFile });
   if (problem) return { sessions: [], why: problem };
-  if (!distros.length) return { sessions: [], why: 'WSL is not running, so there is no tmux session to start in.' };
+  if (!distros.length) return { sessions: [], why: en('said.lc.wslNotRunning') };
   return new Promise((resolve) => {
     execFile('wsl.exe', ['-e', 'tmux', 'list-sessions', '-F', '#S'], { encoding: 'buffer', timeout: 5_000, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const said = stderr ? decode(Buffer.from(stderr)) : '';
         if (typeof err.code === 'number') {
-          resolve({ sessions: [], why: /not found|no such file|execvp/i.test(said) ? 'tmux is not installed in WSL.' : 'No tmux session is running in WSL.' });
+          resolve({ sessions: [], why: /not found|no such file|execvp/i.test(said) ? en('said.lc.noTmux') : en('said.lc.noSession') });
         } else if (err.killed) {
-          resolve({ sessions: [], why: 'WSL did not answer in time. Choose New Windows Terminal tab, or open this sheet again.', code: err.code || 'timeout' });
+          resolve({ sessions: [], why: en('said.lc.wslSlow'), code: err.code || 'timeout' });
         } else {
-          resolve({ sessions: [], why: 'WSL did not answer. Choose New Windows Terminal tab, or start WSL and open this sheet again.', code: err.code || 'error' });
+          resolve({ sessions: [], why: en('said.lc.wslSilent'), code: err.code || 'error' });
         }
         return;
       }
       const sessions = parseSessions(decode(Buffer.from(stdout)));
-      resolve({ sessions, why: sessions.length ? null : 'No tmux session is running in WSL.' });
+      resolve({ sessions, why: sessions.length ? null : en('said.lc.noSession') });
     });
   });
 }
@@ -987,9 +978,9 @@ function wslProbe(dir, { execFile = childProcess.execFile } = {}) {
       if (!err) return resolve({ distro: distro || null, exists: true, error: null });
       // The script ran (it named the distro): its test said the folder is not there.
       if (distro && typeof err.code === 'number') return resolve({ distro, exists: false, error: null });
-      const why = err.code === 'ENOENT' ? 'WSL is not installed. Choose New Windows Terminal tab instead.'
-        : err.killed ? 'WSL did not answer in time. Try again; if it keeps happening, choose New Windows Terminal tab.'
-          : 'WSL could not be asked whether the folder is there. Try again; the system log has the reason.';
+      const why = err.code === 'ENOENT' ? en('said.main.noWsl')
+        : err.killed ? en('said.lc.wslSlowAgain')
+          : en('said.lc.wslNotAsked');
       return resolve({ distro: distro || null, exists: false, error: why, code: err.code ?? (err.killed ? 'timeout' : 'error') });
     });
   });

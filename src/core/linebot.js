@@ -850,7 +850,7 @@ const NEW_DEPLOYMENT = en('said.lb.newDeployment', { settings: SETTINGS });
 // store's own by default). fix 'line': a link to Settings. One row per cause.
 function botProblems({ on, store, error = null, notCollecting: why = null, storeProblems = [], ticked = new Set(store?.settings?.read ?? []), now }) {
   const out = [];
-  const add = (label, detail = '', fix = null) => out.push({ label: en('said.lb.row', { what: label }), detail, ...(fix ? { fix } : {}) });
+  const add = (label, detail = '', fix = null) => out.push({ label: en('said.line.row', { what: label }), detail, ...(fix ? { fix } : {}) });
   const kinds = new Set(storeProblems.map((sp) => sp.what));
   const secretList = storeProblems.find((sp) => sp.what === 'secretUnlisted');
   for (const sp of storeProblems) {
@@ -866,7 +866,7 @@ function botProblems({ on, store, error = null, notCollecting: why = null, store
   const stuck = storeProblems.some((sp) => STUCK.has(sp.what));
   // A store that can't be read says so itself, with what to do.
   const first = why && !stuck ? en('said.lb.onNotCollecting', { why }) : error && !stuck ? en('said.lb.notCollected', { why: error.message }) : '';
-  if (first) out.unshift({ label: en('said.lb.row', { what: first }), detail: '', fix: 'line' });
+  if (first) out.unshift({ label: en('said.line.row', { what: first }), detail: '', fix: 'line' });
   const sum = (what) => (store?.notes ?? []).filter((n) => n.what === what && n.at >= now - KEEP_MS).reduce((a, n) => a + n.n, 0);
   const days = en('said.lb.lastDays', { n: WINDOW_DAYS });
   // A full tally on the relay: these counts are floors.

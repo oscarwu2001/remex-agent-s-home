@@ -29,8 +29,8 @@ const ALLOW = new Set([
   'https', 'MB', 'exec', // a link's parts: https, /exec, ?k=
   'line-bot.json', 'line-bot-store.json', 'line-bot-secret.json', 'line-bot-store.untick.json', 'line-bot-store-off.json', '.tmp',
 ]);
-// Script properties (READER_SECRET, LINE_TOKEN) and a link's ?k= are typed as they are.
-const latin = (text) => (String(text).replace(/°[CF]/g, ' ').replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b|\?k=/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));
+// Script properties (READER_SECRET, LINE_TOKEN), a link's ?k= and drives (C:) are typed as they are.
+const latin = (text) => (String(text).replace(/°[CF]/g, ' ').replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b|\?k=|\b[A-Z]:/g, ' ').match(/\.?[A-Za-z][A-Za-z0-9'’./-]*[A-Za-z0-9]|\.?[A-Za-z]/g) ?? []).filter((w) => !ALLOW.has(w));
 const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 
 // What a page shows: its text, and the words in its title, aria-label and placeholder attributes.
