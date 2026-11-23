@@ -19,6 +19,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { en } = require('./i18n');
 
 const VERSION = 1;
 const TODO_LIMIT = 200;
@@ -75,7 +76,7 @@ function withIds(raw) {
 // The view: what the board and the mini window show, plus what was odd.
 function checkProjects(raw) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.projects)) {
-    return { raw: undefined, data: undefined, problems: ['it has no "projects" list'] };
+    return { raw: undefined, data: undefined, problems: [en('said.projects.noList')] };
   }
   const full = withIds(raw);
   const problems = [];
@@ -83,11 +84,11 @@ function checkProjects(raw) {
   full.projects.forEach((p, i) => {
     const name = str(p?.name, 120);
     if (!name) {
-      problems.push(`project ${i + 1} has no name, so it is not shown (it stays in the file)`);
+      problems.push(en('said.projects.noName', { n: i + 1 }));
       return;
     }
     const list = Array.isArray(p.todos) ? p.todos : [];
-    if (list.length > TODO_LIMIT) problems.push(`${name} has more than ${TODO_LIMIT} to-dos; the rest are not shown (they stay in the file)`);
+    if (list.length > TODO_LIMIT) problems.push(en('said.projects.tooManyTodos', { name, n: TODO_LIMIT }));
     const todos = list.slice(0, TODO_LIMIT)
       .filter((t) => t && typeof t === 'object' && str(t.text))
       .map((t) => ({ id: t.id, text: str(t.text), done: t.done === true, by: t.by === 'agent' ? 'agent' : 'you', ...(isDay(t.due) ? { due: t.due } : {}) }));
@@ -112,13 +113,13 @@ function loadProjects(file, fsys = fs) {
   } catch (err) {
     // No file yet is normal: nobody has scanned or added a project.
     if (err.code === 'ENOENT') return { raw: { version: VERSION, projects: [] }, data: { version: VERSION, projects: [] }, problems: [], missing: true };
-    return { raw: undefined, data: undefined, problems: [`the project list could not be read (${err.code || 'error'})`] };
+    return { raw: undefined, data: undefined, problems: [en('said.projects.unreadable', { code: err.code || 'error' })] };
   }
   let raw;
   try {
     raw = JSON.parse(text);
   } catch {
-    return { raw: undefined, data: undefined, problems: ['the project list is not valid JSON; fix or remove it, it is left as it is'] };
+    return { raw: undefined, data: undefined, problems: [en('said.projects.notJson')] };
   }
   return checkProjects(raw);
 }
@@ -146,21 +147,21 @@ function applyChange(raw, change) {
   const full = withIds(raw);
   const find = (id) => {
     const hits = full.projects.filter((x) => x && typeof x === 'object' && x.id === id);
-    if (hits.length !== 1) throw new Error('That project is no longer on the list.');
+    if (hits.length !== 1) throw new Error(en('said.projects.projectGone'));
     return hits[0];
   };
   const findTodo = (p, id) => {
     const hits = (Array.isArray(p.todos) ? p.todos : []).filter((t) => t && typeof t === 'object' && t.id === id);
-    if (hits.length !== 1) throw new Error('That to-do is no longer on the list.');
+    if (hits.length !== 1) throw new Error(en('said.projects.todoGone'));
     return hits[0];
   };
   switch (change?.op) {
     case 'add-todo': {
       const p = find(change.project);
       const text = str(change.text);
-      if (!text) throw new Error('Type the to-do first.');
+      if (!text) throw new Error(en('said.projects.typeTodo'));
       if (!Array.isArray(p.todos)) p.todos = [];
-      if (p.todos.length >= TODO_LIMIT) throw new Error(`A project holds at most ${TODO_LIMIT} to-dos.`);
+      if (p.todos.length >= TODO_LIMIT) throw new Error(en('said.projects.todoLimit', { n: TODO_LIMIT }));
       p.todos.push({ id: newId('t'), text, done: false, by: 'you', at: new Date().toISOString() });
       break;
     }
@@ -174,7 +175,7 @@ function applyChange(raw, change) {
       const t = findTodo(find(change.project), change.todo);
       if (change.date === '' || change.date == null) delete t.due;
       else if (isDay(change.date)) t.due = change.date;
-      else throw new Error('That is not a date.');
+      else throw new Error(en('said.projects.notDate'));
       break;
     }
     case 'remove-todo': {
@@ -188,19 +189,19 @@ function applyChange(raw, change) {
       break;
     }
     case 'status': {
-      if (!STATES.has(change.status)) throw new Error('Unknown status.');
+      if (!STATES.has(change.status)) throw new Error(en('said.projects.unknownStatus'));
       find(change.project).status = change.status;
       break;
     }
     case 'add-project': {
       const name = str(change.name, 120);
-      if (!name) throw new Error('Give the project a name.');
-      if (full.projects.some((p) => str(p?.name, 120).toLowerCase() === name.toLowerCase())) throw new Error('A project of that name is already on the list.');
+      if (!name) throw new Error(en('said.projects.giveName'));
+      if (full.projects.some((p) => str(p?.name, 120).toLowerCase() === name.toLowerCase())) throw new Error(en('said.projects.nameTaken'));
       full.projects.push({ id: newId('p'), name, status: 'active', confirmed: true, copies: [], todos: [] });
       break;
     }
     default:
-      throw new Error('Unknown change.');
+      throw new Error(en('said.projects.unknownChange'));
   }
   return full;
 }

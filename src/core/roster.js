@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { roomFor } = require('./rooms');
+const { en } = require('./i18n');
 
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
@@ -44,7 +45,7 @@ function readRoster(dirs, overrides = {}) {
       names = fs.readdirSync(dir).filter((n) => n.endsWith('.md'));
     } catch (err) {
       // A missing agents folder is normal: most projects have none.
-      if (err.code !== 'ENOENT') problems.push({ label: `An agents folder could not be listed (${err.code})`, detail: dir });
+      if (err.code !== 'ENOENT') problems.push({ label: en('said.roster.folderUnlisted', { code: err.code }), detail: dir });
       continue;
     }
     for (const n of names) {
@@ -52,11 +53,11 @@ function readRoster(dirs, overrides = {}) {
       try {
         fm = parseFrontmatter(fs.readFileSync(path.join(dir, n), 'utf8'));
       } catch (err) {
-        problems.push({ label: `An agent definition could not be read (${err.code || 'error'})`, detail: n });
+        problems.push({ label: en('said.roster.unreadable', { code: err.code || 'error' }), detail: n });
         continue;
       }
       if (!fm || !fm.name) {
-        problems.push({ label: 'An agent definition has no "name" in its frontmatter', detail: n });
+        problems.push({ label: en('said.roster.noName'), detail: n });
         continue;
       }
       // Project agents override user agents of the same name, as in Claude Code.

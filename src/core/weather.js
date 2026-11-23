@@ -10,10 +10,11 @@
 const GEOCODE_HOST = 'geocoding-api.open-meteo.com';
 const FORECAST_HOST = 'api.open-meteo.com';
 const HOSTS = new Set([GEOCODE_HOST, FORECAST_HOST]);
+const { en } = require('./i18n');
 
 function searchUrl(name) {
   const q = String(name ?? '').trim().slice(0, 80);
-  if (q.length < 2) throw new RangeError('Type at least two letters of a town or city');
+  if (q.length < 2) throw new RangeError(en('said.weather.typeTwo'));
   const u = new URL(`https://${GEOCODE_HOST}/v1/search`);
   u.searchParams.set('name', q);
   u.searchParams.set('count', '5');
@@ -26,7 +27,7 @@ function checkPlace(p) {
   const lat = Number(p?.latitude);
   const lon = Number(p?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-    throw new RangeError('The place has no valid latitude and longitude');
+    throw new RangeError(en('said.weather.noLatLon'));
   }
   // Rounded to about a kilometre: enough for the weather, and no finer a
   // location than the user needs to share.
@@ -45,9 +46,9 @@ function forecastUrl(place, unit = 'celsius') {
 
 // Search results -> [{ name, region, country, latitude, longitude }].
 function parsePlaces(json) {
-  if (!json || typeof json !== 'object') throw new TypeError('The place search answered with something unexpected');
+  if (!json || typeof json !== 'object') throw new TypeError(en('said.weather.oddPlaces'));
   if (json.results === undefined) return []; // Open-Meteo leaves it out when nothing matches
-  if (!Array.isArray(json.results)) throw new TypeError('The place search answered with something unexpected');
+  if (!Array.isArray(json.results)) throw new TypeError(en('said.weather.oddPlaces'));
   return json.results
     .filter((r) => r && typeof r.name === 'string')
     .map((r) => ({
@@ -60,22 +61,22 @@ function parsePlaces(json) {
 
 // WMO weather codes, as Open-Meteo reports them, onto the scene's weathers.
 function sceneWeather(code) {
-  if (!Number.isInteger(code)) throw new TypeError(`weather code ${code} is not a number`);
+  if (!Number.isInteger(code)) throw new TypeError(en('said.weather.codeNotNumber', { code }));
   if (code <= 1) return 'clear';
   if (code <= 3) return 'cloudy';
   if (code === 45 || code === 48) return 'fog';
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95) return 'rain';
   if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
-  throw new RangeError(`unknown weather code ${code}`);
+  throw new RangeError(en('said.weather.unknownCode', { code }));
 }
 
 // Forecast -> { weather, temperature, unit, at }. A missing or odd field is
 // an error, never a guess at the weather.
 function parseCurrent(json) {
   const c = json?.current;
-  if (!c || typeof c !== 'object') throw new TypeError('The weather service answered without current weather');
+  if (!c || typeof c !== 'object') throw new TypeError(en('said.weather.noCurrent'));
   const temperature = Number(c.temperature_2m);
-  if (!Number.isFinite(temperature)) throw new TypeError('The weather service answered without a temperature');
+  if (!Number.isFinite(temperature)) throw new TypeError(en('said.weather.noTemperature'));
   const unit = json.current_units?.temperature_2m === '°F' ? '°F' : '°C';
   return { weather: sceneWeather(c.weather_code), temperature: Math.round(temperature), unit, at: typeof c.time === 'string' ? c.time : undefined };
 }

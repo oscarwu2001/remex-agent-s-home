@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { cleanJob, cleanMachine, cleanWork, sortJobs } = require('./jobs');
+const { en } = require('./i18n');
 
 const FRESH_MS = 3 * 60_000; // a computer not heard from in this long is offline
 const KEEP_MS = 7 * 86_400_000; // offline computers are listed for a week
@@ -114,7 +115,7 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
   try {
     names = fsys.readdirSync(dir);
   } catch (err) {
-    return { computers, problems: [{ label: `The shared folder could not be read (${err.code || 'error'})`, detail: dir }] };
+    return { computers, problems: [{ label: en('said.fleet.folderUnreadable', { code: err.code || 'error' }), detail: dir }] };
   }
   for (const name of names) {
     if (!name.endsWith('.json') || name === self) continue;
@@ -125,11 +126,11 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
     } catch (err) {
       // A sync client may be half-way through replacing the file.
       if (err.code === 'ENOENT') continue;
-      problems.push({ label: `A computer's status file in the shared folder could not be read (${err.code || 'not valid JSON'})`, detail: file });
+      problems.push({ label: en('said.fleet.fileUnreadable', { why: err.code || en('said.common.notJson') }), detail: file });
       continue;
     }
     if (!data || data.app !== 'agents-home' || typeof data.computer !== 'string' || !Number.isFinite(data.at) || !Array.isArray(data.sessions)) {
-      problems.push({ label: 'A file in the shared folder is not an Agent\'s Home status file', detail: file });
+      problems.push({ label: en('said.fleet.notStatusFile'), detail: file });
       continue;
     }
     if (now - data.at > KEEP_MS) continue;
@@ -145,7 +146,7 @@ function readShares(dir, self, now = Date.now(), fsys = fs) {
         if (RUNNING.has(s.status) && now - (s.lastAt ?? data.at) > LIVE_MS) s.status = 'idle';
       }
     }
-    if (kept.length < sessions.length) problems.push({ label: `${sessions.length - kept.length} session${sessions.length - kept.length === 1 ? '' : 's'} in a computer's status file did not make sense and ${sessions.length - kept.length === 1 ? 'is' : 'are'} not shown`, detail: file });
+    if (kept.length < sessions.length) problems.push({ label: en('said.fleet.oddSessions', { n: sessions.length - kept.length }), detail: file });
     computers.push({
       computer: nameOf(data.computer, 80) ?? 'A computer',
       at: data.at,

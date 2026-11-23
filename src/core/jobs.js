@@ -9,6 +9,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { en } = require('./i18n');
 
 const STATES = new Set(['running', 'done', 'failed', 'stopped', 'stalled']);
 const STALL_MS = 30 * 60_000; // a running job silent this long is stalled
@@ -71,7 +72,7 @@ function readJobs(dir = jobsDir(), now = Date.now(), { fsys = fs, alive = realAl
     names = fsys.readdirSync(dir).filter((n) => n.endsWith('.json'));
   } catch (err) {
     // No jobs folder is normal: nothing reports progress on this computer.
-    if (err.code !== 'ENOENT') problems.push({ label: `The jobs folder could not be read (${err.code || 'error'})`, detail: dir, count: 1 });
+    if (err.code !== 'ENOENT') problems.push({ label: en('said.jobs.folderUnreadable', { code: err.code || 'error' }), detail: dir, count: 1 });
     return { jobs: [], problems };
   }
   const jobs = [];
@@ -81,7 +82,7 @@ function readJobs(dir = jobsDir(), now = Date.now(), { fsys = fs, alive = realAl
       raw = JSON.parse(fsys.readFileSync(path.join(dir, n), 'utf8'));
     } catch (err) {
       // A job writes whole files, so a broken one is worth saying once.
-      if (err.code !== 'ENOENT') problems.push({ label: 'A job progress file could not be read', detail: path.join(dir, n), count: 1 });
+      if (err.code !== 'ENOENT') problems.push({ label: en('said.jobs.fileUnreadable'), detail: path.join(dir, n), count: 1 });
       continue;
     }
     const job = cleanJob(raw);

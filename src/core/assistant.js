@@ -13,6 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { en } = require('./i18n');
 
 const SHOWN = 20;
 
@@ -29,12 +30,12 @@ function readJson(file, fsys) {
   } catch (err) {
     // No file is normal: the scan is not set up, or has asked nothing yet.
     if (err.code === 'ENOENT') return { missing: true };
-    return { problem: `could not be read (${err.code || 'error'})` };
+    return { problem: en('said.common.notRead', { code: err.code || 'error' }) };
   }
   try {
     return { value: JSON.parse(text) };
   } catch {
-    return { problem: 'are not valid JSON' };
+    return { problem: en('said.assistant.notJson') };
   }
 }
 
@@ -46,8 +47,8 @@ function loadAssistant(dir, fsys = fs) {
   const q = readJson(path.join(dir, 'questions.json'), fsys);
   const s = readJson(path.join(dir, 'state.json'), fsys);
   const problems = [];
-  if (q.problem) problems.push(`its questions ${q.problem}`);
-  if (s.problem) problems.push(`its state files ${s.problem}`);
+  if (q.problem) problems.push(en('said.assistant.questions', { what: q.problem }));
+  if (s.problem) problems.push(en('said.assistant.state', { what: s.problem }));
   const state = s.value && typeof s.value === 'object' ? s.value : {};
   const open = (Array.isArray(q.value?.questions) ? q.value.questions : [])
     .filter((x) => x && typeof x === 'object' && x.status === 'open' && str(x.text, 300))

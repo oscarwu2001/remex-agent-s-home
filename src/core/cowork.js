@@ -15,6 +15,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { en } = require('./i18n');
 
 const KINDS = ['local-agent-mode-sessions', 'claude-code-sessions'];
 
@@ -59,9 +60,9 @@ function readManifest(fsys, file) {
     raw = JSON.parse(fsys.readFile(file));
   } catch (err) {
     if (err.code === 'ENOENT') return {};
-    return { problem: err.code ? `unreadable (${err.code})` : 'not valid JSON' };
+    return { problem: err.code ? en('said.cowork.unreadable', { code: err.code }) : en('said.common.notJson') };
   }
-  if (!raw || typeof raw !== 'object') return { problem: 'not a JSON object' };
+  if (!raw || typeof raw !== 'object') return { problem: en('said.cowork.notObject') };
   const out = {};
   if (typeof raw.title === 'string' && raw.title.trim()) out.title = raw.title.trim().slice(0, 120);
   // The folders the user gave the task, when the manifest names them: the
@@ -89,7 +90,7 @@ function coworkRoots(opts = {}) {
         orgs = dirsIn(fsys, base);
       } catch (err) {
         // Not there: this app version (or this computer) has no Cowork tasks.
-        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') note(`The Claude app's task folder could not be listed (${err.code || 'error'})`, base);
+        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') note(en('said.cowork.appUnlisted', { code: err.code || 'error' }), base);
         continue;
       }
       for (const org of orgs) {
@@ -97,7 +98,7 @@ function coworkRoots(opts = {}) {
         try {
           users = dirsIn(fsys, path.join(base, org));
         } catch (err) {
-          note(`A Claude app task folder could not be listed (${err.code || 'error'})`, path.join(base, org));
+          note(en('said.cowork.taskUnlisted', { code: err.code || 'error' }), path.join(base, org));
           continue;
         }
         for (const user of users) {
@@ -106,7 +107,7 @@ function coworkRoots(opts = {}) {
           try {
             taskDirs = dirsIn(fsys, userDir);
           } catch (err) {
-            note(`A Claude app task folder could not be listed (${err.code || 'error'})`, userDir);
+            note(en('said.cowork.taskUnlisted', { code: err.code || 'error' }), userDir);
             continue;
           }
           for (const task of taskDirs) {
@@ -115,11 +116,11 @@ function coworkRoots(opts = {}) {
               if (!fsys.stat(root).isDirectory()) continue;
             } catch (err) {
               // A task that never started Claude Code has no transcripts.
-              if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') note(`A Cowork task's transcripts could not be read (${err.code || 'error'})`, root);
+              if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') note(en('said.cowork.transcriptsUnreadable', { code: err.code || 'error' }), root);
               continue;
             }
             const manifest = readManifest(fsys, path.join(userDir, `${task}.json`));
-            if (manifest.problem) note(`A Cowork task's details file is ${manifest.problem}`, path.join(userDir, `${task}.json`));
+            if (manifest.problem) note(en('said.cowork.badManifest', { what: manifest.problem }), path.join(userDir, `${task}.json`));
             roots.push(root);
             tasks.set(root, { title: manifest.title, project: manifest.project });
           }

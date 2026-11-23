@@ -149,7 +149,7 @@ class UsageScanner {
         try {
           await this.readNew(file, state);
         } catch (err) {
-          this.problems.set(file, en('said.usage.notRead', { code: err.code || err.message }));
+          this.problems.set(file, en('said.common.notRead', { code: err.code || err.message }));
         }
       }
     }

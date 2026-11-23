@@ -9,6 +9,7 @@
 const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { en } = require('./i18n');
 
 const UNC = '\\\\wsl.localhost';
 
@@ -69,7 +70,7 @@ async function wslRoots({ platform, execFile, fsys = realFs } = {}) {
       users = fsys.readdir(home);
     } catch (err) {
       // A distro stopping between the check and here gives ENOENT: fine.
-      if (err.code !== 'ENOENT') problems.push({ label: `A WSL home folder could not be listed (${err.code || 'error'})`, detail: home });
+      if (err.code !== 'ENOENT') problems.push({ label: en('said.wsl.homeUnlisted', { code: err.code || 'error' }), detail: home });
       continue;
     }
     for (const user of users) {
@@ -79,12 +80,12 @@ async function wslRoots({ platform, execFile, fsys = realFs } = {}) {
         if (fsys.stat(root).isDirectory()) roots.push(root);
       } catch (err) {
         if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
-          problems.push({ label: `A WSL transcripts folder could not be read (${err.code || 'error'})`, detail: root });
+          problems.push({ label: en('said.wsl.transcriptsUnreadable', { code: err.code || 'error' }), detail: root });
         } else if (listed(path.win32.dirname(claude), '.claude') && !safeIsDir(fsys, claude)) {
           // Windows cannot follow a Linux symlink, so it looks missing.
-          problems.push({ label: 'A WSL .claude folder is a Linux link the app cannot follow', detail: claude });
+          problems.push({ label: en('said.wsl.claudeLink'), detail: claude });
         } else if (listed(claude, 'projects')) {
-          problems.push({ label: 'A WSL transcripts folder is a Linux link the app cannot follow', detail: root });
+          problems.push({ label: en('said.wsl.transcriptsLink'), detail: root });
         }
         // Otherwise this user has never run Claude Code: not a root.
       }

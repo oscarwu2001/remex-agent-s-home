@@ -2671,13 +2671,13 @@ wireProjects($('projects-body'), {
   change: async (c) => {
     if (prefs.demo) return demoProj.change(c);
     if (!bridge.projectChange) return { ok: false, error: tr('proj.previewSave') };
-    return bridge.projectChange(c).catch((err) => ({ ok: false, error: err.message }));
+    return bridge.projectChange(c).then((res) => (res.ok ? res : { ...res, error: said(res.error) }), (err) => ({ ok: false, error: err.message }));
   },
   // The app's list arrives with the next snapshot, half a second later.
   rerender: () => { renderProjects(); setTimeout(renderProjects, 600); },
   setError: (e) => { projError = e; },
   worktrees: projTrees,
-  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id) : { ok: false, error: tr('proj.previewTrees') }),
+  loadWorktrees: async (id) => (prefs.demo ? demoTrees(id) : bridge.worktrees ? bridge.worktrees(id).then((res) => (res.ok ? res : { ...res, error: said(res.error) })) : { ok: false, error: tr('proj.previewTrees') }),
 });
 $('projects-file').addEventListener('click', async () => {
   const res = await bridge.projectsShow?.();
@@ -3325,7 +3325,7 @@ $('line-body').addEventListener('submit', async (e) => {
   const text = $(`line-todo-${key}`).value.trim();
   const project = $(`line-project-${key}`).value;
   if (!text) {
-    Object.assign(lineUi, { error: english('said.ui.typeTodo'), errorKey: key });
+    Object.assign(lineUi, { error: english('said.projects.typeTodo'), errorKey: key });
     renderLine();
     $(`line-todo-${key}`)?.focus();
     return;
