@@ -3,147 +3,161 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1795503602158,
+ "at": 1795507202190,
  "every": 3600000,
  "sessions": [
   {
-   "project": "dataset",
+   "project": "scratch-2026-09-29-771d54",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502396978,
+   "lastAt": 1795506543674,
+   "agents": []
+  },
+  {
+   "project": "scratch-2026-10-06-d702bf",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795506545421,
+   "agents": []
+  },
+  {
+   "project": "scratch-2026-10-29-78f1b6",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795506545535,
    "agents": []
   },
   {
    "project": "spine-demo",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502395620,
-   "agents": []
-  },
-  {
-   "project": "spine-ct",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1795502418838,
-   "agents": []
-  },
-  {
-   "project": "spine-seg2d",
-   "source": "code",
-   "status": "idle",
-   "lastAt": 1795502425254,
+   "lastAt": 1795506556425,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502433935,
+   "lastAt": 1795506550528,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502436551,
+   "lastAt": 1795506486954,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502434188,
+   "lastAt": 1795506435424,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502433522,
+   "lastAt": 1795506435761,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502432757,
+   "lastAt": 1795506549757,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502432472,
+   "lastAt": 1795506584457,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795503138358,
+   "lastAt": 1795506532140,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502385181,
+   "lastAt": 1795506548749,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502435463,
+   "lastAt": 1795506436055,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795503136928,
+   "lastAt": 1795506585220,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502433846,
+   "lastAt": 1795506435931,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502435804,
+   "lastAt": 1795506587420,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502432562,
+   "lastAt": 1795506487136,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502432941,
+   "lastAt": 1795506531807,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502430917,
+   "lastAt": 1795506548357,
    "agents": []
   },
   {
    "project": "spine-sim",
    "source": "code",
    "status": "idle",
-   "lastAt": 1795502429289,
+   "lastAt": 1795506553947,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795506547137,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795506486545,
    "agents": []
   }
  ],
@@ -198,13 +212,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 697,
+    "memUsed": 706,
     "memTotal": 16380,
     "temp": 35
    }
   ],
-  "cpu": 12,
-  "memUsed": 16049,
+  "cpu": 7,
+  "memUsed": 16336,
   "memTotal": 48916
  }
 }
