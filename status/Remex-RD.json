@@ -3,9 +3,150 @@
  "version": 1,
  "id": "Remex-RD",
  "computer": "Remex-RD",
- "at": 1795500002186,
+ "at": 1795503602158,
  "every": 3600000,
- "sessions": [],
+ "sessions": [
+  {
+   "project": "dataset",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502396978,
+   "agents": []
+  },
+  {
+   "project": "spine-demo",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502395620,
+   "agents": []
+  },
+  {
+   "project": "spine-ct",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502418838,
+   "agents": []
+  },
+  {
+   "project": "spine-seg2d",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502425254,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502433935,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502436551,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502434188,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502433522,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502432757,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502432472,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795503138358,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502385181,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502435463,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795503136928,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502433846,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502435804,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502432562,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502432941,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502430917,
+   "agents": []
+  },
+  {
+   "project": "spine-sim",
+   "source": "code",
+   "status": "idle",
+   "lastAt": 1795502429289,
+   "agents": []
+  }
+ ],
  "repos": [
   {
    "project": "spine-ct",
@@ -57,13 +198,13 @@
    {
     "name": "RTX 2000E Ada Generation",
     "util": 0,
-    "memUsed": 674,
+    "memUsed": 697,
     "memTotal": 16380,
     "temp": 35
    }
   ],
-  "cpu": 6,
-  "memUsed": 15577,
+  "cpu": 12,
+  "memUsed": 16049,
   "memTotal": 48916
  }
 }
