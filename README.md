@@ -853,9 +853,10 @@ npm run preview   # the renderer in a browser: http://localhost:5178/?demo=1
 ```
 
 `CLAUDE.md` has the rules for this repo. `CONTEXT.md` has the vocabulary.
-`.claude/agents/` holds the `reviewer`, `runner`, `silent-failure-hunter` and
-`ui-reviewer` agents, and `.claude/skills/project-quality/` holds the
-reviewer's checklist for this project.
+`.claude/skills/project-quality/` holds the reviewer's checklist for this
+project. The repo keeps no agents of its own: a project's agent takes the place
+of the user's agent of the same name, so reviews here use the `reviewer`,
+`runner`, `silent-failure-hunter` and `ui-reviewer` in `~/.claude/agents/`.
 
 ## Credits
 
